@@ -5,7 +5,7 @@
 const FIREBASE_CONFIG = {
     apiKey: "AIzaSyB3Ec_tkkgmjLKYiQRczpaio3o3-VkuKX4",
     authDomain: "financial-planner-e85d4.firebaseapp.com",
-    databaseURL: "https://financial-planner-e85d4-default-rtdb.firebaseio.com",
+    databaseURL: "https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app",
     projectId: "financial-planner-e85d4",
     storageBucket: "financial-planner-e85d4.firebasestorage.app",
     messagingSenderId: "217182250867",
