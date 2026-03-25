@@ -4,6 +4,7 @@
 
 let importedTransactions = [];
 let glMappings = {};
+let storedTransactionHashes = new Set();
 
 function loadGlMappings() {
     const saved = localStorage.getItem('gl_mappings');
@@ -15,6 +16,23 @@ function saveGlMappings(m) {
     glMappings = m;
     localStorage.setItem('gl_mappings', JSON.stringify(m));
     if (typeof fbSave === 'function') fbSave('gl_mappings', m);
+}
+
+function loadStoredHashes() {
+    const saved = localStorage.getItem('imported_tx_hashes');
+    if (saved) try { return new Set(JSON.parse(saved)); } catch(e) {}
+    return new Set();
+}
+
+function saveStoredHashes(hashes) {
+    storedTransactionHashes = hashes;
+    localStorage.setItem('imported_tx_hashes', JSON.stringify([...hashes]));
+    if (typeof fbSave === 'function') fbSave('imported_tx_hashes', [...hashes]);
+}
+
+/** Create a hash to identify a unique transaction */
+function txHash(tx) {
+    return `${tx.dateStr}|${tx.amount}|${tx.details}|${tx.account}`;
 }
 
 /**
@@ -39,13 +57,14 @@ function parseNabCsv(text) {
         const balance = parseFloat(cols[6]) || 0;
         const category = cols[7].trim();
         const merchant = cols[8].trim();
-        const processedOn = cols[9] ? cols[9].trim() : '';
 
         const date = parseNabDate(dateStr);
         if (!date) continue;
 
-        // Skip internal transfers/payments
         if (txType === 'CREDIT CARD PAYMENT') continue;
+
+        // Source label from account
+        const source = account.startsWith('Card ending') ? 'NAB CC ' + account.replace('Card ending ', '') : 'NAB';
 
         transactions.push({
             date,
@@ -53,11 +72,13 @@ function parseNabCsv(text) {
             amount: Math.abs(amount),
             isRefund: amount > 0,
             account,
+            source,
             txType,
             details,
             category,
             merchant: merchant || details.substring(0, 30),
-            glLine: '', // to be assigned
+            glLine: '',
+            isDuplicate: false,
         });
     }
 
@@ -88,22 +109,60 @@ function getWeekIndex(date) {
     return 0;
 }
 
-function getBudgetLineNames(data) {
+/** Build grouped budget line options for the GL dropdown */
+function buildGlOptions(data, selectedLine) {
+    const primary = data.outgoings ? data.outgoings.slice(0, data.primaryCount || 18) : [];
+    const secondary = data.outgoings ? data.outgoings.slice(data.primaryCount || 18) : [];
+    const personal = ['Personal - Brad', 'Personal - Diana'];
+    const special = ['-- Ignore --', '-- Other --'];
+
+    let html = '<option value="">-- Assign --</option>';
+
+    // Secondary first (most common for CC charges)
+    html += '<optgroup label="Secondary Liabilities">';
+    secondary.forEach(item => {
+        html += `<option value="${item.name}" ${selectedLine === item.name ? 'selected' : ''}>${item.name}</option>`;
+    });
+    html += '</optgroup>';
+
+    // Personal
+    html += '<optgroup label="Personal">';
+    personal.forEach(name => {
+        html += `<option value="${name}" ${selectedLine === name ? 'selected' : ''}>${name}</option>`;
+    });
+    html += '</optgroup>';
+
+    // Primary
+    html += '<optgroup label="Primary Liabilities">';
+    primary.forEach(item => {
+        html += `<option value="${item.name}" ${selectedLine === item.name ? 'selected' : ''}>${item.name}</option>`;
+    });
+    html += '</optgroup>';
+
+    // Special
+    html += '<optgroup label="Other">';
+    special.forEach(name => {
+        html += `<option value="${name}" ${selectedLine === name ? 'selected' : ''}>${name}</option>`;
+    });
+    html += '</optgroup>';
+
+    return html;
+}
+
+/** Get all valid budget line names (flat list for matching) */
+function getAllLineNames(data) {
     const lines = [];
-    if (data && data.outgoings) {
-        data.outgoings.forEach(item => lines.push(item.name));
-    }
+    if (data && data.outgoings) data.outgoings.forEach(item => lines.push(item.name));
+    lines.push('Personal - Brad', 'Personal - Diana', '-- Ignore --', '-- Other --');
     return lines;
 }
 
-/** Suggest a GL line — returns suggestion or empty string */
-function suggestGlLine(tx, mappings, budgetLines) {
-    // Priority 1: exact merchant mapping from memory
+/** Suggest a GL line */
+function suggestGlLine(tx, mappings, allLines) {
     if (mappings[tx.merchant] && mappings[tx.merchant] !== '-- Per Transaction --') {
         return mappings[tx.merchant];
     }
 
-    // Priority 2: NAB category mapping
     const categoryMap = {
         'Groceries': 'Groceries',
         'Fuel': 'Fuel',
@@ -112,47 +171,50 @@ function suggestGlLine(tx, mappings, budgetLines) {
         'Gym & fitness': 'Lifestyle Spending',
         'Restaurants & takeaway': 'Lifestyle Spending',
         'Parking & tolls': 'Fuel',
-        'Home improvements': 'Adhoc Spending',
         'Clothing': 'Lifestyle Spending',
         'Clothing & accessories': 'Lifestyle Spending',
-        'Other shopping': '',  // Don't auto-assign — too broad
         'Refund': '-- Ignore --',
         'Internal transfers': '-- Ignore --',
     };
 
     const mapped = categoryMap[tx.category];
-    if (mapped && (mapped === '-- Ignore --' || budgetLines.includes(mapped))) {
+    if (mapped && (mapped === '-- Ignore --' || allLines.includes(mapped))) {
         return mapped;
     }
 
     return '';
 }
 
-/** Apply suggestions but don't lock them in — user must approve */
-function autoSuggest(transactions, mappings, budgetLines) {
+/** Auto-suggest and mark duplicates */
+function autoSuggest(transactions, mappings, allLines, storedHashes) {
+    let dupCount = 0;
     transactions.forEach(tx => {
-        tx.glLine = suggestGlLine(tx, mappings, budgetLines);
+        tx.glLine = suggestGlLine(tx, mappings, allLines);
+        // Check for duplicates
+        const hash = txHash(tx);
+        if (storedHashes.has(hash)) {
+            tx.isDuplicate = true;
+            tx.glLine = '-- Ignore --';
+            dupCount++;
+        }
     });
+    return dupCount;
 }
 
-/** Render the import tab — ALL transactions visible, filterable */
-function renderImportTab(transactions, budgetData) {
+/** Render the import tab */
+function renderImportTab(transactions, budgetData, dupCount) {
     const preview = document.getElementById('import-preview');
     if (!transactions || transactions.length === 0) {
         preview.innerHTML = '<p class="dim">No transactions loaded. Upload a CSV file above.</p>';
         return;
     }
 
-    const budgetLines = getBudgetLineNames(budgetData);
-    const specialLines = ['-- Ignore --', '-- Other --'];
-    const allLines = [...budgetLines, ...specialLines];
-
-    const unassigned = transactions.filter(tx => !tx.glLine);
+    const unassigned = transactions.filter(tx => !tx.glLine && !tx.isDuplicate);
     const assigned = transactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --');
     const ignored = transactions.filter(tx => tx.glLine === '-- Ignore --');
 
-    const totalCharges = transactions.filter(t => !t.isRefund).reduce((s, t) => s + t.amount, 0);
-    const totalRefunds = transactions.filter(t => t.isRefund).reduce((s, t) => s + t.amount, 0);
+    const totalCharges = transactions.filter(t => !t.isRefund && !t.isDuplicate).reduce((s, t) => s + t.amount, 0);
+    const totalRefunds = transactions.filter(t => t.isRefund && !t.isDuplicate).reduce((s, t) => s + t.amount, 0);
 
     let html = `<div class="import-summary">
         <span>${transactions.length} transactions</span>
@@ -160,38 +222,33 @@ function renderImportTab(transactions, budgetData) {
         <span class="positive">${assigned.length} assigned</span>
         <span class="negative">${unassigned.length} unassigned</span>
         <span class="dim">${ignored.length} ignored</span>
-        <button id="apply-to-planner" class="add-revision-btn" style="margin-left:auto;" ${unassigned.length === transactions.length ? 'disabled' : ''}>Apply to Planner</button>
+        ${dupCount > 0 ? `<span class="dim">(${dupCount} duplicates skipped)</span>` : ''}
+        <button id="apply-to-planner" class="add-revision-btn" style="margin-left:auto;" ${assigned.length === 0 ? 'disabled' : ''}>Apply to Planner</button>
     </div>`;
 
     html += `<div class="import-filters">
-        <button class="import-filter-btn" data-filter="all">All (${transactions.length})</button>
         <button class="import-filter-btn active" data-filter="unassigned">Unassigned (${unassigned.length})</button>
         <button class="import-filter-btn" data-filter="assigned">Assigned (${assigned.length})</button>
+        <button class="import-filter-btn" data-filter="all">All (${transactions.length})</button>
         <button class="import-filter-btn" data-filter="ignored">Ignored (${ignored.length})</button>
     </div>`;
 
     html += `<div class="import-table-wrap"><table class="import-table"><thead><tr>
-        <th>Date</th><th>Merchant</th><th>Details</th><th>Amount</th><th>NAB Category</th><th>Budget Line</th>
+        <th>Date</th><th>Source</th><th>Merchant</th><th>Details</th><th>Amount</th><th>Category</th><th>Budget Line</th>
     </tr></thead><tbody>`;
 
     transactions.forEach((tx, globalIdx) => {
-        const group = tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned';
-        const isHidden = group !== 'unassigned'; // default filter is unassigned
+        const group = tx.isDuplicate ? 'ignored' : (tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned');
+        const isHidden = group !== 'unassigned';
 
-        const opts = allLines.map(l =>
-            `<option value="${l}" ${tx.glLine === l ? 'selected' : ''}>${l}</option>`
-        ).join('');
-
-        html += `<tr class="${tx.isRefund ? 'refund-row' : ''}" data-filter-group="${group}" ${isHidden ? 'style="display:none"' : ''}>
+        html += `<tr class="${tx.isRefund ? 'refund-row' : ''} ${tx.isDuplicate ? 'duplicate-row' : ''}" data-filter-group="${group}" ${isHidden ? 'style="display:none"' : ''}>
             <td class="import-date">${tx.dateStr}</td>
+            <td class="import-source">${tx.source}</td>
             <td class="import-merchant">${tx.merchant}</td>
             <td class="import-details" title="${tx.details}">${tx.details}</td>
             <td class="import-amount ${tx.isRefund ? 'positive' : 'negative'}">${tx.isRefund ? '+' : ''}${fmtPlain(tx.amount)}</td>
             <td class="import-category">${tx.category}</td>
-            <td><select class="gl-select" data-tx-index="${globalIdx}">
-                <option value="">-- Assign --</option>
-                ${opts}
-            </select></td>
+            <td>${tx.isDuplicate ? '<span class="dim">Duplicate</span>' : '<select class="gl-select" data-tx-index="' + globalIdx + '">' + buildGlOptions(budgetData, tx.glLine) + '</select>'}</td>
         </tr>`;
     });
 
@@ -204,7 +261,7 @@ function groupByLineAndWeek(transactions) {
     const groups = {};
 
     transactions.forEach(tx => {
-        if (!tx.glLine || tx.glLine === '-- Ignore --' || tx.glLine === '-- Other --') return;
+        if (!tx.glLine || tx.glLine === '-- Ignore --' || tx.glLine === '-- Other --' || tx.isDuplicate) return;
         const weekIdx = getWeekIndex(tx.date);
         if (!groups[tx.glLine]) groups[tx.glLine] = {};
         if (!groups[tx.glLine][weekIdx]) groups[tx.glLine][weekIdx] = { total: 0, charges: [] };
@@ -218,7 +275,7 @@ function groupByLineAndWeek(transactions) {
     return groups;
 }
 
-/** Apply grouped transactions to weekActuals */
+/** Apply grouped transactions to weekActuals and store hashes */
 function applyToPlanner(transactions, weekActuals) {
     const groups = groupByLineAndWeek(transactions);
 
@@ -228,13 +285,30 @@ function applyToPlanner(transactions, weekActuals) {
             if (!weekActuals[w]) weekActuals[w] = { items: {}, contributions: {} };
             if (!weekActuals[w].items) weekActuals[w].items = {};
 
-            weekActuals[w].items[lineName] = {
-                actual: data.total,
-                status: 'adjusted',
-                comment: data.charges.join('\n'),
-            };
+            const existing = weekActuals[w].items[lineName];
+            if (existing) {
+                // Merge with existing
+                existing.actual = data.total;
+                existing.status = 'adjusted';
+                existing.comment = data.charges.join('\n');
+            } else {
+                weekActuals[w].items[lineName] = {
+                    actual: data.total,
+                    status: 'adjusted',
+                    comment: data.charges.join('\n'),
+                };
+            }
         }
     }
+
+    // Store transaction hashes to prevent future duplicates
+    const newHashes = new Set(storedTransactionHashes);
+    transactions.forEach(tx => {
+        if (!tx.isDuplicate && tx.glLine && tx.glLine !== '-- Ignore --') {
+            newHashes.add(txHash(tx));
+        }
+    });
+    saveStoredHashes(newHashes);
 
     return weekActuals;
 }

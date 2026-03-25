@@ -47,8 +47,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderAll();
     }
 
-    // Load GL mappings
+    // Load GL mappings and stored transaction hashes
     glMappings = loadGlMappings();
+    storedTransactionHashes = loadStoredHashes();
 
     setupTabs();
     setupBudgetEditing('budget-cy', 'cy-', budgetCY, saveBudgetCY);
@@ -448,10 +449,13 @@ function setupImport() {
         reader.onload = (evt) => {
             try {
                 importedTransactions = parseNabCsv(evt.target.result);
-                const budgetLines = getBudgetLineNames(budgetCY);
-                autoSuggest(importedTransactions, glMappings, budgetLines);
-                renderImportTab(importedTransactions, budgetCY);
-                showToast(`${importedTransactions.length} transactions loaded`);
+                const allLines = getAllLineNames(budgetCY);
+                const dupCount = autoSuggest(importedTransactions, glMappings, allLines, storedTransactionHashes);
+                renderImportTab(importedTransactions, budgetCY, dupCount);
+                const msg = dupCount > 0
+                    ? `${importedTransactions.length} transactions loaded (${dupCount} duplicates)`
+                    : `${importedTransactions.length} transactions loaded`;
+                showToast(msg);
             } catch (err) {
                 console.error('CSV parse error:', err);
                 document.getElementById('import-preview').innerHTML =

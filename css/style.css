@@ -690,8 +690,12 @@ select.editable { width: 100px; cursor: pointer; }
 .gl-select:focus { border-color: var(--accent); outline: none; }
 .gl-select option { background: var(--surface); }
 
+.import-source { font-size: 0.68rem; color: var(--text-dim); white-space: nowrap; }
+
 .refund-row { opacity: 0.7; }
 .refund-row td { font-style: italic; }
+.duplicate-row { opacity: 0.35; }
+.duplicate-row td { text-decoration: line-through; }
 #planner-content { display: flex; flex-direction: column; gap: 12px; }
 
 /* ── Login screen ── */
