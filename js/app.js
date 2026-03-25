@@ -126,6 +126,30 @@ function setupBudgetEditing(sectionId, prefix, data, saveFn) {
         }
     });
 
+    // Add new budget line item
+    section.addEventListener('click', (e) => {
+        const addBtn = e.target.closest('.add-item-btn');
+        if (addBtn) {
+            const sec = addBtn.dataset.section;
+            const y = String(data.year || 2026);
+            if (sec === 'outgoings') {
+                const name = prompt('Enter item name:');
+                if (!name || !name.trim()) return;
+                const isPrimary = data.outgoings.length < data.primaryCount;
+                data.outgoings.push({
+                    name: name.trim(),
+                    weekly: 0,
+                    cycle: 'Monthly',
+                    firstPayment: y + '-01-01',
+                    comment: '',
+                    revisions: []
+                });
+                saveFn(data);
+                renderBudgetTab(data, prefix);
+            }
+        }
+    });
+
     // Expand/collapse toggle
     section.addEventListener('click', (e) => {
         const toggle = e.target.closest('.expand-toggle');

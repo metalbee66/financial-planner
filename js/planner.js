@@ -281,30 +281,18 @@ function renderWeek(budgetData, weekActuals) {
     const content = document.getElementById('planner-content');
     content.innerHTML = '';
 
-    // Primary liabilities — show items due this week
-    const primaryDue = allSchedules.primary.filter(s => s.schedule[w] > 0);
-    if (primaryDue.length > 0) {
-        content.appendChild(buildSection('Primary Liabilities', 'primary', primaryDue, w, wa, weekActuals));
-    }
+    // Primary liabilities — due items first, then zero items
+    content.appendChild(buildSection('Primary Liabilities', 'primary', allSchedules.primary, w, wa, weekActuals));
 
-    // Secondary liabilities — show items due this week
-    const secondaryDue = allSchedules.secondary.filter(s => s.schedule[w] > 0);
-    if (secondaryDue.length > 0) {
-        content.appendChild(buildSection('Secondary Liabilities', 'secondary', secondaryDue, w, wa, weekActuals));
-    }
+    // Secondary liabilities — due items first, then zero items
+    content.appendChild(buildSection('Secondary Liabilities', 'secondary', allSchedules.secondary, w, wa, weekActuals));
 
-    // Contributions — ALWAYS show all 6 items (expected=0 if not due)
+    // Contributions — all items always shown
     content.appendChild(buildContribSection(allSchedules.contributions, w, wa, weekActuals));
 
-    // Nothing due in liabilities?
-    if (primaryDue.length === 0 && secondaryDue.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'empty-week';
-        empty.textContent = 'No liability payments due this week.';
-        content.insertBefore(empty, content.querySelector('.section-card:last-of-type') || null);
-    }
-
     // Week summary card
+    const primaryDue = allSchedules.primary.filter(s => s.schedule[w] > 0);
+    const secondaryDue = allSchedules.secondary.filter(s => s.schedule[w] > 0);
     const allLiabDue = [...primaryDue, ...secondaryDue];
     const weekExpTotal = allLiabDue.reduce((s, d) => s + d.schedule[w], 0);
     const weekActTotal = allLiabDue.reduce((s, d) => {
@@ -339,7 +327,7 @@ function renderWeek(budgetData, weekActuals) {
 
 // ── Section builders ──
 
-function buildSection(title, type, dueItems, weekIdx, wa, weekActuals) {
+function buildSection(title, type, allItems, weekIdx, wa, weekActuals) {
     const card = document.createElement('div');
     card.className = 'section-card';
     const bg = type === 'primary' ? 'rgba(0,176,240,0.12)' : 'rgba(112,48,160,0.12)';
@@ -361,42 +349,66 @@ function buildSection(title, type, dueItems, weekIdx, wa, weekActuals) {
         </tr></thead>
     `;
 
+    // Sort: due items first, then zero items
+    const due = allItems.filter(s => s.schedule[weekIdx] > 0);
+    const notDue = allItems.filter(s => s.schedule[weekIdx] <= 0);
+
     const tbody = document.createElement('tbody');
-    dueItems.forEach(({ item, schedule }) => {
-        const expected = schedule[weekIdx];
-        const saved = wa.items?.[item.name];
-        const actual = saved ? saved.actual : expected;
-        const status = saved ? saved.status : 'pending';
-        const comment = saved ? (saved.comment || '') : '';
-        const wkVar = actual - expected;
 
-        const ytd = computeYtdVariance(item.name, 'items', weekIdx, allSchedules, weekActuals);
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td class="col-item">${item.name}</td>
-            <td class="col-cycle">${item.cycle}</td>
-            <td class="col-amount">${fmt(expected)}</td>
-            <td class="col-amount">
-                <input class="actual-input" type="text" value="${fmtPlain(actual)}"
-                    data-item="${esc(item.name)}" data-type="items" data-expected="${expected}" data-week="${weekIdx}">
-            </td>
-            <td class="col-variance ${wkVar > 0 ? 'negative' : wkVar < 0 ? 'positive' : ''}">${wkVar !== 0 ? fmtSigned(wkVar) : '—'}</td>
-            <td class="col-variance ${ytd.ytdVariance > 0 ? 'negative' : ytd.ytdVariance < 0 ? 'positive' : ''}">${ytd.ytdVariance !== 0 ? fmtSigned(ytd.ytdVariance) : '—'}</td>
-            <td class="col-status">
-                <button class="status-btn status-${status}" data-item="${esc(item.name)}" data-type="items" data-week="${weekIdx}"
-                    title="Click to confirm">${statusLabel(status)}</button>
-            </td>
-            <td class="col-comment">
-                <textarea class="comment-input" rows="1" placeholder="Charges: Coles $85, Woolies $120..."
-                    data-item="${esc(item.name)}" data-type="items" data-week="${weekIdx}">${esc(comment)}</textarea>
-            </td>
-        `;
-        tbody.appendChild(tr);
+    due.forEach(({ item, schedule }) => {
+        tbody.appendChild(buildItemRow(item, schedule, weekIdx, wa, weekActuals, false));
     });
+
+    if (notDue.length > 0 && due.length > 0) {
+        // Separator
+        const sep = document.createElement('tr');
+        sep.className = 'separator-row';
+        sep.innerHTML = '<td colspan="8" class="separator-cell">Not due this week</td>';
+        tbody.appendChild(sep);
+    }
+
+    notDue.forEach(({ item, schedule }) => {
+        tbody.appendChild(buildItemRow(item, schedule, weekIdx, wa, weekActuals, true));
+    });
+
     table.appendChild(tbody);
     card.appendChild(table);
     return card;
+}
+
+function buildItemRow(item, schedule, weekIdx, wa, weekActuals, isDimmed) {
+    const expected = schedule[weekIdx];
+    const saved = wa.items?.[item.name];
+    const actual = saved ? saved.actual : expected;
+    const status = expected === 0 && !saved ? 'none' : (saved ? saved.status : 'pending');
+    const comment = saved ? (saved.comment || '') : '';
+    const wkVar = actual - expected;
+    const isDue = expected > 0;
+
+    const ytd = computeYtdVariance(item.name, 'items', weekIdx, allSchedules, weekActuals);
+
+    const tr = document.createElement('tr');
+    if (isDimmed) tr.className = 'not-due';
+    tr.innerHTML = `
+        <td class="col-item">${item.name}</td>
+        <td class="col-cycle">${item.cycle}</td>
+        <td class="col-amount">${fmt(expected)}</td>
+        <td class="col-amount">
+            ${isDue ? `<input class="actual-input" type="text" value="${fmtPlain(actual)}"
+                data-item="${esc(item.name)}" data-type="items" data-expected="${expected}" data-week="${weekIdx}">` : ''}
+        </td>
+        <td class="col-variance ${wkVar > 0 ? 'negative' : wkVar < 0 ? 'positive' : ''}">${isDue && wkVar !== 0 ? fmtSigned(wkVar) : '—'}</td>
+        <td class="col-variance ${ytd.ytdVariance > 0 ? 'negative' : ytd.ytdVariance < 0 ? 'positive' : ''}">${ytd.ytdVariance !== 0 ? fmtSigned(ytd.ytdVariance) : '—'}</td>
+        <td class="col-status">
+            ${isDue ? `<button class="status-btn status-${status}" data-item="${esc(item.name)}" data-type="items" data-week="${weekIdx}"
+                title="Click to confirm">${statusLabel(status)}</button>` : ''}
+        </td>
+        <td class="col-comment">
+            ${isDue ? `<textarea class="comment-input" rows="1" placeholder="Charges..."
+                data-item="${esc(item.name)}" data-type="items" data-week="${weekIdx}">${esc(comment)}</textarea>` : ''}
+        </td>
+    `;
+    return tr;
 }
 
 function buildContribSection(allContribs, weekIdx, wa, weekActuals) {

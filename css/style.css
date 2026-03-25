@@ -133,6 +133,23 @@ main { padding: 16px; max-width: 100%; }
 }
 
 .total-row { background: var(--surface2) !important; font-weight: 700; }
+
+.add-item-bar {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+}
+.add-item-btn {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-dim);
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+.add-item-btn:hover { border-color: var(--accent); color: var(--accent); }
 .total-row td {
     border-top: 2px solid var(--accent);
     padding: 8px 8px;
@@ -408,6 +425,18 @@ select.editable { width: 100px; cursor: pointer; }
 .status-confirmed { color: var(--green); border-color: var(--green); background: rgba(0,200,83,0.1); }
 .status-adjusted { color: var(--orange); border-color: var(--orange); background: rgba(255,152,0,0.1); }
 .status-btn:hover { transform: scale(1.15); }
+
+.separator-row { }
+.separator-cell {
+    text-align: left !important;
+    font-family: 'Segoe UI', system-ui, sans-serif !important;
+    font-size: 0.68rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim) !important;
+    padding: 6px 8px 2px !important;
+    border-bottom: 1px solid var(--border) !important;
+}
 
 .contribution-row td { color: var(--green); }
 .week-summary-card { margin-top: 12px; }
