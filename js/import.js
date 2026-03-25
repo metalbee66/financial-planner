@@ -234,7 +234,7 @@ function renderImportTab(transactions, budgetData, dupCount) {
     </div>`;
 
     html += `<div class="import-table-wrap"><table class="import-table"><thead><tr>
-        <th>Date</th><th>Source</th><th>Merchant</th><th>Details</th><th>Amount</th><th>Category</th><th>Budget Line</th>
+        <th>Date</th><th>Source</th><th>Merchant</th><th>Details</th><th>Amount</th><th>Category</th><th>Budget Line</th><th title="Remember this merchant mapping">Auto</th>
     </tr></thead><tbody>`;
 
     transactions.forEach((tx, globalIdx) => {
@@ -249,11 +249,58 @@ function renderImportTab(transactions, budgetData, dupCount) {
             <td class="import-amount ${tx.isRefund ? 'positive' : 'negative'}">${tx.isRefund ? '+' : ''}${fmtPlain(tx.amount)}</td>
             <td class="import-category">${tx.category}</td>
             <td>${tx.isDuplicate ? '<span class="dim">Duplicate</span>' : '<select class="gl-select" data-tx-index="' + globalIdx + '">' + buildGlOptions(budgetData, tx.glLine) + '</select>'}</td>
+            <td>${tx.isDuplicate ? '' : '<input type="checkbox" class="remember-check" data-tx-index="' + globalIdx + '" ' + (glMappings[tx.merchant] ? 'checked' : '') + ' title="Remember ' + tx.merchant + '">'}</td>
         </tr>`;
     });
 
     html += '</tbody></table></div>';
     preview.innerHTML = html;
+}
+
+/** Render stored merchant→budget line mappings grouped by budget line */
+function renderMappings(mappings, budgetData) {
+    const container = document.getElementById('mappings-content');
+    if (!container) return;
+
+    const entries = Object.entries(mappings);
+    if (entries.length === 0) {
+        container.innerHTML = '<p class="dim" style="font-size:0.8rem;">No merchant mappings yet. Assign transactions above and choose to remember them.</p>';
+        return;
+    }
+
+    // Group by budget line
+    const grouped = {};
+    entries.forEach(([merchant, line]) => {
+        if (!grouped[line]) grouped[line] = [];
+        grouped[line].push(merchant);
+    });
+
+    // Sort groups: secondary lines first, then others
+    const sortedKeys = Object.keys(grouped).sort((a, b) => {
+        if (a === '-- Ignore --') return 1;
+        if (b === '-- Ignore --') return -1;
+        return a.localeCompare(b);
+    });
+
+    let html = `<div class="mappings-summary dim" style="font-size:0.75rem;margin-bottom:10px;">${entries.length} merchants mapped to ${sortedKeys.length} budget lines</div>`;
+
+    sortedKeys.forEach(line => {
+        const merchants = grouped[line].sort();
+        html += `<div class="mapping-group">
+            <div class="mapping-line-header">${line} <span class="dim">(${merchants.length})</span></div>
+            <div class="mapping-merchants">`;
+
+        merchants.forEach(merchant => {
+            html += `<span class="mapping-chip">
+                ${merchant}
+                <button class="mapping-delete" data-merchant="${merchant}" title="Remove mapping">&times;</button>
+            </span>`;
+        });
+
+        html += '</div></div>';
+    });
+
+    container.innerHTML = html;
 }
 
 /** Group assigned transactions by budget line and week */

@@ -696,6 +696,57 @@ select.editable { width: 100px; cursor: pointer; }
 .refund-row td { font-style: italic; }
 .duplicate-row { opacity: 0.35; }
 .duplicate-row td { text-decoration: line-through; }
+
+/* Merchant mappings */
+.mapping-group { margin-bottom: 10px; }
+.mapping-line-header {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+}
+.mapping-merchants { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
+.mapping-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    color: var(--text);
+}
+.mapping-delete {
+    background: transparent;
+    border: none;
+    color: var(--red);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 0 2px;
+    opacity: 0.5;
+    line-height: 1;
+}
+.mapping-delete:hover { opacity: 1; }
+
+/* Remember checkbox in import table */
+.remember-check {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--accent);
+    vertical-align: middle;
+}
+.remember-label {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    vertical-align: middle;
+    cursor: pointer;
+    user-select: none;
+    margin-left: 2px;
+}
 #planner-content { display: flex; flex-direction: column; gap: 12px; }
 
 /* ── Login screen ── */

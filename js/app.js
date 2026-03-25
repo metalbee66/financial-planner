@@ -82,6 +82,9 @@ function setupTabs() {
             if (btn.dataset.tab === 'accounts') {
                 renderAccountsTab(accountsData);
             }
+            if (btn.dataset.tab === 'import') {
+                renderMappings(glMappings, budgetCY);
+            }
         });
     });
 }
@@ -473,29 +476,41 @@ function setupImport() {
             const tx = importedTransactions[idx];
             tx.glLine = line;
 
-            // Ask to remember this merchant mapping (skip for broad merchants)
-            const merchant = tx.merchant;
-            if (line && line !== '' && merchant) {
-                // Check if this merchant has varied assignments
-                const otherAssignments = importedTransactions
-                    .filter(t => t.merchant === merchant && t.glLine && t.glLine !== line && t.glLine !== '-- Ignore --')
-                    .length;
-
-                if (otherAssignments === 0 && line !== '-- Ignore --' && line !== '-- Other --') {
-                    if (confirm(`Remember "${merchant}" → "${line}" for future imports?`)) {
-                        glMappings[merchant] = line;
-                        // Apply to all unassigned transactions with same merchant
-                        importedTransactions.forEach(t => {
-                            if (t.merchant === merchant && !t.glLine) {
-                                t.glLine = line;
-                            }
-                        });
-                        saveGlMappings(glMappings);
+            // If remember checkbox is checked, save the mapping
+            const row = e.target.closest('tr');
+            const checkbox = row ? row.querySelector('.remember-check') : null;
+            if (checkbox && checkbox.checked && line && line !== '' && line !== '-- Ignore --' && line !== '-- Other --') {
+                glMappings[tx.merchant] = line;
+                // Apply to all unassigned with same merchant
+                importedTransactions.forEach(t => {
+                    if (t.merchant === tx.merchant && !t.glLine) {
+                        t.glLine = line;
                     }
-                }
+                });
+                saveGlMappings(glMappings);
+                renderMappings(glMappings, budgetCY);
             }
 
-            // Update the row's filter group and counts
+            updateImportCounts();
+        }
+
+        // Remember checkbox toggled
+        if (e.target.classList.contains('remember-check')) {
+            const idx = parseInt(e.target.dataset.txIndex);
+            const tx = importedTransactions[idx];
+            if (e.target.checked && tx.glLine && tx.glLine !== '' && tx.glLine !== '-- Ignore --' && tx.glLine !== '-- Other --') {
+                glMappings[tx.merchant] = tx.glLine;
+                importedTransactions.forEach(t => {
+                    if (t.merchant === tx.merchant && !t.glLine) {
+                        t.glLine = tx.glLine;
+                    }
+                });
+                saveGlMappings(glMappings);
+            } else if (!e.target.checked) {
+                delete glMappings[tx.merchant];
+                saveGlMappings(glMappings);
+            }
+            renderMappings(glMappings, budgetCY);
             updateImportCounts();
         }
     });
@@ -517,6 +532,16 @@ function setupImport() {
                     row.style.display = group === filter ? '' : 'none';
                 }
             });
+        }
+
+        // Delete mapping
+        const delMap = e.target.closest('.mapping-delete');
+        if (delMap) {
+            const merchant = delMap.dataset.merchant;
+            delete glMappings[merchant];
+            saveGlMappings(glMappings);
+            renderMappings(glMappings, budgetCY);
+            showToast('Mapping removed');
         }
 
         // Apply to planner
