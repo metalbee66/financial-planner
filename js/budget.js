@@ -147,8 +147,10 @@ function renderSplit(data, pfx) {
         `;
     });
 
-    // Contribution items with revisions
-    items.forEach((item, i) => {
+    // Contribution items with revisions (exclude rent — managed in income)
+    const personalItems = items.filter(c => !c.name.startsWith('Rent'));
+    personalItems.forEach((item) => {
+        const i = items.indexOf(item); // keep original index for data binding
         migrateItem(item);
         const w = getCurrentWeekly(item);
         const hasDetail = (item.revisions.length > 0) || (item.comment && item.comment.trim());
