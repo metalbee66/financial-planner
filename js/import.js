@@ -1,9 +1,9 @@
 /**
- * Transaction import — parse CSV, assign to budget GL lines, store mappings.
+ * Transaction import — parse CSV, present for review, assign to budget GL lines.
  */
 
 let importedTransactions = [];
-let glMappings = {}; // merchantName -> budgetLineName
+let glMappings = {};
 
 function loadGlMappings() {
     const saved = localStorage.getItem('gl_mappings');
@@ -19,8 +19,6 @@ function saveGlMappings(m) {
 
 /**
  * Parse NAB credit card CSV.
- * Columns: Date, Amount, Account Number, (empty), Transaction Type,
- *          Transaction Details, Balance, Category, Merchant Name, Processed On
  */
 function parseNabCsv(text) {
     const lines = text.split('\n');
@@ -30,7 +28,6 @@ function parseNabCsv(text) {
         const line = lines[i].trim();
         if (!line) continue;
 
-        // Parse CSV respecting commas in fields (simple — NAB doesn't quote fields)
         const cols = line.split(',');
         if (cols.length < 9) continue;
 
@@ -44,7 +41,6 @@ function parseNabCsv(text) {
         const merchant = cols[8].trim();
         const processedOn = cols[9] ? cols[9].trim() : '';
 
-        // Parse date "25 Mar 26" -> Date object
         const date = parseNabDate(dateStr);
         if (!date) continue;
 
@@ -54,20 +50,17 @@ function parseNabCsv(text) {
         transactions.push({
             date,
             dateStr,
-            amount: Math.abs(amount), // store as positive
+            amount: Math.abs(amount),
             isRefund: amount > 0,
             account,
             txType,
             details,
-            balance,
             category,
             merchant: merchant || details.substring(0, 30),
-            processedOn,
-            glLine: '', // assigned budget line
+            glLine: '', // to be assigned
         });
     }
 
-    // Sort by date ascending
     transactions.sort((a, b) => a.date - b.date);
     return transactions;
 }
@@ -95,20 +88,22 @@ function getWeekIndex(date) {
     return 0;
 }
 
-/** Get all budget line names for the GL dropdown */
 function getBudgetLineNames(data) {
     const lines = [];
-    if (data.outgoings) {
+    if (data && data.outgoings) {
         data.outgoings.forEach(item => lines.push(item.name));
     }
-    lines.push('-- Ignore --');
-    lines.push('-- Other --');
     return lines;
 }
 
-/** Auto-assign GL lines based on saved mappings and NAB categories */
-function autoAssign(transactions, mappings, budgetLines) {
-    // Build category-to-line mapping based on common patterns
+/** Suggest a GL line — returns suggestion or empty string */
+function suggestGlLine(tx, mappings, budgetLines) {
+    // Priority 1: exact merchant mapping from memory
+    if (mappings[tx.merchant] && mappings[tx.merchant] !== '-- Per Transaction --') {
+        return mappings[tx.merchant];
+    }
+
+    // Priority 2: NAB category mapping
     const categoryMap = {
         'Groceries': 'Groceries',
         'Fuel': 'Fuel',
@@ -118,31 +113,29 @@ function autoAssign(transactions, mappings, budgetLines) {
         'Restaurants & takeaway': 'Lifestyle Spending',
         'Parking & tolls': 'Fuel',
         'Home improvements': 'Adhoc Spending',
-        'Other shopping': 'Lifestyle Spending',
         'Clothing': 'Lifestyle Spending',
-        'Medical & health': 'Health Insurance',
-        'Education': 'School',
+        'Clothing & accessories': 'Lifestyle Spending',
+        'Other shopping': '',  // Don't auto-assign — too broad
         'Refund': '-- Ignore --',
         'Internal transfers': '-- Ignore --',
     };
 
+    const mapped = categoryMap[tx.category];
+    if (mapped && (mapped === '-- Ignore --' || budgetLines.includes(mapped))) {
+        return mapped;
+    }
+
+    return '';
+}
+
+/** Apply suggestions but don't lock them in — user must approve */
+function autoSuggest(transactions, mappings, budgetLines) {
     transactions.forEach(tx => {
-        // Priority 1: exact merchant mapping from memory
-        if (mappings[tx.merchant]) {
-            tx.glLine = mappings[tx.merchant];
-            return;
-        }
-        // Priority 2: NAB category mapping
-        if (categoryMap[tx.category] && budgetLines.includes(categoryMap[tx.category])) {
-            tx.glLine = categoryMap[tx.category];
-            return;
-        }
-        // Priority 3: unassigned
-        tx.glLine = '';
+        tx.glLine = suggestGlLine(tx, mappings, budgetLines);
     });
 }
 
-/** Render the import tab */
+/** Render the import tab — ALL transactions visible, filterable */
 function renderImportTab(transactions, budgetData) {
     const preview = document.getElementById('import-preview');
     if (!transactions || transactions.length === 0) {
@@ -151,43 +144,48 @@ function renderImportTab(transactions, budgetData) {
     }
 
     const budgetLines = getBudgetLineNames(budgetData);
+    const specialLines = ['-- Ignore --', '-- Other --'];
+    const allLines = [...budgetLines, ...specialLines];
+
     const unassigned = transactions.filter(tx => !tx.glLine);
     const assigned = transactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --');
     const ignored = transactions.filter(tx => tx.glLine === '-- Ignore --');
 
-    // Summary
+    const totalCharges = transactions.filter(t => !t.isRefund).reduce((s, t) => s + t.amount, 0);
+    const totalRefunds = transactions.filter(t => t.isRefund).reduce((s, t) => s + t.amount, 0);
+
     let html = `<div class="import-summary">
         <span>${transactions.length} transactions</span>
+        <span>Net: ${fmtPlain(totalCharges - totalRefunds)}</span>
         <span class="positive">${assigned.length} assigned</span>
         <span class="negative">${unassigned.length} unassigned</span>
         <span class="dim">${ignored.length} ignored</span>
-        <button id="apply-to-planner" class="add-revision-btn" style="margin-left:auto;">Apply to Planner</button>
+        <button id="apply-to-planner" class="add-revision-btn" style="margin-left:auto;" ${unassigned.length === transactions.length ? 'disabled' : ''}>Apply to Planner</button>
     </div>`;
 
-    // Filter controls
     html += `<div class="import-filters">
+        <button class="import-filter-btn" data-filter="all">All (${transactions.length})</button>
         <button class="import-filter-btn active" data-filter="unassigned">Unassigned (${unassigned.length})</button>
         <button class="import-filter-btn" data-filter="assigned">Assigned (${assigned.length})</button>
-        <button class="import-filter-btn" data-filter="all">All (${transactions.length})</button>
+        <button class="import-filter-btn" data-filter="ignored">Ignored (${ignored.length})</button>
     </div>`;
 
-    // Transaction table
-    html += '<table class="import-table"><thead><tr>';
-    html += '<th>Date</th><th>Merchant</th><th>Details</th><th>Amount</th><th>Category</th><th>Budget Line</th>';
-    html += '</tr></thead><tbody>';
+    html += `<div class="import-table-wrap"><table class="import-table"><thead><tr>
+        <th>Date</th><th>Merchant</th><th>Details</th><th>Amount</th><th>NAB Category</th><th>Budget Line</th>
+    </tr></thead><tbody>`;
 
-    const showList = unassigned.length > 0 ? unassigned : transactions;
+    transactions.forEach((tx, globalIdx) => {
+        const group = tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned';
+        const isHidden = group !== 'unassigned'; // default filter is unassigned
 
-    showList.forEach((tx, i) => {
-        const globalIdx = transactions.indexOf(tx);
-        const opts = budgetLines.map(l =>
+        const opts = allLines.map(l =>
             `<option value="${l}" ${tx.glLine === l ? 'selected' : ''}>${l}</option>`
         ).join('');
 
-        html += `<tr class="${tx.isRefund ? 'refund-row' : ''}" data-filter-group="${tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned'}">
+        html += `<tr class="${tx.isRefund ? 'refund-row' : ''}" data-filter-group="${group}" ${isHidden ? 'style="display:none"' : ''}>
             <td class="import-date">${tx.dateStr}</td>
             <td class="import-merchant">${tx.merchant}</td>
-            <td class="import-details">${tx.details}</td>
+            <td class="import-details" title="${tx.details}">${tx.details}</td>
             <td class="import-amount ${tx.isRefund ? 'positive' : 'negative'}">${tx.isRefund ? '+' : ''}${fmtPlain(tx.amount)}</td>
             <td class="import-category">${tx.category}</td>
             <td><select class="gl-select" data-tx-index="${globalIdx}">
@@ -197,13 +195,13 @@ function renderImportTab(transactions, budgetData) {
         </tr>`;
     });
 
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     preview.innerHTML = html;
 }
 
-/** Group assigned transactions by budget line and week for planner integration */
+/** Group assigned transactions by budget line and week */
 function groupByLineAndWeek(transactions) {
-    const groups = {}; // { lineName: { weekIdx: { total: N, charges: [...] } } }
+    const groups = {};
 
     transactions.forEach(tx => {
         if (!tx.glLine || tx.glLine === '-- Ignore --' || tx.glLine === '-- Other --') return;
@@ -212,7 +210,9 @@ function groupByLineAndWeek(transactions) {
         if (!groups[tx.glLine][weekIdx]) groups[tx.glLine][weekIdx] = { total: 0, charges: [] };
         const sign = tx.isRefund ? -1 : 1;
         groups[tx.glLine][weekIdx].total += tx.amount * sign;
-        groups[tx.glLine][weekIdx].charges.push(`${tx.merchant} ${tx.isRefund ? '+' : ''}$${tx.amount.toFixed(2)}`);
+        groups[tx.glLine][weekIdx].charges.push(
+            `${tx.dateStr} ${tx.merchant} ${tx.isRefund ? '+' : '-'}$${tx.amount.toFixed(2)}`
+        );
     });
 
     return groups;

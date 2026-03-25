@@ -446,30 +446,53 @@ function setupImport() {
 
         const reader = new FileReader();
         reader.onload = (evt) => {
-            importedTransactions = parseNabCsv(evt.target.result);
-            const budgetLines = getBudgetLineNames(budgetCY);
-            autoAssign(importedTransactions, glMappings, budgetLines);
-            renderImportTab(importedTransactions, budgetCY);
+            try {
+                importedTransactions = parseNabCsv(evt.target.result);
+                const budgetLines = getBudgetLineNames(budgetCY);
+                autoSuggest(importedTransactions, glMappings, budgetLines);
+                renderImportTab(importedTransactions, budgetCY);
+                showToast(`${importedTransactions.length} transactions loaded`);
+            } catch (err) {
+                console.error('CSV parse error:', err);
+                document.getElementById('import-preview').innerHTML =
+                    `<p class="negative">Error parsing CSV: ${err.message}</p>`;
+            }
         };
         reader.readAsText(file);
     });
 
-    // GL line assignment (delegated)
+    // GL line assignment
     section.addEventListener('change', (e) => {
         if (e.target.classList.contains('gl-select')) {
             const idx = parseInt(e.target.dataset.txIndex);
             const line = e.target.value;
-            importedTransactions[idx].glLine = line;
+            const tx = importedTransactions[idx];
+            tx.glLine = line;
 
-            // Save merchant mapping for future imports
-            const merchant = importedTransactions[idx].merchant;
-            if (line && line !== '-- Assign --' && merchant) {
-                glMappings[merchant] = line;
-                saveGlMappings(glMappings);
+            // Ask to remember this merchant mapping (skip for broad merchants)
+            const merchant = tx.merchant;
+            if (line && line !== '' && merchant) {
+                // Check if this merchant has varied assignments
+                const otherAssignments = importedTransactions
+                    .filter(t => t.merchant === merchant && t.glLine && t.glLine !== line && t.glLine !== '-- Ignore --')
+                    .length;
+
+                if (otherAssignments === 0 && line !== '-- Ignore --' && line !== '-- Other --') {
+                    if (confirm(`Remember "${merchant}" → "${line}" for future imports?`)) {
+                        glMappings[merchant] = line;
+                        // Apply to all unassigned transactions with same merchant
+                        importedTransactions.forEach(t => {
+                            if (t.merchant === merchant && !t.glLine) {
+                                t.glLine = line;
+                            }
+                        });
+                        saveGlMappings(glMappings);
+                    }
+                }
             }
 
-            // Re-render to update counts
-            renderImportTab(importedTransactions, budgetCY);
+            // Update the row's filter group and counts
+            updateImportCounts();
         }
     });
 
@@ -486,10 +509,8 @@ function setupImport() {
                 const group = row.dataset.filterGroup;
                 if (filter === 'all') {
                     row.style.display = '';
-                } else if (filter === 'unassigned') {
-                    row.style.display = group === 'unassigned' ? '' : 'none';
-                } else if (filter === 'assigned') {
-                    row.style.display = (group === 'assigned') ? '' : 'none';
+                } else {
+                    row.style.display = group === filter ? '' : 'none';
                 }
             });
         }
@@ -504,6 +525,47 @@ function setupImport() {
             weekActuals = applyToPlanner(importedTransactions, weekActuals);
             saveWeekActuals(weekActuals);
             showToast('Applied to planner');
+        }
+    });
+}
+
+/** Update filter counts and row groups without full re-render */
+function updateImportCounts() {
+    const section = document.getElementById('import');
+    const rows = section.querySelectorAll('.import-table tbody tr');
+
+    // Update each row's filter group based on current glLine
+    rows.forEach(row => {
+        const select = row.querySelector('.gl-select');
+        if (!select) return;
+        const idx = parseInt(select.dataset.txIndex);
+        const tx = importedTransactions[idx];
+        const group = tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned';
+        row.dataset.filterGroup = group;
+    });
+
+    // Update count badges
+    const unassigned = importedTransactions.filter(tx => !tx.glLine).length;
+    const assigned = importedTransactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --').length;
+    const ignored = importedTransactions.filter(tx => tx.glLine === '-- Ignore --').length;
+
+    const buttons = section.querySelectorAll('.import-filter-btn');
+    buttons.forEach(btn => {
+        const f = btn.dataset.filter;
+        if (f === 'all') btn.textContent = `All (${importedTransactions.length})`;
+        if (f === 'unassigned') btn.textContent = `Unassigned (${unassigned})`;
+        if (f === 'assigned') btn.textContent = `Assigned (${assigned})`;
+        if (f === 'ignored') btn.textContent = `Ignored (${ignored})`;
+    });
+
+    // Re-apply current filter
+    const activeFilter = section.querySelector('.import-filter-btn.active')?.dataset.filter || 'unassigned';
+    rows.forEach(row => {
+        const group = row.dataset.filterGroup;
+        if (activeFilter === 'all') {
+            row.style.display = '';
+        } else {
+            row.style.display = group === activeFilter ? '' : 'none';
         }
     });
 }
