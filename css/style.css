@@ -609,6 +609,83 @@ select.editable { width: 100px; cursor: pointer; }
     transition: all 0.15s;
 }
 .import-upload-btn:hover { background: var(--accent); color: #000; }
+
+/* Import tab */
+.import-summary {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.import-filters {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+.import-filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.15s;
+}
+.import-filter-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.import-filter-btn.active { background: var(--surface2); color: var(--accent); border-color: var(--accent); }
+
+.import-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+.import-table th {
+    background: var(--surface2);
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.import-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(42,58,94,0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+.import-table tbody tr:hover { background: rgba(0,176,240,0.04); }
+
+.import-date { font-family: var(--mono); font-size: 0.75rem; min-width: 70px; }
+.import-merchant { font-weight: 500; max-width: 160px; }
+.import-details { color: var(--text-dim); max-width: 200px; font-size: 0.72rem; }
+.import-amount { font-family: var(--mono); text-align: right; white-space: pre; }
+.import-category { color: var(--text-dim); font-size: 0.72rem; }
+
+.gl-select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    min-width: 130px;
+}
+.gl-select:focus { border-color: var(--accent); outline: none; }
+.gl-select option { background: var(--surface); }
+
+.refund-row { opacity: 0.7; }
+.refund-row td { font-style: italic; }
 #planner-content { display: flex; flex-direction: column; gap: 12px; }
 
 /* ── Login screen ── */

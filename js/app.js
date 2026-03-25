@@ -47,11 +47,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderAll();
     }
 
+    // Load GL mappings
+    glMappings = loadGlMappings();
+
     setupTabs();
     setupBudgetEditing('budget-cy', 'cy-', budgetCY, saveBudgetCY);
     setupBudgetEditing('budget-ny', 'ny-', budgetNY, saveBudgetNY);
     setupPlannerEditing();
     setupAccountsEditing();
+    setupImport();
 });
 
 function renderAll() {
@@ -429,4 +433,77 @@ function setupAccountsEditing() {
             }
         }
     }, true);
+}
+
+// ── Import ──
+function setupImport() {
+    const section = document.getElementById('import');
+
+    // CSV file upload
+    document.getElementById('csv-upload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            importedTransactions = parseNabCsv(evt.target.result);
+            const budgetLines = getBudgetLineNames(budgetCY);
+            autoAssign(importedTransactions, glMappings, budgetLines);
+            renderImportTab(importedTransactions, budgetCY);
+        };
+        reader.readAsText(file);
+    });
+
+    // GL line assignment (delegated)
+    section.addEventListener('change', (e) => {
+        if (e.target.classList.contains('gl-select')) {
+            const idx = parseInt(e.target.dataset.txIndex);
+            const line = e.target.value;
+            importedTransactions[idx].glLine = line;
+
+            // Save merchant mapping for future imports
+            const merchant = importedTransactions[idx].merchant;
+            if (line && line !== '-- Assign --' && merchant) {
+                glMappings[merchant] = line;
+                saveGlMappings(glMappings);
+            }
+
+            // Re-render to update counts
+            renderImportTab(importedTransactions, budgetCY);
+        }
+    });
+
+    // Filter buttons
+    section.addEventListener('click', (e) => {
+        const filterBtn = e.target.closest('.import-filter-btn');
+        if (filterBtn) {
+            const filter = filterBtn.dataset.filter;
+            section.querySelectorAll('.import-filter-btn').forEach(b => b.classList.remove('active'));
+            filterBtn.classList.add('active');
+
+            const rows = section.querySelectorAll('.import-table tbody tr');
+            rows.forEach(row => {
+                const group = row.dataset.filterGroup;
+                if (filter === 'all') {
+                    row.style.display = '';
+                } else if (filter === 'unassigned') {
+                    row.style.display = group === 'unassigned' ? '' : 'none';
+                } else if (filter === 'assigned') {
+                    row.style.display = (group === 'assigned') ? '' : 'none';
+                }
+            });
+        }
+
+        // Apply to planner
+        if (e.target.id === 'apply-to-planner') {
+            if (importedTransactions.length === 0) return;
+            const unassigned = importedTransactions.filter(tx => !tx.glLine);
+            if (unassigned.length > 0) {
+                if (!confirm(`${unassigned.length} transactions are still unassigned. Apply assigned ones anyway?`)) return;
+            }
+            weekActuals = applyToPlanner(importedTransactions, weekActuals);
+            saveWeekActuals(weekActuals);
+            showToast('Applied to planner');
+        }
+    });
 }
