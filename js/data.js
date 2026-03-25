@@ -70,7 +70,8 @@ function periodToWeekly(amount, cycle) {
 }
 
 // ── Currency formatting (accounting style) ──
-// $ left-aligned, number right-aligned, zero shows as dash
+// Simple right-aligned monospace: "$1,234.56" or "$-"
+// Uses non-breaking spaces so alignment holds.
 
 function fmtNum(n) {
     if (n === 0) return '-';
@@ -78,18 +79,17 @@ function fmtNum(n) {
 }
 
 function fmt(n) {
-    return `<span class="acct"><span class="acct-sign">$</span><span class="acct-num">${fmtNum(n)}</span></span>`;
+    return '$' + fmtNum(n);
 }
 
 function fmtSigned(n) {
-    const sign = n < 0 ? '-' : '';
-    return `<span class="acct"><span class="acct-sign">${sign}$</span><span class="acct-num">${fmtNum(n)}</span></span>`;
+    if (n < 0) return '-$' + fmtNum(n);
+    return '$' + fmtNum(n);
 }
 
-/** Plain text for input values */
+/** Same as fmt — used for input values */
 function fmtPlain(n) {
-    if (n === 0) return '$ -';
-    return '$ ' + Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return fmt(n);
 }
 
 /** Parse "$1,234.56" or "1234.56" or "$ -" back to number */
@@ -122,11 +122,35 @@ function getCurrentWeekly(item) {
     return getEffectiveWeekly(item, new Date());
 }
 
-/** Ensure outgoing items have comment and revisions fields */
-function migrateOutgoing(item) {
-    if (!item.comment) item.comment = '';
+/** Ensure items have comment and revisions fields */
+function migrateItem(item) {
+    if (!item.comment && item.comment !== '') item.comment = '';
     if (!item.revisions) item.revisions = [];
     return item;
+}
+const migrateOutgoing = migrateItem;
+
+/** Migrate old flat contributions object to new array format */
+function migrateBudget(data) {
+    data.outgoings.forEach(migrateItem);
+    data.income.forEach(migrateItem);
+
+    // Convert old contributions object to contributionItems array
+    if (data.contributions && !data.contributionItems) {
+        const c = data.contributions;
+        const y = String(data.year || 2026);
+        data.contributionItems = [
+            { name: 'Brad Regular', weekly: c.bradRegular || 0, cycle: c.bradRegularCycle || 'Fortnightly', firstPayment: c.bradRegularFirstPayment || y+'-01-12', autoCalc: true, comment: '', revisions: [] },
+            { name: 'Brad Additional', weekly: c.bradAdditional || 0, cycle: c.bradAdditionalCycle || 'Fortnightly', firstPayment: c.bradAdditionalFirstPayment || y+'-01-12', autoCalc: false, comment: '', revisions: [] },
+            { name: 'Diana Regular', weekly: c.dianaRegular || 0, cycle: c.dianaRegularCycle || 'Monthly', firstPayment: c.dianaRegularFirstPayment || y+'-01-05', autoCalc: true, comment: '', revisions: [] },
+            { name: 'Diana Additional', weekly: c.dianaAdditional || 0, cycle: c.dianaAdditionalCycle || 'Monthly', firstPayment: c.dianaAdditionalFirstPayment || y+'-01-05', autoCalc: false, comment: '', revisions: [] },
+            { name: 'Rent - Cranbourne', weekly: c.rentCranbourne || 0, cycle: c.rentCranbourneCycle || 'Weekly', firstPayment: c.rentCranbourneFirstPayment || y+'-01-06', autoCalc: false, comment: '', revisions: [] },
+            { name: 'Rent - Mentone', weekly: c.rentMentone || 0, cycle: c.rentMentoneCycle || 'Monthly', firstPayment: c.rentMentoneFirstPayment || y+'-01-07', autoCalc: false, comment: '', revisions: [] },
+        ];
+        delete data.contributions;
+    }
+    if (data.contributionItems) data.contributionItems.forEach(migrateItem);
+    return data;
 }
 
 // ── Default budget data ──
@@ -195,14 +219,14 @@ function makeDefaultBudget(year) {
             { name: 'Xmas Fund', weekly: 67.31, cycle: 'Annually', firstPayment: nov + '30' },
             { name: 'Adhoc Spending', weekly: 115.38, cycle: 'Monthly', firstPayment: jan + '05' },
         ],
-        contributions: {
-            bradRegular: 1567, bradRegularCycle: 'Fortnightly', bradRegularFirstPayment: jan + '12',
-            bradAdditional: 0, bradAdditionalCycle: 'Fortnightly', bradAdditionalFirstPayment: jan + '12',
-            dianaRegular: 1567, dianaRegularCycle: 'Monthly', dianaRegularFirstPayment: jan + '05',
-            dianaAdditional: 0, dianaAdditionalCycle: 'Monthly', dianaAdditionalFirstPayment: jan + '05',
-            rentCranbourne: 669.23, rentCranbourneCycle: 'Weekly', rentCranbourneFirstPayment: jan + '06',
-            rentMentone: 611.54, rentMentoneCycle: 'Monthly', rentMentoneFirstPayment: jan + '07',
-        },
+        contributionItems: [
+            { name: 'Brad Regular', weekly: 1567, cycle: 'Fortnightly', firstPayment: jan + '12', autoCalc: true, comment: '', revisions: [] },
+            { name: 'Brad Additional', weekly: 0, cycle: 'Fortnightly', firstPayment: jan + '12', autoCalc: false, comment: '', revisions: [] },
+            { name: 'Diana Regular', weekly: 1567, cycle: 'Monthly', firstPayment: jan + '05', autoCalc: true, comment: '', revisions: [] },
+            { name: 'Diana Additional', weekly: 0, cycle: 'Monthly', firstPayment: jan + '05', autoCalc: false, comment: '', revisions: [] },
+            { name: 'Rent - Cranbourne', weekly: 669.23, cycle: 'Weekly', firstPayment: jan + '06', autoCalc: false, comment: '', revisions: [] },
+            { name: 'Rent - Mentone', weekly: 611.54, cycle: 'Monthly', firstPayment: jan + '07', autoCalc: false, comment: '', revisions: [] },
+        ],
         primaryCount: 18,
         primaryAccountBalance: 161606.99,
     };
@@ -221,14 +245,10 @@ function loadData(key) {
 }
 
 function loadBudgetCY() {
-    const d = loadData('budget_cy26') || JSON.parse(JSON.stringify(DEFAULT_CY));
-    d.outgoings.forEach(migrateOutgoing);
-    return d;
+    return migrateBudget(loadData('budget_cy26') || JSON.parse(JSON.stringify(DEFAULT_CY)));
 }
 function loadBudgetNY() {
-    const d = loadData('budget_ny27') || JSON.parse(JSON.stringify(DEFAULT_NY));
-    d.outgoings.forEach(migrateOutgoing);
-    return d;
+    return migrateBudget(loadData('budget_ny27') || JSON.parse(JSON.stringify(DEFAULT_NY)));
 }
 function loadWeekActuals() { return loadData('week_actuals_cy26') || {}; }
 

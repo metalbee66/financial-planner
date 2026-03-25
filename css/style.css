@@ -65,18 +65,7 @@ main { padding: 16px; max-width: 100%; }
 .negative { color: var(--red) !important; }
 .dim { color: var(--text-dim); }
 
-/* ── Accounting currency format ── */
-/* Uses a monospace two-part span: sign+$ left, number right */
-.acct {
-    display: inline-flex;
-    width: 100%;
-    font-family: var(--mono);
-    font-size: inherit;
-    font-variant-numeric: tabular-nums;
-    color: inherit;
-}
-.acct-sign { flex-shrink: 0; }
-.acct-num { flex: 1; text-align: right; }
+/* All currency text inherits monospace from the table cell */
 
 /* ── Budget Tab ── */
 
@@ -462,6 +451,19 @@ select.editable { width: 100px; cursor: pointer; }
     user-select: none;
 }
 .expand-toggle:hover { color: var(--accent); }
+
+.auto-badge {
+    display: inline-block;
+    background: rgba(0,176,240,0.15);
+    color: var(--accent);
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: 4px;
+    vertical-align: middle;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
 
 .revision-badge {
     display: inline-block;

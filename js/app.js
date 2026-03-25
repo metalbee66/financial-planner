@@ -82,20 +82,31 @@ function setupTabs() {
 }
 
 // ── Budget editing (works for both CY and NY) ──
+
+/** Resolve the data array from a section name */
+function getSection(data, sectionName) {
+    return data[sectionName]; // 'income', 'outgoings', 'contributionItems'
+}
+
 function setupBudgetEditing(sectionId, prefix, data, saveFn) {
     const section = document.getElementById(sectionId);
 
+    // Helper to re-open a detail row after re-render
+    function reopenDetail(sec, idx) {
+        const row = document.getElementById(`${prefix}${sec}-detail-${idx}`);
+        if (row) row.style.display = 'table-row';
+    }
+
     // Currency input: format on blur, raw on focus
     section.addEventListener('focus', (e) => {
-        if (e.target.classList.contains('currency-input')) {
-            const raw = e.target.dataset.raw;
-            e.target.value = raw;
+        if (e.target.classList.contains('currency-input') && !e.target.dataset.field?.startsWith('revision-')) {
+            e.target.value = e.target.dataset.raw;
             e.target.select();
         }
     }, true);
 
     section.addEventListener('blur', (e) => {
-        if (e.target.classList.contains('currency-input')) {
+        if (e.target.classList.contains('currency-input') && !e.target.dataset.field?.startsWith('revision-')) {
             const val = parseCurrency(e.target.value);
             e.target.dataset.raw = val;
             e.target.value = fmtPlain(val);
@@ -105,7 +116,7 @@ function setupBudgetEditing(sectionId, prefix, data, saveFn) {
         }
     }, true);
 
-    // Select and date inputs
+    // Select and date inputs (not inside detail rows)
     section.addEventListener('change', (e) => {
         const el = e.target;
         if (el.classList.contains('editable') && !el.closest('.detail-row')) {
@@ -120,8 +131,8 @@ function setupBudgetEditing(sectionId, prefix, data, saveFn) {
         const toggle = e.target.closest('.expand-toggle');
         if (toggle) {
             const idx = toggle.dataset.index;
-            const pfx = toggle.dataset.pfx;
-            const row = document.getElementById(`${pfx}detail-${idx}`);
+            const sec = toggle.dataset.section;
+            const row = document.getElementById(`${toggle.dataset.pfx}${sec}-detail-${idx}`);
             if (row) {
                 const visible = row.style.display !== 'none';
                 row.style.display = visible ? 'none' : 'table-row';
@@ -129,20 +140,20 @@ function setupBudgetEditing(sectionId, prefix, data, saveFn) {
             }
         }
 
-        // Add revision
+        // Add revision (works for any section)
         const addBtn = e.target.closest('.add-revision-btn');
         if (addBtn) {
             const idx = parseInt(addBtn.dataset.index);
-            const item = data.outgoings[idx];
-            migrateOutgoing(item);
+            const sec = addBtn.dataset.section;
+            const arr = getSection(data, sec);
+            const item = arr[idx];
+            migrateItem(item);
             const today = new Date().toISOString().split('T')[0];
             item.revisions.push({ fromDate: today, weekly: getCurrentWeekly(item), reason: '' });
             item.revisions.sort((a, b) => a.fromDate.localeCompare(b.fromDate));
             saveFn(data);
             renderBudgetTab(data, prefix);
-            // Re-open the detail row
-            const row = document.getElementById(`${prefix}detail-${idx}`);
-            if (row) row.style.display = 'table-row';
+            reopenDetail(sec, idx);
         }
 
         // Delete revision
@@ -150,11 +161,11 @@ function setupBudgetEditing(sectionId, prefix, data, saveFn) {
         if (delBtn) {
             const idx = parseInt(delBtn.dataset.index);
             const ri = parseInt(delBtn.dataset.rev);
-            data.outgoings[idx].revisions.splice(ri, 1);
+            const sec = delBtn.dataset.section;
+            getSection(data, sec)[idx].revisions.splice(ri, 1);
             saveFn(data);
             renderBudgetTab(data, prefix);
-            const row = document.getElementById(`${prefix}detail-${idx}`);
-            if (row) row.style.display = 'table-row';
+            reopenDetail(sec, idx);
         }
     });
 
@@ -162,48 +173,50 @@ function setupBudgetEditing(sectionId, prefix, data, saveFn) {
     section.addEventListener('blur', (e) => {
         if (e.target.classList.contains('detail-comment')) {
             const idx = parseInt(e.target.dataset.index);
-            data.outgoings[idx].comment = e.target.value;
+            const sec = e.target.dataset.section;
+            getSection(data, sec)[idx].comment = e.target.value;
             saveFn(data);
         }
     }, true);
 
-    // Revision field editing
+    // Revision field editing (date and reason)
     section.addEventListener('change', (e) => {
         const el = e.target;
         const field = el.dataset.field;
         if (!field || !field.startsWith('revision-')) return;
         const idx = parseInt(el.dataset.index);
         const ri = parseInt(el.dataset.rev);
-        const rev = data.outgoings[idx].revisions[ri];
+        const sec = el.dataset.section;
+        const rev = getSection(data, sec)[idx].revisions[ri];
         if (!rev) return;
 
         if (field === 'revision-date') {
             rev.fromDate = el.value;
-            data.outgoings[idx].revisions.sort((a, b) => a.fromDate.localeCompare(b.fromDate));
+            getSection(data, sec)[idx].revisions.sort((a, b) => a.fromDate.localeCompare(b.fromDate));
         } else if (field === 'revision-reason') {
             rev.reason = el.value;
         }
         saveFn(data);
         renderBudgetTab(data, prefix);
-        const row = document.getElementById(`${prefix}detail-${idx}`);
-        if (row) row.style.display = 'table-row';
+        reopenDetail(sec, idx);
     });
 
-    // Revision weekly amount (blur handler for currency input in revision rows)
+    // Revision weekly amount
     section.addEventListener('blur', (e) => {
         const el = e.target;
         if (el.dataset.field === 'revision-weekly' && el.classList.contains('currency-input')) {
             const val = parseCurrency(el.value);
             const idx = parseInt(el.dataset.index);
             const ri = parseInt(el.dataset.rev);
-            if (data.outgoings[idx].revisions[ri]) {
-                data.outgoings[idx].revisions[ri].weekly = val;
+            const sec = el.dataset.section;
+            const rev = getSection(data, sec)[idx].revisions[ri];
+            if (rev) {
+                rev.weekly = val;
                 el.value = fmtPlain(val);
                 el.dataset.raw = val;
                 saveFn(data);
                 renderBudgetTab(data, prefix);
-                const row = document.getElementById(`${prefix}detail-${idx}`);
-                if (row) row.style.display = 'table-row';
+                reopenDetail(sec, idx);
             }
         }
     }, true);
@@ -234,8 +247,9 @@ function applyBudgetChange(el, data, prefix) {
             // cycle, firstPayment — string values
             item[prop] = el.value;
         }
-    } else if (field === 'contributions') {
-        data.contributions[prop] = parseCurrency(el.dataset.raw || el.value);
+    } else if (field === 'contributionItems') {
+        const amount = parseCurrency(el.dataset.raw || el.value);
+        data.contributionItems[index].weekly = amount;
     }
 }
 

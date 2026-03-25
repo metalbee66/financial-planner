@@ -123,16 +123,7 @@ function placeInWeekWithAmount(date, amount, payments, weekDates) {
 function computeAllSchedules(data, weekDates) {
     const primary = data.outgoings.slice(0, data.primaryCount);
     const secondary = data.outgoings.slice(data.primaryCount);
-
-    const c = data.contributions;
-    const contribItems = [
-        { name: 'Brad Regular', weekly: c.bradRegular, cycle: c.bradRegularCycle || 'Fortnightly', firstPayment: c.bradRegularFirstPayment || '2026-01-12' },
-        { name: 'Brad Additional', weekly: c.bradAdditional, cycle: c.bradAdditionalCycle || 'Fortnightly', firstPayment: c.bradAdditionalFirstPayment || '2026-01-12' },
-        { name: 'Diana Regular', weekly: c.dianaRegular, cycle: c.dianaRegularCycle || 'Monthly', firstPayment: c.dianaRegularFirstPayment || '2026-01-05' },
-        { name: 'Diana Additional', weekly: c.dianaAdditional, cycle: c.dianaAdditionalCycle || 'Monthly', firstPayment: c.dianaAdditionalFirstPayment || '2026-01-05' },
-        { name: 'Rent - Cranbourne', weekly: c.rentCranbourne, cycle: c.rentCranbourneCycle || 'Weekly', firstPayment: c.rentCranbourneFirstPayment || '2026-01-06' },
-        { name: 'Rent - Mentone', weekly: c.rentMentone, cycle: c.rentMentoneCycle || 'Monthly', firstPayment: c.rentMentoneFirstPayment || '2026-01-07' },
-    ];
+    const contribItems = data.contributionItems || [];
 
     return {
         primary: primary.map(item => ({ item, schedule: calcPaymentSchedule(item, weekDates) })),
