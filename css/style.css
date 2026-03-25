@@ -97,22 +97,8 @@ main { padding: 16px; max-width: 100%; }
 .residual-header { background: #0a2040; color: var(--accent); }
 .accounts-header { background: #1a2a1a; color: var(--accent); }
 
-.budget-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-/* Fixed column widths for alignment across sections */
-.budget-table th:first-child,
-.budget-table td:first-child { width: 220px; }
-.budget-table th:nth-child(2),
-.budget-table td:nth-child(2),
-.budget-table th:nth-child(3),
-.budget-table td:nth-child(3),
-.budget-table th:nth-child(4),
-.budget-table td:nth-child(4),
-.budget-table th:nth-child(5),
-.budget-table td:nth-child(5) { width: 110px; }
-.budget-table th:nth-child(6),
-.budget-table td:nth-child(6) { width: 100px; }
-.budget-table th:nth-child(7),
-.budget-table td:nth-child(7) { width: 110px; }
+.budget-table { width: 100%; border-collapse: collapse; }
+.budget-table td:first-child { min-width: 180px; }
 
 .budget-table th {
     background: var(--surface2);
@@ -130,7 +116,7 @@ main { padding: 16px; max-width: 100%; }
     text-align: right;
     font-size: 0.8rem;
     border-bottom: 1px solid rgba(42,58,94,0.3);
-    white-space: nowrap;
+    white-space: pre;
     font-family: var(--mono);
     font-variant-numeric: tabular-nums;
 }

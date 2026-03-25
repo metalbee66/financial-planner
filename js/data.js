@@ -69,27 +69,36 @@ function periodToWeekly(amount, cycle) {
     }
 }
 
-// ── Currency formatting (accounting style) ──
-// Simple right-aligned monospace: "$1,234.56" or "$-"
-// Uses non-breaking spaces so alignment holds.
+// ── Currency formatting (accounting style, monospace-padded) ──
+// Pad numbers to fixed width so $ and digits align in any cell width.
+// Uses \u00A0 (non-breaking space) so HTML won't collapse them.
+
+const NBSP = '\u00A0';
+const NUM_WIDTH = 12; // enough for "999,999.99" with commas
 
 function fmtNum(n) {
     if (n === 0) return '-';
     return Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function padNum(s) {
+    while (s.length < NUM_WIDTH) s = NBSP + s;
+    return s;
+}
+
 function fmt(n) {
-    return '$' + fmtNum(n);
+    return '$' + padNum(fmtNum(n));
 }
 
 function fmtSigned(n) {
-    if (n < 0) return '-$' + fmtNum(n);
-    return '$' + fmtNum(n);
+    if (n < 0) return '-$' + padNum(fmtNum(n));
+    return NBSP + '$' + padNum(fmtNum(n));
 }
 
-/** Same as fmt — used for input values */
+/** For input values — no padding, just clean display */
 function fmtPlain(n) {
-    return fmt(n);
+    if (n === 0) return '$-';
+    return '$' + fmtNum(n);
 }
 
 /** Parse "$1,234.56" or "1234.56" or "$ -" back to number */
