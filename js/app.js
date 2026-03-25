@@ -468,6 +468,27 @@ function setupImport() {
         reader.readAsText(file);
     });
 
+    // Search/filter inputs (delegated since they're created dynamically)
+    section.addEventListener('input', (e) => {
+        if (e.target.id === 'import-search') applyImportFilters();
+    });
+    section.addEventListener('change', (e) => {
+        if (e.target.id === 'import-search-line' || e.target.id === 'import-search-source') {
+            applyImportFilters();
+        }
+    });
+    section.addEventListener('click', (e) => {
+        if (e.target.id === 'import-search-clear') {
+            const s = document.getElementById('import-search');
+            const l = document.getElementById('import-search-line');
+            const src = document.getElementById('import-search-source');
+            if (s) s.value = '';
+            if (l) l.value = '';
+            if (src) src.value = '';
+            applyImportFilters();
+        }
+    });
+
     // GL line assignment
     section.addEventListener('change', (e) => {
         if (e.target.classList.contains('gl-select')) {
@@ -515,23 +536,48 @@ function setupImport() {
         }
     });
 
+    // Combined filter + search (global so updateImportCounts can call it)
+    window.applyImportFilters = function() {
+        const activeBtn = section.querySelector('.import-filter-btn.active');
+        const groupFilter = activeBtn ? activeBtn.dataset.filter : 'all';
+        const searchEl = document.getElementById('import-search');
+        const lineEl = document.getElementById('import-search-line');
+        const sourceEl = document.getElementById('import-search-source');
+
+        const searchText = searchEl ? searchEl.value.toLowerCase().trim() : '';
+        const lineFilter = lineEl ? lineEl.value : '';
+        const sourceFilter = sourceEl ? sourceEl.value : '';
+
+        const rows = section.querySelectorAll('.import-table tbody tr');
+        let visible = 0;
+        rows.forEach(row => {
+            const group = row.dataset.filterGroup || '';
+            const search = row.dataset.search || '';
+            const source = row.dataset.source || '';
+            const glLine = row.dataset.glLine || '';
+
+            let show = true;
+            // Group filter
+            if (groupFilter !== 'all' && group !== groupFilter) show = false;
+            // Text search
+            if (searchText && !search.includes(searchText)) show = false;
+            // Budget line filter
+            if (lineFilter && glLine !== lineFilter) show = false;
+            // Source filter
+            if (sourceFilter && source !== sourceFilter) show = false;
+
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+    }
+
     // Filter buttons
     section.addEventListener('click', (e) => {
         const filterBtn = e.target.closest('.import-filter-btn');
         if (filterBtn) {
-            const filter = filterBtn.dataset.filter;
             section.querySelectorAll('.import-filter-btn').forEach(b => b.classList.remove('active'));
             filterBtn.classList.add('active');
-
-            const rows = section.querySelectorAll('.import-table tbody tr');
-            rows.forEach(row => {
-                const group = row.dataset.filterGroup;
-                if (filter === 'all') {
-                    row.style.display = '';
-                } else {
-                    row.style.display = group === filter ? '' : 'none';
-                }
-            });
+            applyImportFilters();
         }
 
         // Delete mapping
@@ -563,7 +609,7 @@ function updateImportCounts() {
     const section = document.getElementById('import');
     const rows = section.querySelectorAll('.import-table tbody tr');
 
-    // Update each row's filter group based on current glLine
+    // Update each row's data attributes based on current glLine
     rows.forEach(row => {
         const select = row.querySelector('.gl-select');
         if (!select) return;
@@ -571,6 +617,7 @@ function updateImportCounts() {
         const tx = importedTransactions[idx];
         const group = tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned';
         row.dataset.filterGroup = group;
+        row.dataset.glLine = tx.glLine || '';
     });
 
     // Update count badges
@@ -587,7 +634,11 @@ function updateImportCounts() {
         if (f === 'ignored') btn.textContent = `Ignored (${ignored})`;
     });
 
-    // Re-apply current filter
+    // Re-apply combined filters
+    if (window.applyImportFilters) {
+        window.applyImportFilters();
+        return;
+    }
     const activeFilter = section.querySelector('.import-filter-btn.active')?.dataset.filter || 'unassigned';
     rows.forEach(row => {
         const group = row.dataset.filterGroup;

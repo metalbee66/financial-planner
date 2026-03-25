@@ -231,6 +231,18 @@ function renderImportTab(transactions, budgetData, dupCount) {
         <button class="import-filter-btn" data-filter="assigned">Assigned (${assigned.length})</button>
         <button class="import-filter-btn" data-filter="all">All (${transactions.length})</button>
         <button class="import-filter-btn" data-filter="ignored">Ignored (${ignored.length})</button>
+    </div>
+    <div class="import-search-bar">
+        <input type="text" id="import-search" class="import-search" placeholder="Search merchant, details, category...">
+        <select id="import-search-line" class="import-search-select">
+            <option value="">All budget lines</option>
+            ${buildLineFilterOptions(transactions)}
+        </select>
+        <select id="import-search-source" class="import-search-select">
+            <option value="">All sources</option>
+            ${buildSourceFilterOptions(transactions)}
+        </select>
+        <button id="import-search-clear" class="import-search-clear">Clear</button>
     </div>`;
 
     html += `<div class="import-table-wrap"><table class="import-table"><thead><tr>
@@ -241,7 +253,8 @@ function renderImportTab(transactions, budgetData, dupCount) {
         const group = tx.isDuplicate ? 'ignored' : (tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned');
         const isHidden = group !== 'unassigned';
 
-        html += `<tr class="${tx.isRefund ? 'refund-row' : ''} ${tx.isDuplicate ? 'duplicate-row' : ''}" data-filter-group="${group}" ${isHidden ? 'style="display:none"' : ''}>
+        const searchText = `${tx.merchant} ${tx.details} ${tx.category} ${tx.dateStr}`.toLowerCase();
+        html += `<tr class="${tx.isRefund ? 'refund-row' : ''} ${tx.isDuplicate ? 'duplicate-row' : ''}" data-filter-group="${group}" data-search="${searchText}" data-source="${tx.source}" data-gl-line="${tx.glLine || ''}" ${isHidden ? 'style="display:none"' : ''}>
             <td class="import-date">${tx.dateStr}</td>
             <td class="import-source">${tx.source}</td>
             <td class="import-merchant">${tx.merchant}</td>
@@ -255,6 +268,20 @@ function renderImportTab(transactions, budgetData, dupCount) {
 
     html += '</tbody></table></div>';
     preview.innerHTML = html;
+}
+
+/** Build unique budget line filter options from current transactions */
+function buildLineFilterOptions(transactions) {
+    const lines = new Set();
+    transactions.forEach(tx => { if (tx.glLine && tx.glLine !== '') lines.add(tx.glLine); });
+    return [...lines].sort().map(l => `<option value="${l}">${l}</option>`).join('');
+}
+
+/** Build unique source filter options */
+function buildSourceFilterOptions(transactions) {
+    const sources = new Set();
+    transactions.forEach(tx => sources.add(tx.source));
+    return [...sources].sort().map(s => `<option value="${s}">${s}</option>`).join('');
 }
 
 /** Render stored merchant→budget line mappings grouped by budget line */

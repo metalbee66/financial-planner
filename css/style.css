@@ -641,6 +641,50 @@ select.editable { width: 100px; cursor: pointer; }
 .import-filter-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .import-filter-btn.active { background: var(--surface2); color: var(--accent); border-color: var(--accent); }
 
+.import-search-bar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.import-search {
+    flex: 1;
+    min-width: 180px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-family: inherit;
+}
+.import-search:focus { border-color: var(--accent); outline: none; }
+.import-search::placeholder { color: var(--text-dim); }
+
+.import-search-select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    min-width: 120px;
+}
+.import-search-select:focus { border-color: var(--accent); outline: none; }
+
+.import-search-clear {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.75rem;
+}
+.import-search-clear:hover { color: var(--text); border-color: var(--text-dim); }
+
 .import-table-wrap {
     overflow-x: auto;
     max-height: 70vh;
