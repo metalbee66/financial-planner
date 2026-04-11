@@ -2,7 +2,7 @@
  * App controller — tabs, editing, planner interaction, Firebase bootstrap.
  */
 
-let budgetCY, budgetNY, weekActuals, accountsData;
+let budgetCY, budgetNY, weekActuals, accountsData, pmData;
 
 document.addEventListener('DOMContentLoaded', async () => {
     // Load from localStorage first (instant render)
@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     budgetNY = loadBudgetNY();
     weekActuals = loadWeekActuals();
     accountsData = loadAccounts();
+    pmData = loadPM();
     window._budgetData = budgetCY;
 
     // Try Firebase
@@ -57,6 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupPlannerEditing();
     setupAccountsEditing();
     setupImport();
+    setupPMEditing();
 });
 
 function renderAll() {
@@ -64,6 +66,7 @@ function renderAll() {
     renderBudgetTab(budgetNY, 'ny-');
     initPlanner(budgetCY, weekActuals);
     renderAccountsTab(accountsData);
+    renderPMTab(pmData);
 }
 
 // ── Tab switching ──
@@ -84,6 +87,9 @@ function setupTabs() {
             }
             if (btn.dataset.tab === 'import') {
                 renderMappings(glMappings, budgetCY);
+            }
+            if (btn.dataset.tab === 'pm-dlbooks') {
+                renderPMTab(pmData);
             }
         });
     });

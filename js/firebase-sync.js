@@ -137,6 +137,12 @@ function patchSaveFunctions() {
         fbSave('accounts_data', data);
         showToast('Saved');
     };
+
+    savePM = function(data) {
+        localStorage.setItem('pm_dlbooks', JSON.stringify(data));
+        fbSave('pm_dlbooks', data);
+        showToast('Saved');
+    };
 }
 
 function setupRealtimeListeners() {
@@ -161,6 +167,13 @@ function setupRealtimeListeners() {
         if (data && data.banking) {
             accountsData = data;
             renderAccountsTab(accountsData);
+        }
+    });
+
+    fbListen('pm_dlbooks', (data) => {
+        if (data && (data.macro || data.customers)) {
+            pmData = data;
+            renderPMTab(pmData);
         }
     });
 }
@@ -189,6 +202,9 @@ async function initialSync() {
         const fbAcct = await fbLoad('accounts_data');
         if (fbAcct && fbAcct.banking) accountsData = fbAcct;
 
+        const fbPM = await fbLoad('pm_dlbooks');
+        if (fbPM && (fbPM.macro || fbPM.customers)) pmData = fbPM;
+
         console.log('Data loaded from Firebase.');
     } else {
         // Firebase is empty — push defaults
@@ -208,12 +224,16 @@ async function initialSync() {
         if (!weekActuals || typeof weekActuals !== 'object') {
             weekActuals = {};
         }
+        if (!pmData || (!pmData.macro && !pmData.customers)) {
+            pmData = JSON.parse(JSON.stringify(DEFAULT_PM));
+        }
         window._budgetData = budgetCY;
 
         fbSave('budget_cy26', budgetCY);
         fbSave('budget_ny27', budgetNY);
         fbSave('week_actuals_cy26', weekActuals);
         fbSave('accounts_data', accountsData);
+        fbSave('pm_dlbooks', pmData);
         console.log('Default data pushed to Firebase.');
     }
 }

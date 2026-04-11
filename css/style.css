@@ -860,6 +860,120 @@ select.editable { width: 100px; cursor: pointer; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
+/* ── PM DLBooks Tab ── */
+
+.pm-macro-header { background: #2a1040; color: #b388ff; }
+.pm-micro-header { background: #1a2a40; color: var(--accent); }
+
+.pm-task-list { display: flex; flex-direction: column; }
+
+.pm-task-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(42,58,94,0.3);
+    font-size: 0.85rem;
+}
+.pm-task-row:hover { background: rgba(0,176,240,0.04); }
+
+.pm-task-name { flex: 1; font-weight: 500; }
+.pm-task-name-input {
+    flex: 1; background: transparent; border: none; border-bottom: 1px solid var(--border);
+    color: var(--text); font-size: 0.85rem; font-weight: 500; padding: 2px 4px;
+}
+.pm-task-name-input:focus { border-color: var(--accent); outline: none; }
+
+.pm-badge {
+    font-size: 0.68rem; font-weight: 600;
+    padding: 2px 8px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap;
+}
+
+.pm-status-not-started { background: rgba(136,146,160,0.15); color: var(--text-dim); }
+.pm-status-in-progress { background: rgba(0,176,240,0.15); color: var(--accent); }
+.pm-status-done        { background: rgba(0,200,83,0.15);  color: var(--green); }
+.pm-status-blocked     { background: rgba(255,82,82,0.15); color: var(--red); }
+
+.pm-assignee-brad  { background: rgba(0,176,240,0.1); color: var(--accent); }
+.pm-assignee-diana { background: rgba(176,0,240,0.1); color: #b388ff; }
+.pm-assignee-both  { background: rgba(255,152,0,0.1); color: var(--orange); }
+
+.pm-task-delete {
+    background: transparent; border: none; color: var(--red);
+    font-size: 1rem; cursor: pointer; padding: 0 4px; opacity: 0.4;
+}
+.pm-task-delete:hover { opacity: 1; }
+
+.pm-task-detail {
+    background: rgba(0,0,0,0.15);
+    padding: 12px 14px 12px 36px;
+    border-bottom: 1px solid rgba(42,58,94,0.3);
+    display: none;
+}
+.pm-task-detail.open { display: block; }
+
+.pm-detail-grid {
+    display: grid; grid-template-columns: auto 1fr; gap: 8px 12px;
+    align-items: center; font-size: 0.82rem;
+}
+.pm-detail-label { color: var(--text-dim); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.3px; }
+
+.pm-select {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 3px;
+    font-size: 0.8rem; cursor: pointer; width: fit-content;
+}
+.pm-select:focus { border-color: var(--accent); outline: none; }
+
+.pm-notes {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 6px 8px; border-radius: 3px;
+    font-size: 0.8rem; width: 100%; min-height: 50px; resize: vertical;
+    font-family: inherit; grid-column: 1 / -1; margin-top: 4px;
+}
+.pm-notes:focus { border-color: var(--accent); outline: none; }
+
+.pm-subtasks { margin-top: 10px; }
+
+.pm-subtask-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0; font-size: 0.82rem;
+}
+.pm-subtask-check { cursor: pointer; accent-color: var(--green); }
+.pm-subtask-name { flex: 1; }
+.pm-subtask-name.pm-done { text-decoration: line-through; color: var(--text-dim); }
+.pm-subtask-delete {
+    background: transparent; border: none; color: var(--red);
+    font-size: 0.85rem; cursor: pointer; opacity: 0.3; padding: 0 2px;
+}
+.pm-subtask-delete:hover { opacity: 1; }
+
+.pm-customer-card { margin-bottom: 2px; }
+
+.pm-customer-name {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; background: var(--surface2);
+    font-weight: 600; font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+}
+.pm-customer-name-input {
+    background: transparent; border: none; border-bottom: 1px solid var(--border);
+    color: var(--text); font-size: 0.85rem; font-weight: 600; padding: 2px 4px;
+}
+.pm-customer-name-input:focus { border-color: var(--accent); outline: none; }
+
+.pm-add-btn {
+    background: transparent; border: 1px dashed var(--border);
+    color: var(--text-dim); padding: 8px 14px; width: 100%;
+    cursor: pointer; font-size: 0.82rem; text-align: left;
+}
+.pm-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.pm-summary-bar {
+    display: flex; gap: 12px; padding: 10px 14px;
+    font-size: 0.78rem; color: var(--text-dim);
+    border-top: 1px solid var(--border);
+}
+
 /* ── Mobile ── */
 @media (max-width: 768px) {
     header { flex-direction: column; gap: 8px; padding: 8px 12px; }
