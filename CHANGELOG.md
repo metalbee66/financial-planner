@@ -1,6 +1,13 @@
-# Financial Planner — Changelog
+# Family Planner — Changelog
 
-## v1.0.0 — 2026-03-26
+## v2.0.0 (in progress) — Modular monolith + Projects module
+
+Rebranding "Financial Planner" → "Family Planner" and restructuring the app into a modular monolith. The existing finance features become the **Finance** module; a new **Projects** module (Asana-like project management) is added alongside. Future modules slot into the same registry. See [tasks/plan.md](../tasks/plan.md) for the full plan.
+
+### Phase 0 (in progress)
+- Rebrand visible labels (title, header, login card) — Task 0.1
+
+## v1.0.0 — 2026-03-26 (Financial Planner)
 
 ### Budget Tabs (CY / NY)
 - Budget CY (2026) and Budget NY (2027) with independent data

@@ -1,4 +1,7 @@
-# Financial Planner — Handover Notes
+# Family Planner — Handover Notes
+
+> **Note (2026-04-28):** App was renamed from "Financial Planner" to "Family Planner" as part of a modular-monolith restructure (see [tasks/plan.md](../tasks/plan.md)). The original GitHub repo (`financial-planner`) and Firebase project ID are unchanged for now — only visible labels have been updated.
+
 
 ## Architecture
 
@@ -63,7 +66,7 @@ app/
 
 ## How to Deploy Changes
 
-1. Edit files locally in `e:/Projects/Finances Planner/app/`
+1. Edit files locally in `e:/Projects/Family Planner/app/`
 2. Test at http://localhost:8080 (`python server.py`)
 3. `git add -A && git commit -m "message" && git push`
 4. GitHub Pages rebuilds in ~30 seconds
