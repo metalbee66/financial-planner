@@ -1,21 +1,47 @@
 /**
  * Firebase authentication and real-time data sync.
  * Falls back to localStorage if Firebase is not configured or fails.
+ *
+ * Save functions:
+ *   - fbSave(key, data) is the low-level write helper, exported for use
+ *     by save functions in other modules (saveBudgetCY in data.js, etc.).
+ *   - It always writes to localStorage and conditionally pushes to Firebase
+ *     based on `useFirebase && currentUser`. The pre-ES-module code used a
+ *     patchSaveFunctions() trick to swap save impls post-sign-in; that is
+ *     no longer needed because fbSave checks state itself at call time.
  */
+
+import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
+import { migrateOutgoing, DEFAULT_CY, DEFAULT_NY } from './data.js';
+import { DEFAULT_ACCOUNTS } from './accounts.js';
+import { DEFAULT_PM } from './pm.js';
+import { state } from './state.js';
 
 let firebaseApp = null;
 let firebaseDb = null;
 let firebaseAuth = null;
-let currentUser = null;
+export let currentUser = null;
 let useFirebase = false;
 
 const HOUSEHOLD_ID = 'family';
+
+// External hooks set by app.js after the modules are wired (avoids a
+// hard import cycle from sync → ui-render → sync).
+let renderBudgetTab = null;
+let renderAccountsTab = null;
+let renderPMTab = null;
+
+export function registerRenderHooks(hooks) {
+    renderBudgetTab = hooks.renderBudgetTab;
+    renderAccountsTab = hooks.renderAccountsTab;
+    renderPMTab = hooks.renderPMTab;
+}
 
 function isFirebaseConfigured() {
     return FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.length > 0;
 }
 
-async function initFirebase() {
+export async function initFirebase() {
     if (!isFirebaseConfigured()) {
         console.log('Firebase not configured — using localStorage.');
         return false;
@@ -34,19 +60,31 @@ async function initFirebase() {
     }
 }
 
+export function getFirebaseAuth() {
+    return firebaseAuth;
+}
+
+export function isUsingFirebase() {
+    return useFirebase;
+}
+
+export function setCurrentUser(user) {
+    currentUser = user;
+}
+
 // ── Authentication ──
 
-function showLoginScreen() {
+export function showLoginScreen() {
     document.getElementById('app-wrapper').style.display = 'none';
     document.getElementById('login-screen').style.display = 'flex';
 }
 
-function showApp() {
+export function showApp() {
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app-wrapper').style.display = '';
 }
 
-async function signInWithGoogle() {
+export async function signInWithGoogle() {
     const provider = new firebase.auth.GoogleAuthProvider();
     try {
         const result = await firebaseAuth.signInWithPopup(provider);
@@ -65,7 +103,7 @@ async function signInWithGoogle() {
     }
 }
 
-function signOut() {
+export function signOut() {
     if (firebaseAuth) firebaseAuth.signOut();
     currentUser = null;
     showLoginScreen();
@@ -77,14 +115,15 @@ function dbRef(path) {
     return firebaseDb.ref(`household/${HOUSEHOLD_ID}/${path}`);
 }
 
-function fbSave(key, data) {
+/** Always write localStorage; conditionally push to Firebase when user is signed in. */
+export function fbSave(key, data) {
     if (useFirebase && currentUser) {
         dbRef(key).set(data).catch(e => console.error('Firebase save error:', key, e));
     }
     localStorage.setItem(key, JSON.stringify(data));
 }
 
-async function fbLoad(key) {
+export async function fbLoad(key) {
     if (useFirebase && currentUser) {
         try {
             const snap = await dbRef(key).once('value');
@@ -114,126 +153,92 @@ function fbListen(key, callback) {
     }
 }
 
-function patchSaveFunctions() {
-    saveBudgetCY = function(data) {
-        localStorage.setItem('budget_cy26', JSON.stringify(data));
-        fbSave('budget_cy26', data);
-        showToast('Saved');
-    };
-
-    saveBudgetNY = function(data) {
-        localStorage.setItem('budget_ny27', JSON.stringify(data));
-        fbSave('budget_ny27', data);
-        showToast('Saved');
-    };
-
-    saveWeekActuals = function(data) {
-        localStorage.setItem('week_actuals_cy26', JSON.stringify(data));
-        fbSave('week_actuals_cy26', data);
-    };
-
-    saveAccounts = function(data) {
-        localStorage.setItem('accounts_data', JSON.stringify(data));
-        fbSave('accounts_data', data);
-        showToast('Saved');
-    };
-
-    savePM = function(data) {
-        localStorage.setItem('pm_dlbooks', JSON.stringify(data));
-        fbSave('pm_dlbooks', data);
-        showToast('Saved');
-    };
-}
-
-function setupRealtimeListeners() {
+export function setupRealtimeListeners() {
     fbListen('budget_cy26', (data) => {
         if (data && data.outgoings) {
             data.outgoings.forEach(migrateOutgoing);
-            budgetCY = data;
-            window._budgetData = budgetCY;
-            renderBudgetTab(budgetCY, 'cy-');
+            state.budgetCY = data;
+            if (renderBudgetTab) renderBudgetTab(state.budgetCY, 'cy-');
         }
     });
 
     fbListen('budget_ny27', (data) => {
         if (data && data.outgoings) {
             data.outgoings.forEach(migrateOutgoing);
-            budgetNY = data;
-            renderBudgetTab(budgetNY, 'ny-');
+            state.budgetNY = data;
+            if (renderBudgetTab) renderBudgetTab(state.budgetNY, 'ny-');
         }
     });
 
     fbListen('accounts_data', (data) => {
         if (data && data.banking) {
-            accountsData = data;
-            renderAccountsTab(accountsData);
+            state.accountsData = data;
+            if (renderAccountsTab) renderAccountsTab(state.accountsData);
         }
     });
 
     fbListen('pm_dlbooks', (data) => {
         if (data && (data.macro || data.customers)) {
-            pmData = data;
-            renderPMTab(pmData);
+            state.pmData = data;
+            if (renderPMTab) renderPMTab(state.pmData);
         }
     });
 }
 
 /** Initial sync: push defaults to Firebase if empty, or load from Firebase */
-async function initialSync() {
+export async function initialSync() {
     console.log('Starting initial sync...');
 
     const fbCY = await fbLoad('budget_cy26');
 
     if (fbCY && fbCY.outgoings && fbCY.outgoings.length > 0) {
         // Firebase has valid data — use it
-        budgetCY = fbCY;
-        budgetCY.outgoings.forEach(migrateOutgoing);
-        window._budgetData = budgetCY;
+        state.budgetCY = fbCY;
+        state.budgetCY.outgoings.forEach(migrateOutgoing);
 
         const fbNY = await fbLoad('budget_ny27');
         if (fbNY && fbNY.outgoings) {
-            budgetNY = fbNY;
-            budgetNY.outgoings.forEach(migrateOutgoing);
+            state.budgetNY = fbNY;
+            state.budgetNY.outgoings.forEach(migrateOutgoing);
         }
 
         const fbWA = await fbLoad('week_actuals_cy26');
-        if (fbWA) weekActuals = fbWA;
+        if (fbWA) state.weekActuals = fbWA;
 
         const fbAcct = await fbLoad('accounts_data');
-        if (fbAcct && fbAcct.banking) accountsData = fbAcct;
+        if (fbAcct && fbAcct.banking) state.accountsData = fbAcct;
 
         const fbPM = await fbLoad('pm_dlbooks');
-        if (fbPM && (fbPM.macro || fbPM.customers)) pmData = fbPM;
+        if (fbPM && (fbPM.macro || fbPM.customers)) state.pmData = fbPM;
 
         console.log('Data loaded from Firebase.');
     } else {
         // Firebase is empty — push defaults
         console.log('Firebase empty, pushing default data...');
         // Ensure we have good defaults
-        if (!budgetCY || !budgetCY.outgoings || budgetCY.outgoings.length === 0) {
-            budgetCY = JSON.parse(JSON.stringify(DEFAULT_CY));
-            budgetCY.outgoings.forEach(migrateOutgoing);
+        if (!state.budgetCY || !state.budgetCY.outgoings || state.budgetCY.outgoings.length === 0) {
+            state.budgetCY = JSON.parse(JSON.stringify(DEFAULT_CY));
+            state.budgetCY.outgoings.forEach(migrateOutgoing);
         }
-        if (!budgetNY || !budgetNY.outgoings || budgetNY.outgoings.length === 0) {
-            budgetNY = JSON.parse(JSON.stringify(DEFAULT_NY));
-            budgetNY.outgoings.forEach(migrateOutgoing);
+        if (!state.budgetNY || !state.budgetNY.outgoings || state.budgetNY.outgoings.length === 0) {
+            state.budgetNY = JSON.parse(JSON.stringify(DEFAULT_NY));
+            state.budgetNY.outgoings.forEach(migrateOutgoing);
         }
-        if (!accountsData || !accountsData.banking) {
-            accountsData = JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
+        if (!state.accountsData || !state.accountsData.banking) {
+            state.accountsData = JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
         }
-        if (!weekActuals || typeof weekActuals !== 'object') {
-            weekActuals = {};
+        if (!state.weekActuals || typeof state.weekActuals !== 'object') {
+            state.weekActuals = {};
         }
-        if (!pmData || (!pmData.macro && !pmData.customers)) {
-            pmData = JSON.parse(JSON.stringify(DEFAULT_PM));
+        if (!state.pmData || (!state.pmData.macro && !state.pmData.customers)) {
+            state.pmData = JSON.parse(JSON.stringify(DEFAULT_PM));
         }
-        window._budgetData = budgetCY;
 
-        fbSave('budget_cy26', budgetCY);
-        fbSave('budget_ny27', budgetNY);
-        fbSave('week_actuals_cy26', weekActuals);
-        fbSave('accounts_data', accountsData);
-        fbSave('pm_dlbooks', pmData);
+        fbSave('budget_cy26', state.budgetCY);
+        fbSave('budget_ny27', state.budgetNY);
+        fbSave('week_actuals_cy26', state.weekActuals);
+        fbSave('accounts_data', state.accountsData);
+        fbSave('pm_dlbooks', state.pmData);
         console.log('Default data pushed to Firebase.');
     }
 }

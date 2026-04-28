@@ -2,19 +2,21 @@
  * Budget data model, defaults, formatting helpers, and persistence.
  */
 
-const PAY_CYCLES = ['Weekly', 'Fortnightly', 'Monthly', 'Bi-Monthly', 'Quarterly', 'Bi-Annually', 'Annually'];
-const WEEKS_PER_YEAR = 52;
-const MONTHS_PER_YEAR = 12;
-const QUARTERS_PER_YEAR = 4;
+import { fbSave } from './firebase-sync.js';
 
-function getYearStart(year) {
+export const PAY_CYCLES = ['Weekly', 'Fortnightly', 'Monthly', 'Bi-Monthly', 'Quarterly', 'Bi-Annually', 'Annually'];
+export const WEEKS_PER_YEAR = 52;
+export const MONTHS_PER_YEAR = 12;
+export const QUARTERS_PER_YEAR = 4;
+
+export function getYearStart(year) {
     const jan1 = new Date(year, 0, 1);
     const day = jan1.getDay();
     const offset = day === 0 ? 1 : day === 1 ? 0 : 8 - day;
     return new Date(year, 0, 1 + offset);
 }
 
-function getWeekDates(year) {
+export function getWeekDates(year) {
     const start = getYearStart(year);
     const dates = [];
     for (let i = 0; i < 52; i++) {
@@ -25,7 +27,7 @@ function getWeekDates(year) {
     return dates;
 }
 
-function getCurrentWeekIndex(year) {
+export function getCurrentWeekIndex(year) {
     const dates = getWeekDates(year);
     const now = new Date();
     for (let i = dates.length - 1; i >= 0; i--) {
@@ -35,14 +37,14 @@ function getCurrentWeekIndex(year) {
 }
 
 // ── Conversion helpers ──
-function weeklyToMonthly(w) { return w * WEEKS_PER_YEAR / MONTHS_PER_YEAR; }
-function weeklyToQuarterly(w) { return w * WEEKS_PER_YEAR / QUARTERS_PER_YEAR; }
-function weeklyToAnnual(w) { return w * WEEKS_PER_YEAR; }
-function monthlyToWeekly(m) { return m * MONTHS_PER_YEAR / WEEKS_PER_YEAR; }
-function quarterlyToWeekly(q) { return q * QUARTERS_PER_YEAR / WEEKS_PER_YEAR; }
-function annualToWeekly(a) { return a / WEEKS_PER_YEAR; }
+export function weeklyToMonthly(w) { return w * WEEKS_PER_YEAR / MONTHS_PER_YEAR; }
+export function weeklyToQuarterly(w) { return w * WEEKS_PER_YEAR / QUARTERS_PER_YEAR; }
+export function weeklyToAnnual(w) { return w * WEEKS_PER_YEAR; }
+export function monthlyToWeekly(m) { return m * MONTHS_PER_YEAR / WEEKS_PER_YEAR; }
+export function quarterlyToWeekly(q) { return q * QUARTERS_PER_YEAR / WEEKS_PER_YEAR; }
+export function annualToWeekly(a) { return a / WEEKS_PER_YEAR; }
 
-function cycleToPeriodAmount(weekly, cycle) {
+export function cycleToPeriodAmount(weekly, cycle) {
     switch (cycle) {
         case 'Weekly': return weekly;
         case 'Fortnightly': return weekly * 2;
@@ -56,7 +58,7 @@ function cycleToPeriodAmount(weekly, cycle) {
 }
 
 /** Given a cycle and an amount in that cycle's period, return weekly equivalent */
-function periodToWeekly(amount, cycle) {
+export function periodToWeekly(amount, cycle) {
     switch (cycle) {
         case 'Weekly': return amount;
         case 'Fortnightly': return amount / 2;
@@ -71,38 +73,38 @@ function periodToWeekly(amount, cycle) {
 
 // ── Currency formatting (accounting style, monospace-padded) ──
 // Pad numbers to fixed width so $ and digits align in any cell width.
-// Uses \u00A0 (non-breaking space) so HTML won't collapse them.
+// Uses   (non-breaking space) so HTML won't collapse them.
 
-const NBSP = '\u00A0';
-const NUM_WIDTH = 12; // enough for "999,999.99" with commas
+export const NBSP = '\u00A0';
+export const NUM_WIDTH = 12; // enough for "999,999.99" with commas
 
-function fmtNum(n) {
+export function fmtNum(n) {
     if (n === 0) return '-';
     return Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function padNum(s) {
+export function padNum(s) {
     while (s.length < NUM_WIDTH) s = NBSP + s;
     return s;
 }
 
-function fmt(n) {
+export function fmt(n) {
     return '$' + padNum(fmtNum(n));
 }
 
-function fmtSigned(n) {
+export function fmtSigned(n) {
     if (n < 0) return '-$' + padNum(fmtNum(n));
     return NBSP + '$' + padNum(fmtNum(n));
 }
 
 /** For input values — no padding, just clean display */
-function fmtPlain(n) {
+export function fmtPlain(n) {
     if (n === 0) return '$-';
     return '$' + fmtNum(n);
 }
 
 /** Parse "$1,234.56" or "1234.56" or "$ -" back to number */
-function parseCurrency(str) {
+export function parseCurrency(str) {
     if (typeof str === 'number') return str;
     const cleaned = String(str).replace(/[^0-9.\-]/g, '');
     return cleaned === '' ? 0 : parseFloat(cleaned) || 0;
@@ -115,7 +117,7 @@ function parseCurrency(str) {
  *
  * Each revision: { fromDate: 'YYYY-MM-DD', weekly: number, reason: string }
  */
-function getEffectiveWeekly(item, date) {
+export function getEffectiveWeekly(item, date) {
     if (!item.revisions || item.revisions.length === 0) return item.weekly;
     let effective = item.weekly;
     for (const rev of item.revisions) {
@@ -127,20 +129,20 @@ function getEffectiveWeekly(item, date) {
 }
 
 /** Get the current effective weekly (latest revision or base) */
-function getCurrentWeekly(item) {
+export function getCurrentWeekly(item) {
     return getEffectiveWeekly(item, new Date());
 }
 
 /** Ensure items have comment and revisions fields */
-function migrateItem(item) {
+export function migrateItem(item) {
     if (!item.comment && item.comment !== '') item.comment = '';
     if (!item.revisions) item.revisions = [];
     return item;
 }
-const migrateOutgoing = migrateItem;
+export const migrateOutgoing = migrateItem;
 
 /** Migrate old flat contributions object to new array format */
-function migrateBudget(data) {
+export function migrateBudget(data) {
     data.outgoings.forEach(migrateItem);
     data.income.forEach(migrateItem);
 
@@ -164,7 +166,7 @@ function migrateBudget(data) {
 
 // ── Default budget data ──
 
-function makeDefaultBudget(year) {
+export function makeDefaultBudget(year) {
     const y = String(year);
     const jan = y + '-01-', feb = y + '-02-', mar = y + '-03-', apr = y + '-04-';
     const jun = y + '-06-', jul = y + '-07-', aug = y + '-08-', nov = y + '-11-', dec = y + '-12-';
@@ -241,11 +243,17 @@ function makeDefaultBudget(year) {
     };
 }
 
-const DEFAULT_CY = makeDefaultBudget(2026);
-const DEFAULT_NY = makeDefaultBudget(2027);
+export const DEFAULT_CY = makeDefaultBudget(2026);
+export const DEFAULT_NY = makeDefaultBudget(2027);
 
 // ── Persistence ──
-function loadData(key) {
+//
+// Save functions always write to localStorage AND conditionally push to
+// Firebase via fbSave (which checks `useFirebase && currentUser` itself).
+// This replaces the old patchSaveFunctions reassignment trick — ES module
+// bindings are read-only, so we can't swap the function impl after sign-in.
+
+export function loadData(key) {
     const saved = localStorage.getItem(key);
     if (saved) {
         try { return JSON.parse(saved); } catch (e) { console.error('Parse error', e); }
@@ -253,19 +261,27 @@ function loadData(key) {
     return null;
 }
 
-function loadBudgetCY() {
+export function loadBudgetCY() {
     return migrateBudget(loadData('budget_cy26') || JSON.parse(JSON.stringify(DEFAULT_CY)));
 }
-function loadBudgetNY() {
+export function loadBudgetNY() {
     return migrateBudget(loadData('budget_ny27') || JSON.parse(JSON.stringify(DEFAULT_NY)));
 }
-function loadWeekActuals() { return loadData('week_actuals_cy26') || {}; }
+export function loadWeekActuals() { return loadData('week_actuals_cy26') || {}; }
 
-function saveBudgetCY(data) { localStorage.setItem('budget_cy26', JSON.stringify(data)); showToast('Saved'); }
-function saveBudgetNY(data) { localStorage.setItem('budget_ny27', JSON.stringify(data)); showToast('Saved'); }
-function saveWeekActuals(data) { localStorage.setItem('week_actuals_cy26', JSON.stringify(data)); }
+export function saveBudgetCY(data) {
+    fbSave('budget_cy26', data);
+    showToast('Saved');
+}
+export function saveBudgetNY(data) {
+    fbSave('budget_ny27', data);
+    showToast('Saved');
+}
+export function saveWeekActuals(data) {
+    fbSave('week_actuals_cy26', data);
+}
 
-function showToast(msg) {
+export function showToast(msg) {
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.classList.add('show');

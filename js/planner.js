@@ -2,12 +2,18 @@
  * Planner — week-by-week confirmation & reconciliation view.
  */
 
+import {
+    getWeekDates, getCurrentWeekIndex, getEffectiveWeekly, cycleToPeriodAmount,
+    fmt, fmtPlain, fmtSigned,
+} from './data.js';
+import { state } from './state.js';
+
 let currentWeekIdx = 0;
 let realCurrentWeek = 0;
-let weekDates = [];
-let allSchedules = null;
+export let weekDates = [];
+export let allSchedules = null;
 
-function initPlanner(budgetData, weekActuals) {
+export function initPlanner(budgetData, weekActuals) {
     const year = budgetData.year || 2026;
     weekDates = getWeekDates(year);
     realCurrentWeek = getCurrentWeekIndex(year);
@@ -42,7 +48,7 @@ function onWeekChange(budgetData, weekActuals) {
 
 // ── Schedule computation ──
 
-function calcPaymentSchedule(item, weekDates) {
+export function calcPaymentSchedule(item, weekDates) {
     const payments = new Array(52).fill(0);
     const firstPay = new Date(item.firstPayment + 'T00:00:00');
     const year = weekDates[0].getFullYear();
@@ -156,7 +162,7 @@ function computeYtdVariance(itemName, type, upToWeek, schedules, weekActuals) {
 
 // ── Week strip (52 mini cells) ──
 
-function buildWeekStrip(weekActuals) {
+export function buildWeekStrip(weekActuals) {
     const strip = document.getElementById('week-strip');
     strip.innerHTML = '';
     for (let w = 0; w < 52; w++) {
@@ -171,7 +177,7 @@ function buildWeekStrip(weekActuals) {
 
         cell.onclick = () => {
             currentWeekIdx = w;
-            onWeekChange(window._budgetData, weekActuals);
+            onWeekChange(state.budgetCY, weekActuals);
         };
         strip.appendChild(cell);
     }
@@ -219,7 +225,7 @@ function buildWeekSelector() {
 
 // ── Render a single week ──
 
-function renderWeek(budgetData, weekActuals) {
+export function renderWeek(budgetData, weekActuals) {
     const w = currentWeekIdx;
     const isCurrentWeek = (w === realCurrentWeek);
     const isPast = (w < realCurrentWeek);

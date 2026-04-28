@@ -2,7 +2,10 @@
  * Accounts dashboard — all bank, investment, and super accounts.
  */
 
-const DEFAULT_ACCOUNTS = {
+import { fmt, fmtPlain, fmtSigned, showToast } from './data.js';
+import { fbSave } from './firebase-sync.js';
+
+export const DEFAULT_ACCOUNTS = {
     banking: [
         { id: 'hsbc-ppr', bank: 'HSBC', name: 'Mortgage PPR (Redraw)', desc: 'Primary family account. Available redraw offsets home loan.', balance: 161606.99, type: 'offset' },
         { id: 'hsbc-inv', bank: 'HSBC', name: 'Mortgages - Investments', desc: '4 mortgage accounts: Cranbourne, Mentone, Cranbourne 2, Stock Assets.', balance: 0, type: 'liability' },
@@ -22,7 +25,7 @@ const DEFAULT_ACCOUNTS = {
     ],
 };
 
-function loadAccounts() {
+export function loadAccounts() {
     const saved = localStorage.getItem('accounts_data');
     if (saved) {
         try { return JSON.parse(saved); } catch (e) {}
@@ -30,12 +33,12 @@ function loadAccounts() {
     return JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
 }
 
-function saveAccounts(data) {
-    localStorage.setItem('accounts_data', JSON.stringify(data));
+export function saveAccounts(data) {
+    fbSave('accounts_data', data);
     showToast('Saved');
 }
 
-function renderAccountsTab(accounts) {
+export function renderAccountsTab(accounts) {
     const container = document.getElementById('accounts-content');
 
     let totalAssets = 0;

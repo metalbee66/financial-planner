@@ -1,21 +1,29 @@
 /**
  * PM DLBooks — project management for DLBooks bookkeeping & business solutions.
+ *
+ * NOTE: This module is being retired in Phase 8 of the v2.0.0 restructure;
+ * its data will be migrated into the new Projects module. Kept unchanged
+ * (apart from ES-module wiring) until that migration runs.
  */
 
-const PM_STATUSES = [
+import { showToast } from './data.js';
+import { fbSave } from './firebase-sync.js';
+import { state } from './state.js';
+
+export const PM_STATUSES = [
     { value: 'not-started', label: 'Not Started' },
     { value: 'in-progress', label: 'In Progress' },
     { value: 'done',        label: 'Done' },
     { value: 'blocked',     label: 'Blocked' }
 ];
 
-const PM_ASSIGNEES = [
+export const PM_ASSIGNEES = [
     { value: 'brad',  label: 'Brad' },
     { value: 'diana', label: 'Diana' },
     { value: 'both',  label: 'Both' }
 ];
 
-const DEFAULT_PM = {
+export const DEFAULT_PM = {
     macro: [
         { id: 'macro-1', name: 'Migrate from GoogleSheets to SharePoint', status: 'not-started', assignee: 'both', notes: '', createdAt: '2026-03-26' },
         { id: 'macro-2', name: 'Build CRM module',                       status: 'not-started', assignee: 'both', notes: '', createdAt: '2026-03-26' }
@@ -35,7 +43,7 @@ const DEFAULT_PM = {
 
 function generatePMId(prefix) { return prefix + '-' + Date.now(); }
 
-function loadPM() {
+export function loadPM() {
     const raw = localStorage.getItem('pm_dlbooks');
     if (raw) {
         try {
@@ -46,10 +54,10 @@ function loadPM() {
     return JSON.parse(JSON.stringify(DEFAULT_PM));
 }
 
-let savePM = function(data) {
-    localStorage.setItem('pm_dlbooks', JSON.stringify(data));
+export function savePM(data) {
+    fbSave('pm_dlbooks', data);
     showToast('Saved');
-};
+}
 
 // ── Rendering ──
 
@@ -106,7 +114,7 @@ function summaryBar(tasks) {
     return `<div class="pm-summary-bar">${total} task${total !== 1 ? 's' : ''} &nbsp; ${parts}</div>`;
 }
 
-function renderPMTab(data) {
+export function renderPMTab(data) {
     const el = document.getElementById('pm-content');
     if (!el) return;
 
@@ -178,12 +186,13 @@ function reopenDetail(taskId) {
 
 // ── Event handling ──
 
-function setupPMEditing() {
+export function setupPMEditing() {
     const container = document.getElementById('pm-dlbooks');
     if (!container) return;
 
     container.addEventListener('click', (e) => {
         const target = e.target;
+        const pmData = state.pmData;
 
         // Expand / collapse
         if (target.classList.contains('pm-expand')) {
@@ -322,6 +331,7 @@ function setupPMEditing() {
         const target = e.target;
         const { section, id } = target.dataset;
         const custId = target.dataset.cust;
+        const pmData = state.pmData;
 
         if (target.classList.contains('pm-status-select')) {
             const task = findTask(pmData, section, id, custId);
@@ -341,6 +351,7 @@ function setupPMEditing() {
         const target = e.target;
         const { section, id } = target.dataset;
         const custId = target.dataset.cust;
+        const pmData = state.pmData;
 
         if (target.classList.contains('pm-notes')) {
             const task = findTask(pmData, section, id, custId);

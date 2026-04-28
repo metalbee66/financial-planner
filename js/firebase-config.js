@@ -2,7 +2,7 @@
  * Firebase configuration.
  */
 
-const FIREBASE_CONFIG = {
+export const FIREBASE_CONFIG = {
     apiKey: "AIzaSyB3Ec_tkkgmjLKYiQRczpaio3o3-VkuKX4",
     authDomain: "financial-planner-e85d4.firebaseapp.com",
     databaseURL: "https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -14,7 +14,7 @@ const FIREBASE_CONFIG = {
 
 // Allowed Google emails — only these can sign in
 // Add your and Diana's Gmail addresses here
-const ALLOWED_EMAILS = [
+export const ALLOWED_EMAILS = [
     "metalbee66@gmail.com",
     "dianaleshcheva@gmail.com",
 ];

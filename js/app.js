@@ -2,21 +2,45 @@
  * App controller — tabs, editing, planner interaction, Firebase bootstrap.
  */
 
-let budgetCY, budgetNY, weekActuals, accountsData, pmData;
+import {
+    loadBudgetCY, loadBudgetNY, loadWeekActuals,
+    saveBudgetCY, saveBudgetNY, saveWeekActuals,
+    parseCurrency, fmtPlain, monthlyToWeekly, quarterlyToWeekly, annualToWeekly,
+    migrateItem, getCurrentWeekly, showToast,
+} from './data.js';
+import {
+    initFirebase, getFirebaseAuth, setCurrentUser, signInWithGoogle, signOut,
+    showLoginScreen, showApp, initialSync, setupRealtimeListeners,
+    registerRenderHooks,
+} from './firebase-sync.js';
+import { ALLOWED_EMAILS } from './firebase-config.js';
+import { state } from './state.js';
+import { renderBudgetTab } from './budget.js';
+import { initPlanner, buildWeekStrip, renderWeek, allSchedules } from './planner.js';
+import { renderAccountsTab, loadAccounts, saveAccounts } from './accounts.js';
+import {
+    loadGlMappings, saveGlMappings, loadStoredHashes,
+    parseNabCsv, autoSuggest, getAllLineNames,
+    renderImportTab, renderMappings, applyToPlanner,
+} from './import.js';
+import { renderPMTab, loadPM, setupPMEditing } from './pm.js';
+
+// Wire render hooks into firebase-sync so its real-time listeners can re-render
+registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderPMTab });
 
 document.addEventListener('DOMContentLoaded', async () => {
     // Load from localStorage first (instant render)
-    budgetCY = loadBudgetCY();
-    budgetNY = loadBudgetNY();
-    weekActuals = loadWeekActuals();
-    accountsData = loadAccounts();
-    pmData = loadPM();
-    window._budgetData = budgetCY;
+    state.budgetCY = loadBudgetCY();
+    state.budgetNY = loadBudgetNY();
+    state.weekActuals = loadWeekActuals();
+    state.accountsData = loadAccounts();
+    state.pmData = loadPM();
 
     // Try Firebase
     const fbReady = await initFirebase();
 
     if (fbReady) {
+        const firebaseAuth = getFirebaseAuth();
         // Set up auth listener
         firebaseAuth.onAuthStateChanged(async (user) => {
             if (user) {
@@ -26,13 +50,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     showLoginScreen();
                     return;
                 }
-                currentUser = user;
+                setCurrentUser(user);
                 document.getElementById('sign-out-btn').style.display = '';
                 showApp();
 
                 // Sync data from Firebase
                 await initialSync();
-                patchSaveFunctions();
                 renderAll();
                 setupRealtimeListeners();
             } else {
@@ -49,12 +72,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Load GL mappings and stored transaction hashes
-    glMappings = loadGlMappings();
-    storedTransactionHashes = loadStoredHashes();
+    state.glMappings = loadGlMappings();
+    state.storedTransactionHashes = loadStoredHashes();
 
     setupTabs();
-    setupBudgetEditing('budget-cy', 'cy-', budgetCY, saveBudgetCY);
-    setupBudgetEditing('budget-ny', 'ny-', budgetNY, saveBudgetNY);
+    setupBudgetEditing('budget-cy', 'cy-', state.budgetCY, saveBudgetCY);
+    setupBudgetEditing('budget-ny', 'ny-', state.budgetNY, saveBudgetNY);
     setupPlannerEditing();
     setupAccountsEditing();
     setupImport();
@@ -62,11 +85,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function renderAll() {
-    renderBudgetTab(budgetCY, 'cy-');
-    renderBudgetTab(budgetNY, 'ny-');
-    initPlanner(budgetCY, weekActuals);
-    renderAccountsTab(accountsData);
-    renderPMTab(pmData);
+    renderBudgetTab(state.budgetCY, 'cy-');
+    renderBudgetTab(state.budgetNY, 'ny-');
+    initPlanner(state.budgetCY, state.weekActuals);
+    renderAccountsTab(state.accountsData);
+    renderPMTab(state.pmData);
 }
 
 // ── Tab switching ──
@@ -79,17 +102,16 @@ function setupTabs() {
             document.getElementById(btn.dataset.tab).classList.add('active');
 
             if (btn.dataset.tab === 'planner') {
-                window._budgetData = budgetCY;
-                initPlanner(budgetCY, weekActuals);
+                initPlanner(state.budgetCY, state.weekActuals);
             }
             if (btn.dataset.tab === 'accounts') {
-                renderAccountsTab(accountsData);
+                renderAccountsTab(state.accountsData);
             }
             if (btn.dataset.tab === 'import') {
-                renderMappings(glMappings, budgetCY);
+                renderMappings(state.glMappings, state.budgetCY);
             }
             if (btn.dataset.tab === 'pm-dlbooks') {
-                renderPMTab(pmData);
+                renderPMTab(state.pmData);
             }
         });
     });
@@ -298,7 +320,7 @@ function setupPlannerEditing() {
     // Primary account balance input
     planner.addEventListener('focus', (e) => {
         if (e.target.id === 'primary-acct-balance') {
-            e.target.value = budgetCY.primaryAccountBalance || 0;
+            e.target.value = state.budgetCY.primaryAccountBalance || 0;
             e.target.select();
         }
     }, true);
@@ -307,10 +329,10 @@ function setupPlannerEditing() {
         if (e.target.id === 'primary-acct-balance') {
             const val = parseCurrency(e.target.value);
             e.target.value = fmtPlain(val);
-            budgetCY.primaryAccountBalance = val;
-            saveBudgetCY(budgetCY);
-            renderWeek(budgetCY, weekActuals);
-            buildWeekStrip(weekActuals);
+            state.budgetCY.primaryAccountBalance = val;
+            saveBudgetCY(state.budgetCY);
+            renderWeek(state.budgetCY, state.weekActuals);
+            buildWeekStrip(state.weekActuals);
         }
     }, true);
 
@@ -333,7 +355,7 @@ function setupPlannerEditing() {
             const expected = parseFloat(e.target.dataset.expected);
 
             ensureWeekActual(weekIdx);
-            const bucket = weekActuals[weekIdx][type];
+            const bucket = state.weekActuals[weekIdx][type];
             if (!bucket[itemName]) {
                 bucket[itemName] = { actual: val, status: 'pending', comment: '' };
             } else {
@@ -347,9 +369,9 @@ function setupPlannerEditing() {
                 bucket[itemName].status = 'adjusted';
             }
 
-            saveWeekActuals(weekActuals);
-            renderWeek(budgetCY, weekActuals);
-            buildWeekStrip(weekActuals);
+            saveWeekActuals(state.weekActuals);
+            renderWeek(state.budgetCY, state.weekActuals);
+            buildWeekStrip(state.weekActuals);
         }
     }, true);
 
@@ -361,14 +383,14 @@ function setupPlannerEditing() {
             const weekIdx = parseInt(e.target.dataset.week);
 
             ensureWeekActual(weekIdx);
-            const bucket = weekActuals[weekIdx][type];
+            const bucket = state.weekActuals[weekIdx][type];
             if (!bucket[itemName]) {
                 const expected = 0;
                 bucket[itemName] = { actual: expected, status: 'pending', comment: e.target.value };
             } else {
                 bucket[itemName].comment = e.target.value;
             }
-            saveWeekActuals(weekActuals);
+            saveWeekActuals(state.weekActuals);
         }
     }, true);
 
@@ -382,7 +404,7 @@ function setupPlannerEditing() {
         const weekIdx = parseInt(btn.dataset.week);
 
         ensureWeekActual(weekIdx);
-        const bucket = weekActuals[weekIdx][type];
+        const bucket = state.weekActuals[weekIdx][type];
 
         // Find expected amount
         const allItems = [...allSchedules.primary, ...allSchedules.secondary, ...allSchedules.contributions];
@@ -399,18 +421,18 @@ function setupPlannerEditing() {
             }
         }
 
-        saveWeekActuals(weekActuals);
-        renderWeek(budgetCY, weekActuals);
-        buildWeekStrip(weekActuals);
+        saveWeekActuals(state.weekActuals);
+        renderWeek(state.budgetCY, state.weekActuals);
+        buildWeekStrip(state.weekActuals);
     });
 }
 
 function ensureWeekActual(weekIdx) {
-    if (!weekActuals[weekIdx]) {
-        weekActuals[weekIdx] = { items: {}, contributions: {} };
+    if (!state.weekActuals[weekIdx]) {
+        state.weekActuals[weekIdx] = { items: {}, contributions: {} };
     }
-    if (!weekActuals[weekIdx].items) weekActuals[weekIdx].items = {};
-    if (!weekActuals[weekIdx].contributions) weekActuals[weekIdx].contributions = {};
+    if (!state.weekActuals[weekIdx].items) state.weekActuals[weekIdx].items = {};
+    if (!state.weekActuals[weekIdx].contributions) state.weekActuals[weekIdx].contributions = {};
 }
 
 // ── Accounts editing ──
@@ -421,7 +443,7 @@ function setupAccountsEditing() {
         if (e.target.classList.contains('account-balance-input')) {
             const sec = e.target.dataset.section;
             const idx = parseInt(e.target.dataset.index);
-            e.target.value = accountsData[sec][idx].balance;
+            e.target.value = state.accountsData[sec][idx].balance;
             e.target.select();
         }
     }, true);
@@ -431,21 +453,25 @@ function setupAccountsEditing() {
             const val = parseCurrency(e.target.value);
             const sec = e.target.dataset.section;
             const idx = parseInt(e.target.dataset.index);
-            accountsData[sec][idx].balance = val;
+            state.accountsData[sec][idx].balance = val;
             e.target.value = fmtPlain(val);
-            saveAccounts(accountsData);
-            renderAccountsTab(accountsData);
+            saveAccounts(state.accountsData);
+            renderAccountsTab(state.accountsData);
 
             // Sync HSBC PPR balance to budget primary account
-            if (accountsData[sec][idx].id === 'hsbc-ppr') {
-                budgetCY.primaryAccountBalance = val;
-                saveBudgetCY(budgetCY);
+            if (state.accountsData[sec][idx].id === 'hsbc-ppr') {
+                state.budgetCY.primaryAccountBalance = val;
+                saveBudgetCY(state.budgetCY);
             }
         }
     }, true);
 }
 
 // ── Import ──
+
+// Module-level so updateImportCounts (also in this file) can call it.
+let applyImportFilters = null;
+
 function setupImport() {
     const section = document.getElementById('import');
 
@@ -457,13 +483,13 @@ function setupImport() {
         const reader = new FileReader();
         reader.onload = (evt) => {
             try {
-                importedTransactions = parseNabCsv(evt.target.result);
-                const allLines = getAllLineNames(budgetCY);
-                const dupCount = autoSuggest(importedTransactions, glMappings, allLines, storedTransactionHashes);
-                renderImportTab(importedTransactions, budgetCY, dupCount);
+                state.importedTransactions = parseNabCsv(evt.target.result);
+                const allLines = getAllLineNames(state.budgetCY);
+                const dupCount = autoSuggest(state.importedTransactions, state.glMappings, allLines, state.storedTransactionHashes);
+                renderImportTab(state.importedTransactions, state.budgetCY, dupCount);
                 const msg = dupCount > 0
-                    ? `${importedTransactions.length} transactions loaded (${dupCount} duplicates)`
-                    : `${importedTransactions.length} transactions loaded`;
+                    ? `${state.importedTransactions.length} transactions loaded (${dupCount} duplicates)`
+                    : `${state.importedTransactions.length} transactions loaded`;
                 showToast(msg);
             } catch (err) {
                 console.error('CSV parse error:', err);
@@ -500,22 +526,22 @@ function setupImport() {
         if (e.target.classList.contains('gl-select')) {
             const idx = parseInt(e.target.dataset.txIndex);
             const line = e.target.value;
-            const tx = importedTransactions[idx];
+            const tx = state.importedTransactions[idx];
             tx.glLine = line;
 
             // If remember checkbox is checked, save the mapping
             const row = e.target.closest('tr');
             const checkbox = row ? row.querySelector('.remember-check') : null;
             if (checkbox && checkbox.checked && line && line !== '' && line !== '-- Ignore --' && line !== '-- Other --') {
-                glMappings[tx.merchant] = line;
+                state.glMappings[tx.merchant] = line;
                 // Apply to all unassigned with same merchant
-                importedTransactions.forEach(t => {
+                state.importedTransactions.forEach(t => {
                     if (t.merchant === tx.merchant && !t.glLine) {
                         t.glLine = line;
                     }
                 });
-                saveGlMappings(glMappings);
-                renderMappings(glMappings, budgetCY);
+                saveGlMappings(state.glMappings);
+                renderMappings(state.glMappings, state.budgetCY);
             }
 
             updateImportCounts();
@@ -524,26 +550,26 @@ function setupImport() {
         // Remember checkbox toggled
         if (e.target.classList.contains('remember-check')) {
             const idx = parseInt(e.target.dataset.txIndex);
-            const tx = importedTransactions[idx];
+            const tx = state.importedTransactions[idx];
             if (e.target.checked && tx.glLine && tx.glLine !== '' && tx.glLine !== '-- Ignore --' && tx.glLine !== '-- Other --') {
-                glMappings[tx.merchant] = tx.glLine;
-                importedTransactions.forEach(t => {
+                state.glMappings[tx.merchant] = tx.glLine;
+                state.importedTransactions.forEach(t => {
                     if (t.merchant === tx.merchant && !t.glLine) {
                         t.glLine = tx.glLine;
                     }
                 });
-                saveGlMappings(glMappings);
+                saveGlMappings(state.glMappings);
             } else if (!e.target.checked) {
-                delete glMappings[tx.merchant];
-                saveGlMappings(glMappings);
+                delete state.glMappings[tx.merchant];
+                saveGlMappings(state.glMappings);
             }
-            renderMappings(glMappings, budgetCY);
+            renderMappings(state.glMappings, state.budgetCY);
             updateImportCounts();
         }
     });
 
-    // Combined filter + search (global so updateImportCounts can call it)
-    window.applyImportFilters = function() {
+    // Combined filter + search
+    applyImportFilters = function() {
         const activeBtn = section.querySelector('.import-filter-btn.active');
         const groupFilter = activeBtn ? activeBtn.dataset.filter : 'all';
         const searchEl = document.getElementById('import-search');
@@ -575,7 +601,7 @@ function setupImport() {
             row.style.display = show ? '' : 'none';
             if (show) visible++;
         });
-    }
+    };
 
     // Filter buttons
     section.addEventListener('click', (e) => {
@@ -590,21 +616,21 @@ function setupImport() {
         const delMap = e.target.closest('.mapping-delete');
         if (delMap) {
             const merchant = delMap.dataset.merchant;
-            delete glMappings[merchant];
-            saveGlMappings(glMappings);
-            renderMappings(glMappings, budgetCY);
+            delete state.glMappings[merchant];
+            saveGlMappings(state.glMappings);
+            renderMappings(state.glMappings, state.budgetCY);
             showToast('Mapping removed');
         }
 
         // Apply to planner
         if (e.target.id === 'apply-to-planner') {
-            if (importedTransactions.length === 0) return;
-            const unassigned = importedTransactions.filter(tx => !tx.glLine);
+            if (state.importedTransactions.length === 0) return;
+            const unassigned = state.importedTransactions.filter(tx => !tx.glLine);
             if (unassigned.length > 0) {
                 if (!confirm(`${unassigned.length} transactions are still unassigned. Apply assigned ones anyway?`)) return;
             }
-            weekActuals = applyToPlanner(importedTransactions, weekActuals);
-            saveWeekActuals(weekActuals);
+            state.weekActuals = applyToPlanner(state.importedTransactions, state.weekActuals);
+            saveWeekActuals(state.weekActuals);
             showToast('Applied to planner');
         }
     });
@@ -620,29 +646,29 @@ function updateImportCounts() {
         const select = row.querySelector('.gl-select');
         if (!select) return;
         const idx = parseInt(select.dataset.txIndex);
-        const tx = importedTransactions[idx];
+        const tx = state.importedTransactions[idx];
         const group = tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned';
         row.dataset.filterGroup = group;
         row.dataset.glLine = tx.glLine || '';
     });
 
     // Update count badges
-    const unassigned = importedTransactions.filter(tx => !tx.glLine).length;
-    const assigned = importedTransactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --').length;
-    const ignored = importedTransactions.filter(tx => tx.glLine === '-- Ignore --').length;
+    const unassigned = state.importedTransactions.filter(tx => !tx.glLine).length;
+    const assigned = state.importedTransactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --').length;
+    const ignored = state.importedTransactions.filter(tx => tx.glLine === '-- Ignore --').length;
 
     const buttons = section.querySelectorAll('.import-filter-btn');
     buttons.forEach(btn => {
         const f = btn.dataset.filter;
-        if (f === 'all') btn.textContent = `All (${importedTransactions.length})`;
+        if (f === 'all') btn.textContent = `All (${state.importedTransactions.length})`;
         if (f === 'unassigned') btn.textContent = `Unassigned (${unassigned})`;
         if (f === 'assigned') btn.textContent = `Assigned (${assigned})`;
         if (f === 'ignored') btn.textContent = `Ignored (${ignored})`;
     });
 
     // Re-apply combined filters
-    if (window.applyImportFilters) {
-        window.applyImportFilters();
+    if (applyImportFilters) {
+        applyImportFilters();
         return;
     }
     const activeFilter = section.querySelector('.import-filter-btn.active')?.dataset.filter || 'unassigned';
@@ -655,3 +681,4 @@ function updateImportCounts() {
         }
     });
 }
+

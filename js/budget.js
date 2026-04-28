@@ -2,7 +2,13 @@
  * Budget tab rendering — parameterised by year key prefix.
  */
 
-function renderBudgetTab(data, prefix) {
+import {
+    PAY_CYCLES, fmt, fmtPlain, fmtSigned,
+    weeklyToMonthly, weeklyToQuarterly, weeklyToAnnual,
+    getCurrentWeekly, migrateBudget, migrateItem,
+} from './data.js';
+
+export function renderBudgetTab(data, prefix) {
     migrateBudget(data);
     renderIncome(data, prefix);
     renderBonuses(data, prefix);

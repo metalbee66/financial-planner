@@ -2,32 +2,30 @@
  * Transaction import — parse CSV, present for review, assign to budget GL lines.
  */
 
-let importedTransactions = [];
-let glMappings = {};
-let storedTransactionHashes = new Set();
+import { getWeekDates, fmtPlain } from './data.js';
+import { fbSave } from './firebase-sync.js';
+import { state } from './state.js';
 
-function loadGlMappings() {
+export function loadGlMappings() {
     const saved = localStorage.getItem('gl_mappings');
     if (saved) try { return JSON.parse(saved); } catch(e) {}
     return {};
 }
 
-function saveGlMappings(m) {
-    glMappings = m;
-    localStorage.setItem('gl_mappings', JSON.stringify(m));
-    if (typeof fbSave === 'function') fbSave('gl_mappings', m);
+export function saveGlMappings(m) {
+    state.glMappings = m;
+    fbSave('gl_mappings', m);
 }
 
-function loadStoredHashes() {
+export function loadStoredHashes() {
     const saved = localStorage.getItem('imported_tx_hashes');
     if (saved) try { return new Set(JSON.parse(saved)); } catch(e) {}
     return new Set();
 }
 
-function saveStoredHashes(hashes) {
-    storedTransactionHashes = hashes;
-    localStorage.setItem('imported_tx_hashes', JSON.stringify([...hashes]));
-    if (typeof fbSave === 'function') fbSave('imported_tx_hashes', [...hashes]);
+export function saveStoredHashes(hashes) {
+    state.storedTransactionHashes = hashes;
+    fbSave('imported_tx_hashes', [...hashes]);
 }
 
 /** Create a hash to identify a unique transaction */
@@ -38,7 +36,7 @@ function txHash(tx) {
 /**
  * Parse NAB credit card CSV.
  */
-function parseNabCsv(text) {
+export function parseNabCsv(text) {
     const lines = text.split('\n');
     const transactions = [];
 
@@ -150,7 +148,7 @@ function buildGlOptions(data, selectedLine) {
 }
 
 /** Get all valid budget line names (flat list for matching) */
-function getAllLineNames(data) {
+export function getAllLineNames(data) {
     const lines = [];
     if (data && data.outgoings) data.outgoings.forEach(item => lines.push(item.name));
     lines.push('Personal - Brad', 'Personal - Diana', '-- Ignore --', '-- Other --');
@@ -186,7 +184,7 @@ function suggestGlLine(tx, mappings, allLines) {
 }
 
 /** Auto-suggest and mark duplicates */
-function autoSuggest(transactions, mappings, allLines, storedHashes) {
+export function autoSuggest(transactions, mappings, allLines, storedHashes) {
     let dupCount = 0;
     transactions.forEach(tx => {
         tx.glLine = suggestGlLine(tx, mappings, allLines);
@@ -202,7 +200,7 @@ function autoSuggest(transactions, mappings, allLines, storedHashes) {
 }
 
 /** Render the import tab */
-function renderImportTab(transactions, budgetData, dupCount) {
+export function renderImportTab(transactions, budgetData, dupCount) {
     const preview = document.getElementById('import-preview');
     if (!transactions || transactions.length === 0) {
         preview.innerHTML = '<p class="dim">No transactions loaded. Upload a CSV file above.</p>';
@@ -262,7 +260,7 @@ function renderImportTab(transactions, budgetData, dupCount) {
             <td class="import-amount ${tx.isRefund ? 'positive' : 'negative'}">${tx.isRefund ? '+' : ''}${fmtPlain(tx.amount)}</td>
             <td class="import-category">${tx.category}</td>
             <td>${tx.isDuplicate ? '<span class="dim">Duplicate</span>' : '<select class="gl-select" data-tx-index="' + globalIdx + '">' + buildGlOptions(budgetData, tx.glLine) + '</select>'}</td>
-            <td>${tx.isDuplicate ? '' : '<input type="checkbox" class="remember-check" data-tx-index="' + globalIdx + '" ' + (glMappings[tx.merchant] ? 'checked' : '') + ' title="Remember ' + tx.merchant + '">'}</td>
+            <td>${tx.isDuplicate ? '' : '<input type="checkbox" class="remember-check" data-tx-index="' + globalIdx + '" ' + (state.glMappings[tx.merchant] ? 'checked' : '') + ' title="Remember ' + tx.merchant + '">'}</td>
         </tr>`;
     });
 
@@ -285,7 +283,7 @@ function buildSourceFilterOptions(transactions) {
 }
 
 /** Render stored merchant→budget line mappings grouped by budget line */
-function renderMappings(mappings, budgetData) {
+export function renderMappings(mappings, budgetData) {
     const container = document.getElementById('mappings-content');
     if (!container) return;
 
@@ -350,7 +348,7 @@ function groupByLineAndWeek(transactions) {
 }
 
 /** Apply grouped transactions to weekActuals and store hashes */
-function applyToPlanner(transactions, weekActuals) {
+export function applyToPlanner(transactions, weekActuals) {
     const groups = groupByLineAndWeek(transactions);
 
     for (const [lineName, weeks] of Object.entries(groups)) {
@@ -376,7 +374,7 @@ function applyToPlanner(transactions, weekActuals) {
     }
 
     // Store transaction hashes to prevent future duplicates
-    const newHashes = new Set(storedTransactionHashes);
+    const newHashes = new Set(state.storedTransactionHashes);
     transactions.forEach(tx => {
         if (!tx.isDuplicate && tx.glLine && tx.glLine !== '-- Ignore --') {
             newHashes.add(txHash(tx));
