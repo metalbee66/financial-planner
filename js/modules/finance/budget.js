@@ -5,8 +5,10 @@
 import {
     PAY_CYCLES, fmt, fmtPlain, fmtSigned,
     weeklyToMonthly, weeklyToQuarterly, weeklyToAnnual,
+    monthlyToWeekly, quarterlyToWeekly, annualToWeekly,
     getCurrentWeekly, migrateBudget, migrateItem,
-} from './data.js';
+    parseCurrency,
+} from '../../data.js';
 
 export function renderBudgetTab(data, prefix) {
     migrateBudget(data);
@@ -293,6 +295,198 @@ function setTotals(idPrefix, values, colorClass) {
             td.className = colorClass || '';
         }
     });
+}
+
+// ── Editing wiring (moved from app.js during module-shell refactor) ──
+
+/** Resolve the data array from a section name */
+function getSection(data, sectionName) {
+    return data[sectionName]; // 'income', 'outgoings', 'contributionItems'
+}
+
+export function setupBudgetEditing(sectionId, prefix, data, saveFn) {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+
+    // Helper to re-open a detail row after re-render
+    function reopenDetail(sec, idx) {
+        const row = document.getElementById(`${prefix}${sec}-detail-${idx}`);
+        if (row) row.style.display = 'table-row';
+    }
+
+    // Currency input: format on blur, raw on focus
+    section.addEventListener('focus', (e) => {
+        if (e.target.classList.contains('currency-input') && !e.target.dataset.field?.startsWith('revision-')) {
+            e.target.value = e.target.dataset.raw;
+            e.target.select();
+        }
+    }, true);
+
+    section.addEventListener('blur', (e) => {
+        if (e.target.classList.contains('currency-input') && !e.target.dataset.field?.startsWith('revision-')) {
+            const val = parseCurrency(e.target.value);
+            e.target.dataset.raw = val;
+            e.target.value = fmtPlain(val);
+            applyBudgetChange(e.target, data, prefix);
+            saveFn(data);
+            renderBudgetTab(data, prefix);
+        }
+    }, true);
+
+    // Select and date inputs (not inside detail rows)
+    section.addEventListener('change', (e) => {
+        const el = e.target;
+        if (el.classList.contains('editable') && !el.closest('.detail-row')) {
+            applyBudgetChange(el, data, prefix);
+            saveFn(data);
+            renderBudgetTab(data, prefix);
+        }
+    });
+
+    // Add new budget line item
+    section.addEventListener('click', (e) => {
+        const addBtn = e.target.closest('.add-item-btn');
+        if (addBtn) {
+            const sec = addBtn.dataset.section;
+            const y = String(data.year || 2026);
+            if (sec === 'outgoings') {
+                const name = prompt('Enter item name:');
+                if (!name || !name.trim()) return;
+                data.outgoings.push({
+                    name: name.trim(),
+                    weekly: 0,
+                    cycle: 'Monthly',
+                    firstPayment: y + '-01-01',
+                    comment: '',
+                    revisions: []
+                });
+                saveFn(data);
+                renderBudgetTab(data, prefix);
+            }
+        }
+    });
+
+    // Expand/collapse toggle + revision add/delete
+    section.addEventListener('click', (e) => {
+        const toggle = e.target.closest('.expand-toggle');
+        if (toggle) {
+            const idx = toggle.dataset.index;
+            const sec = toggle.dataset.section;
+            const row = document.getElementById(`${toggle.dataset.pfx}${sec}-detail-${idx}`);
+            if (row) {
+                const visible = row.style.display !== 'none';
+                row.style.display = visible ? 'none' : 'table-row';
+                toggle.innerHTML = visible ? '&#9654;' : '&#9660;';
+            }
+        }
+
+        const addBtn = e.target.closest('.add-revision-btn');
+        if (addBtn) {
+            const idx = parseInt(addBtn.dataset.index);
+            const sec = addBtn.dataset.section;
+            const arr = getSection(data, sec);
+            const item = arr[idx];
+            migrateItem(item);
+            const today = new Date().toISOString().split('T')[0];
+            item.revisions.push({ fromDate: today, weekly: getCurrentWeekly(item), reason: '' });
+            item.revisions.sort((a, b) => a.fromDate.localeCompare(b.fromDate));
+            saveFn(data);
+            renderBudgetTab(data, prefix);
+            reopenDetail(sec, idx);
+        }
+
+        const delBtn = e.target.closest('.revision-delete');
+        if (delBtn) {
+            const idx = parseInt(delBtn.dataset.index);
+            const ri = parseInt(delBtn.dataset.rev);
+            const sec = delBtn.dataset.section;
+            getSection(data, sec)[idx].revisions.splice(ri, 1);
+            saveFn(data);
+            renderBudgetTab(data, prefix);
+            reopenDetail(sec, idx);
+        }
+    });
+
+    // Comment editing
+    section.addEventListener('blur', (e) => {
+        if (e.target.classList.contains('detail-comment')) {
+            const idx = parseInt(e.target.dataset.index);
+            const sec = e.target.dataset.section;
+            getSection(data, sec)[idx].comment = e.target.value;
+            saveFn(data);
+        }
+    }, true);
+
+    // Revision date / reason
+    section.addEventListener('change', (e) => {
+        const el = e.target;
+        const field = el.dataset.field;
+        if (!field || !field.startsWith('revision-')) return;
+        const idx = parseInt(el.dataset.index);
+        const ri = parseInt(el.dataset.rev);
+        const sec = el.dataset.section;
+        const rev = getSection(data, sec)[idx].revisions[ri];
+        if (!rev) return;
+
+        if (field === 'revision-date') {
+            rev.fromDate = el.value;
+            getSection(data, sec)[idx].revisions.sort((a, b) => a.fromDate.localeCompare(b.fromDate));
+        } else if (field === 'revision-reason') {
+            rev.reason = el.value;
+        }
+        saveFn(data);
+        renderBudgetTab(data, prefix);
+        reopenDetail(sec, idx);
+    });
+
+    // Revision weekly amount
+    section.addEventListener('blur', (e) => {
+        const el = e.target;
+        if (el.dataset.field === 'revision-weekly' && el.classList.contains('currency-input')) {
+            const val = parseCurrency(el.value);
+            const idx = parseInt(el.dataset.index);
+            const ri = parseInt(el.dataset.rev);
+            const sec = el.dataset.section;
+            const rev = getSection(data, sec)[idx].revisions[ri];
+            if (rev) {
+                rev.weekly = val;
+                el.value = fmtPlain(val);
+                el.dataset.raw = val;
+                saveFn(data);
+                renderBudgetTab(data, prefix);
+                reopenDetail(sec, idx);
+            }
+        }
+    }, true);
+}
+
+function applyBudgetChange(el, data, prefix) {
+    const field = el.dataset.field;
+    const prop = el.dataset.prop;
+    const index = el.dataset.index;
+
+    if (field === 'income') {
+        data.income[index][prop] = parseCurrency(el.dataset.raw || el.value);
+    } else if (field === 'bonuses') {
+        data.bonuses[index][prop] = parseCurrency(el.dataset.raw || el.value);
+    } else if (field === 'outgoings') {
+        const amount = parseCurrency(el.dataset.raw || el.value);
+        const item = data.outgoings[index];
+        if (prop === 'weekly') {
+            item.weekly = amount;
+        } else if (prop === 'monthly') {
+            item.weekly = monthlyToWeekly(amount);
+        } else if (prop === 'quarterly') {
+            item.weekly = quarterlyToWeekly(amount);
+        } else if (prop === 'annual') {
+            item.weekly = annualToWeekly(amount);
+        } else {
+            item[prop] = el.value;
+        }
+    } else if (field === 'contributionItems') {
+        const amount = parseCurrency(el.dataset.raw || el.value);
+        data.contributionItems[index].weekly = amount;
+    }
 }
 
 function escHtml(str) {

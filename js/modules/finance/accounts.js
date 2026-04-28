@@ -2,8 +2,9 @@
  * Accounts dashboard — all bank, investment, and super accounts.
  */
 
-import { fmt, fmtPlain, fmtSigned, showToast } from './data.js';
-import { fbSave } from './firebase-sync.js';
+import { fmt, fmtPlain, fmtSigned, showToast, parseCurrency, saveBudgetCY } from '../../data.js';
+import { fbSave } from '../../firebase-sync.js';
+import { state } from '../../state.js';
 
 export const DEFAULT_ACCOUNTS = {
     banking: [
@@ -101,4 +102,38 @@ export function renderAccountsTab(accounts) {
     `;
 
     container.innerHTML = html;
+}
+
+// ── Editing wiring (moved from app.js during module-shell refactor) ──
+
+export function setupAccountsEditing() {
+    const section = document.getElementById('accounts');
+    if (!section) return;
+
+    section.addEventListener('focus', (e) => {
+        if (e.target.classList.contains('account-balance-input')) {
+            const sec = e.target.dataset.section;
+            const idx = parseInt(e.target.dataset.index);
+            e.target.value = state.accountsData[sec][idx].balance;
+            e.target.select();
+        }
+    }, true);
+
+    section.addEventListener('blur', (e) => {
+        if (e.target.classList.contains('account-balance-input')) {
+            const val = parseCurrency(e.target.value);
+            const sec = e.target.dataset.section;
+            const idx = parseInt(e.target.dataset.index);
+            state.accountsData[sec][idx].balance = val;
+            e.target.value = fmtPlain(val);
+            saveAccounts(state.accountsData);
+            renderAccountsTab(state.accountsData);
+
+            // Sync HSBC PPR balance to budget primary account
+            if (state.accountsData[sec][idx].id === 'hsbc-ppr') {
+                state.budgetCY.primaryAccountBalance = val;
+                saveBudgetCY(state.budgetCY);
+            }
+        }
+    }, true);
 }

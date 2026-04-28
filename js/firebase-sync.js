@@ -13,8 +13,8 @@
 
 import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
 import { migrateOutgoing, DEFAULT_CY, DEFAULT_NY } from './data.js';
-import { DEFAULT_ACCOUNTS } from './accounts.js';
-import { DEFAULT_PM } from './pm.js';
+import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
+import { DEFAULT_PM } from './modules/pm-legacy/pm.js';
 import { state } from './state.js';
 
 let firebaseApp = null;

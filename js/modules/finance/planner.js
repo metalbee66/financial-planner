@@ -5,8 +5,9 @@
 import {
     getWeekDates, getCurrentWeekIndex, getEffectiveWeekly, cycleToPeriodAmount,
     fmt, fmtPlain, fmtSigned,
-} from './data.js';
-import { state } from './state.js';
+    parseCurrency, saveBudgetCY, saveWeekActuals,
+} from '../../data.js';
+import { state } from '../../state.js';
 
 let currentWeekIdx = 0;
 let realCurrentWeek = 0;
@@ -562,4 +563,127 @@ function formatDateMed(d) {
 
 function esc(str) {
     return String(str).replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+// ── Editing wiring (moved from app.js during module-shell refactor) ──
+
+export function setupPlannerEditing() {
+    const planner = document.getElementById('planner');
+    if (!planner) return;
+
+    // Primary account balance input
+    planner.addEventListener('focus', (e) => {
+        if (e.target.id === 'primary-acct-balance') {
+            e.target.value = state.budgetCY.primaryAccountBalance || 0;
+            e.target.select();
+        }
+    }, true);
+
+    planner.addEventListener('blur', (e) => {
+        if (e.target.id === 'primary-acct-balance') {
+            const val = parseCurrency(e.target.value);
+            e.target.value = fmtPlain(val);
+            state.budgetCY.primaryAccountBalance = val;
+            saveBudgetCY(state.budgetCY);
+            renderWeek(state.budgetCY, state.weekActuals);
+            buildWeekStrip(state.weekActuals);
+        }
+    }, true);
+
+    // Actual amount: format on blur, raw on focus
+    planner.addEventListener('focus', (e) => {
+        if (e.target.classList.contains('actual-input')) {
+            e.target.value = parseCurrency(e.target.value);
+            e.target.select();
+        }
+    }, true);
+
+    planner.addEventListener('blur', (e) => {
+        if (e.target.classList.contains('actual-input')) {
+            const val = parseCurrency(e.target.value);
+            e.target.value = fmtPlain(val);
+
+            const itemName = e.target.dataset.item;
+            const type = e.target.dataset.type;
+            const weekIdx = parseInt(e.target.dataset.week);
+            const expected = parseFloat(e.target.dataset.expected);
+
+            ensureWeekActual(weekIdx);
+            const bucket = state.weekActuals[weekIdx][type];
+            if (!bucket[itemName]) {
+                bucket[itemName] = { actual: val, status: 'pending', comment: '' };
+            } else {
+                bucket[itemName].actual = val;
+            }
+
+            // Auto-set status
+            if (Math.abs(val - expected) < 0.01) {
+                bucket[itemName].status = 'confirmed';
+            } else {
+                bucket[itemName].status = 'adjusted';
+            }
+
+            saveWeekActuals(state.weekActuals);
+            renderWeek(state.budgetCY, state.weekActuals);
+            buildWeekStrip(state.weekActuals);
+        }
+    }, true);
+
+    // Comment
+    planner.addEventListener('blur', (e) => {
+        if (e.target.classList.contains('comment-input')) {
+            const itemName = e.target.dataset.item;
+            const type = e.target.dataset.type;
+            const weekIdx = parseInt(e.target.dataset.week);
+
+            ensureWeekActual(weekIdx);
+            const bucket = state.weekActuals[weekIdx][type];
+            if (!bucket[itemName]) {
+                const expected = 0;
+                bucket[itemName] = { actual: expected, status: 'pending', comment: e.target.value };
+            } else {
+                bucket[itemName].comment = e.target.value;
+            }
+            saveWeekActuals(state.weekActuals);
+        }
+    }, true);
+
+    // Status button click — toggle confirm
+    planner.addEventListener('click', (e) => {
+        const btn = e.target.closest('.status-btn');
+        if (!btn) return;
+
+        const itemName = btn.dataset.item;
+        const type = btn.dataset.type;
+        const weekIdx = parseInt(btn.dataset.week);
+
+        ensureWeekActual(weekIdx);
+        const bucket = state.weekActuals[weekIdx][type];
+
+        // Find expected amount
+        const allItems = [...allSchedules.primary, ...allSchedules.secondary, ...allSchedules.contributions];
+        const match = allItems.find(s => s.item.name === itemName);
+        const expected = match ? match.schedule[weekIdx] : 0;
+
+        if (!bucket[itemName]) {
+            bucket[itemName] = { actual: expected, status: 'confirmed', comment: '' };
+        } else {
+            bucket[itemName].status = bucket[itemName].status === 'confirmed' ? 'pending' : 'confirmed';
+            if (bucket[itemName].status === 'confirmed') {
+                bucket[itemName].actual = expected;
+            }
+        }
+
+        saveWeekActuals(state.weekActuals);
+        renderWeek(state.budgetCY, state.weekActuals);
+        buildWeekStrip(state.weekActuals);
+    });
+}
+
+function ensureWeekActual(weekIdx) {
+    if (!state.weekActuals[weekIdx]) {
+        state.weekActuals[weekIdx] = { items: {}, contributions: {} };
+    }
+    if (!state.weekActuals[weekIdx].items) state.weekActuals[weekIdx].items = {};
+    if (!state.weekActuals[weekIdx].contributions) state.weekActuals[weekIdx].contributions = {};
 }

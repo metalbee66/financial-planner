@@ -6,9 +6,9 @@
  * (apart from ES-module wiring) until that migration runs.
  */
 
-import { showToast } from './data.js';
-import { fbSave } from './firebase-sync.js';
-import { state } from './state.js';
+import { showToast } from '../../data.js';
+import { fbSave } from '../../firebase-sync.js';
+import { state } from '../../state.js';
 
 export const PM_STATUSES = [
     { value: 'not-started', label: 'Not Started' },
