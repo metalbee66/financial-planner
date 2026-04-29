@@ -4,8 +4,16 @@
 
 Rebranding "Financial Planner" → "Family Planner" and restructuring the app into a modular monolith. The existing finance features become the **Finance** module; a new **Projects** module (Asana-like project management) is added alongside. Future modules slot into the same registry. See [tasks/plan.md](../tasks/plan.md) for the full plan.
 
-### Phase 0 (in progress)
-- Rebrand visible labels (title, header, login card) — Task 0.1
+### Phase 0 — Rebrand & Modular-Monolith Conversion (complete, 2026-04-28)
+
+- **Task 0.1** — Rebrand visible labels: title, header h1, login card heading → "Family Planner". GitHub repo, Firebase project ID, and live URL deferred. (commit `5a988f7`)
+- **Task 0.2** — Convert all JS to native ES modules. Adds `state.js` as the single shared mutable-state container. Drops the `patchSaveFunctions` reassignment trick and `window._budgetData` global. No behavior change. (commit `2f8c88f`)
+- **Task 0.3** — Module registry + thin shell. `index.html` reduced to header + `#top-nav` + `#module-host`. New `shell.js` mounts modules from `modules.js` registry. Existing finance code moves into `js/modules/finance/`; PM DLBooks moves into `js/modules/pm-legacy/` pending Phase 8 migration. (commit `83bcd04`)
+- **Task 0.4** — Projects module skeleton: empty-state stub registered as third top-level module. (commit `3b73808`)
+
+### Phase 1+ (pending)
+
+See [tasks/plan.md](../tasks/plan.md) for the full breakdown. Headline: project + task CRUD with dependencies, comments, attachments, milestones, audit trail; per-project list/timeline/calendar views; cross-project dashboard/overview/per-user/files views; **email notifications via n8n + M365 Outlook** (sensei infrastructure); on-screen celebrations; local AI helpers; and final retirement of the PM DLBooks tab via data migration.
 
 ## v1.0.0 — 2026-03-26 (Financial Planner)
 
