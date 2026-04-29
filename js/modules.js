@@ -6,6 +6,7 @@
  */
 
 import { mount as mountFinance } from './modules/finance/index.js';
+import { mount as mountProjects } from './modules/projects/index.js';
 import { mount as mountPmLegacy } from './modules/pm-legacy/index.js';
 
 export const MODULES = [
@@ -16,6 +17,13 @@ export const MODULES = [
         // Firebase RTDB keys this module reads/writes (informational; useful
         // for future per-module sync wiring or admin tooling).
         dataKeys: ['budget_cy26', 'budget_ny27', 'week_actuals_cy26', 'accounts_data', 'gl_mappings', 'imported_tx_hashes'],
+    },
+    {
+        id: 'projects',
+        label: 'Projects',
+        mount: mountProjects,
+        // Phase 0.4 stub — real keys arrive with Phase 1+ work.
+        dataKeys: [],
     },
     {
         id: 'pm-legacy',
