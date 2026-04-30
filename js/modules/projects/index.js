@@ -1,13 +1,13 @@
 /**
  * Projects module — Asana-like project & task management.
  *
- * Phase 1.1: project CRUD (name, dates, status, description, default
- * Brad+Diana participants, delete-with-confirm). Tasks/views/notifications
- * arrive in Phases 2–7. Phase 1.2 enriches the participant editor.
+ * Phase 1.1: project CRUD (name, dates, status, description, participants).
+ * Phase 1.2 layered on top adds a richer participant chip editor.
  *
  * The module owns one DOM host element and renders either the project list
- * or the create/edit form into it. There is no router — `mode` tracks
- * which view is active.
+ * or the create/edit form into it on each `render()` call. There is no
+ * router — `mode` tracks which view is active. Tasks/views/notifications
+ * arrive in Phases 2–7.
  */
 
 import { state } from '../../state.js';
@@ -190,6 +190,7 @@ function renderForm() {
         </form>
     `;
 
+    // Wire participant editor (Task 1.2 component)
     renderParticipantEditor(host.querySelector('#pf-participants'), draft.participants);
 
     host.querySelector('#projects-back-btn').addEventListener('click', goList);
@@ -263,8 +264,14 @@ function goList() { mode = { view: 'list', editingId: null }; render(); }
 function goCreate() { mode = { view: 'form', editingId: null }; render(); }
 function goEdit(id) { mode = { view: 'form', editingId: id }; render(); }
 
-// ── Participant editor (Phase 1.1: built-in toggles only) ──
+// ── Participant editor (Task 1.2) ──
 
+/**
+ * Renders an editable participants control: built-in Brad/Diana checkboxes
+ * plus a free-text "+ add" input for external participants. The element's
+ * `dataset.participants` holds the JSON-serialised array; reads use
+ * `getParticipantEditorValue()`.
+ */
 function renderParticipantEditor(root, initial) {
     const set = new Set(Array.isArray(initial) && initial.length ? initial : DEFAULT_PARTICIPANTS);
     root.innerHTML = '';
@@ -282,11 +289,78 @@ function renderParticipantEditor(root, initial) {
             const updated = cb.checked
                 ? Array.from(new Set(arr.concat([id])))
                 : arr.filter(x => x !== id);
-            root.dataset.participants = JSON.stringify(updated);
+            commitParticipants(root, updated);
         });
         builtins.appendChild(lbl);
     });
     root.appendChild(builtins);
+
+    const chipBox = document.createElement('div');
+    chipBox.className = 'participants-chips';
+    root.appendChild(chipBox);
+
+    const adder = document.createElement('div');
+    adder.className = 'participants-adder';
+    adder.innerHTML = `
+        <input type="text" class="participant-add-input" placeholder="Add participant…" maxlength="60" autocomplete="off" />
+        <button type="button" class="btn-secondary participant-add-btn">Add</button>
+    `;
+    const input = adder.querySelector('input');
+    const btn = adder.querySelector('button');
+    const addExternal = () => {
+        const v = input.value.trim();
+        if (!v) return;
+        const arr = JSON.parse(root.dataset.participants);
+        if (arr.includes(v)) {
+            input.value = '';
+            return;
+        }
+        commitParticipants(root, arr.concat([v]));
+        input.value = '';
+        input.focus();
+    };
+    btn.addEventListener('click', addExternal);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addExternal(); }
+    });
+    root.appendChild(adder);
+
+    // Render the external chip list (built-ins live in their checkboxes;
+    // external participants render here so they can be removed individually)
+    drawExternalChips(root);
+}
+
+function commitParticipants(root, arr) {
+    root.dataset.participants = JSON.stringify(arr);
+
+    // Sync built-in checkboxes
+    root.querySelectorAll('input[data-builtin]').forEach(cb => {
+        cb.checked = arr.includes(cb.dataset.builtin);
+    });
+    drawExternalChips(root);
+}
+
+function drawExternalChips(root) {
+    const chipBox = root.querySelector('.participants-chips');
+    const arr = JSON.parse(root.dataset.participants);
+    const externals = arr.filter(p => !DEFAULT_PARTICIPANTS.includes(p));
+    chipBox.innerHTML = externals.length === 0
+        ? '<span class="participants-empty">No external participants</span>'
+        : '';
+    externals.forEach(p => {
+        const chip = document.createElement('span');
+        chip.className = 'chip chip-external';
+        chip.innerHTML = `<span class="chip-avatar">${escapeHtml(initialOf(p))}</span><span class="chip-label">${escapeHtml(p)}</span><button type="button" class="chip-remove" aria-label="Remove ${escapeAttr(p)}">×</button>`;
+        chip.querySelector('.chip-remove').addEventListener('click', () => {
+            const cur = JSON.parse(root.dataset.participants);
+            const wasAssigned = isParticipantAssignedToTasks(p);
+            if (wasAssigned && !confirm(`${p} is assigned to tasks in this project. Remove anyway? (Tasks will keep their current assignee until you reassign them.)`)) {
+                return;
+            }
+            commitParticipants(root, cur.filter(x => x !== p));
+        });
+        chipBox.appendChild(chip);
+    });
 }
 
 function getParticipantEditorValue(root) {
@@ -296,9 +370,18 @@ function getParticipantEditorValue(root) {
     } catch { return []; }
 }
 
+/**
+ * Phase 1.2 placeholder — tasks live in the data model from Phase 2.1 onward;
+ * until then this always returns false. Wiring the warning now keeps the UI
+ * code stable when assignment data lands.
+ */
+function isParticipantAssignedToTasks(_participant) {
+    return false;
+}
+
 // ── Helpers ──
 
-/** Shared chip renderer — used by project cards and (in 1.2+) by other surfaces. */
+/** Shared chip renderer — used by project cards and other surfaces. */
 export function renderChipsHtml(participants) {
     if (!Array.isArray(participants) || participants.length === 0) return '';
     return participants.map(p => {

@@ -1143,7 +1143,7 @@ select.editable { width: 100px; cursor: pointer; }
 .status-completed { background: rgba(0,200,83,0.16); color: var(--green); }
 .status-cancelled { background: rgba(255,82,82,0.14); color: var(--red); }
 
-/* Participant chips (shared between project cards and the editor) */
+/* Participant chips (shared between cards and editor — Task 1.2) */
 .chip {
     display: inline-flex;
     align-items: center;
@@ -1154,6 +1154,10 @@ select.editable { width: 100px; cursor: pointer; }
     border-radius: 999px;
     font-size: 0.78rem;
     font-weight: 500;
+}
+.chip-external {
+    background: rgba(112,48,160,0.18);
+    color: #b48bd9;
 }
 .chip-avatar {
     display: inline-flex;
@@ -1167,6 +1171,17 @@ select.editable { width: 100px; cursor: pointer; }
     font-weight: 600;
 }
 .chip-label { line-height: 1; }
+.chip-remove {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 2px 0 4px;
+    opacity: 0.7;
+}
+.chip-remove:hover { opacity: 1; }
 
 /* Project form */
 .project-form {
@@ -1235,7 +1250,7 @@ select.editable { width: 100px; cursor: pointer; }
 .btn-danger { background: transparent; color: var(--red); border-color: var(--red); margin-right: auto; }
 .btn-danger:hover { background: rgba(255,82,82,0.1); }
 
-/* Participants editor — built-in toggle row */
+/* Participants editor */
 .participants-editor { display: flex; flex-direction: column; gap: 10px; }
 .participants-builtins { display: flex; gap: 16px; flex-wrap: wrap; }
 .participant-toggle {
@@ -1248,6 +1263,20 @@ select.editable { width: 100px; cursor: pointer; }
     user-select: none;
 }
 .participant-toggle input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+.participants-chips { display: flex; gap: 6px; flex-wrap: wrap; min-height: 24px; align-items: center; }
+.participants-empty { color: var(--text-dim); font-size: 0.78rem; font-style: italic; }
+.participants-adder { display: flex; gap: 8px; }
+.participant-add-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.participant-add-input:focus { border-color: var(--accent); outline: none; }
+.participants-adder .btn-secondary { padding: 6px 14px; font-size: 0.82rem; }
 
 @media (max-width: 600px) {
     .form-row-grid { grid-template-columns: 1fr; }
