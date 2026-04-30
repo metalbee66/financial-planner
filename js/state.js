@@ -19,4 +19,6 @@ export const state = {
     glMappings: {},
     storedTransactionHashes: new Set(),
     importedTransactions: [],
+    // Projects module (Phase 1+): { items: [...], (later) prefs, notifications, ... }
+    projectsData: null,
 };

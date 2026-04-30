@@ -22,8 +22,8 @@ export const MODULES = [
         id: 'projects',
         label: 'Projects',
         mount: mountProjects,
-        // Phase 0.4 stub — real keys arrive with Phase 1+ work.
-        dataKeys: [],
+        // Single root key holds `{ items: [...] }`; Phase 6 adds `prefs` and `notifications` siblings.
+        dataKeys: ['projects'],
     },
     {
         id: 'pm-legacy',

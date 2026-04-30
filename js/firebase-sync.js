@@ -15,6 +15,7 @@ import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
 import { migrateOutgoing, DEFAULT_CY, DEFAULT_NY } from './data.js';
 import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
 import { DEFAULT_PM } from './modules/pm-legacy/pm.js';
+import { DEFAULT_PROJECTS, sanitiseProject } from './modules/projects/data.js';
 import { state } from './state.js';
 
 let firebaseApp = null;
@@ -30,11 +31,13 @@ const HOUSEHOLD_ID = 'family';
 let renderBudgetTab = null;
 let renderAccountsTab = null;
 let renderPMTab = null;
+let renderProjectsTab = null;
 
 export function registerRenderHooks(hooks) {
     renderBudgetTab = hooks.renderBudgetTab;
     renderAccountsTab = hooks.renderAccountsTab;
     renderPMTab = hooks.renderPMTab;
+    renderProjectsTab = hooks.renderProjectsTab;
 }
 
 function isFirebaseConfigured() {
@@ -183,6 +186,13 @@ export function setupRealtimeListeners() {
             if (renderPMTab) renderPMTab(state.pmData);
         }
     });
+
+    fbListen('projects', (data) => {
+        if (data && Array.isArray(data.items)) {
+            state.projectsData = { ...data, items: data.items.map(sanitiseProject).filter(Boolean) };
+            if (renderProjectsTab) renderProjectsTab();
+        }
+    });
 }
 
 /** Initial sync: push defaults to Firebase if empty, or load from Firebase */
@@ -211,6 +221,11 @@ export async function initialSync() {
         const fbPM = await fbLoad('pm_dlbooks');
         if (fbPM && (fbPM.macro || fbPM.customers)) state.pmData = fbPM;
 
+        const fbProjects = await fbLoad('projects');
+        if (fbProjects && Array.isArray(fbProjects.items)) {
+            state.projectsData = { ...fbProjects, items: fbProjects.items.map(sanitiseProject).filter(Boolean) };
+        }
+
         console.log('Data loaded from Firebase.');
     } else {
         // Firebase is empty — push defaults
@@ -233,12 +248,16 @@ export async function initialSync() {
         if (!state.pmData || (!state.pmData.macro && !state.pmData.customers)) {
             state.pmData = JSON.parse(JSON.stringify(DEFAULT_PM));
         }
+        if (!state.projectsData || !Array.isArray(state.projectsData.items)) {
+            state.projectsData = JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
+        }
 
         fbSave('budget_cy26', state.budgetCY);
         fbSave('budget_ny27', state.budgetNY);
         fbSave('week_actuals_cy26', state.weekActuals);
         fbSave('accounts_data', state.accountsData);
         fbSave('pm_dlbooks', state.pmData);
+        fbSave('projects', state.projectsData);
         console.log('Default data pushed to Firebase.');
     }
 }

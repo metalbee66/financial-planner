@@ -31,11 +31,13 @@ import { renderBudgetTab } from './modules/finance/budget.js';
 import { renderAccountsTab } from './modules/finance/accounts.js';
 import { loadPM } from './modules/pm-legacy/pm.js';
 import { renderPMTab } from './modules/pm-legacy/pm.js';
+import { loadProjects } from './modules/projects/data.js';
+import { renderProjectsTab } from './modules/projects/index.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
 // cheap and idempotent.
-registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderPMTab });
+registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderPMTab, renderProjectsTab });
 
 document.addEventListener('DOMContentLoaded', async () => {
     // Load from localStorage first (instant render before Firebase resolves)
@@ -46,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.pmData = loadPM();
     state.glMappings = loadGlMappings();
     state.storedTransactionHashes = loadStoredHashes();
+    state.projectsData = loadProjects();
 
     const fbReady = await initFirebase();
 
