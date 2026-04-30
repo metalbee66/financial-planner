@@ -1,6 +1,6 @@
 # Family Planner — Handover Notes
 
-> **State as of 2026-04-28:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phase 0 of v2.0.0 is complete (rebrand + ES modules + module shell + Projects skeleton). Phases 1–8 build out the new Projects module — see [tasks/plan.md](../tasks/plan.md).
+> **State as of 2026-04-30:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0–1 of v2.0.0 are complete (rebrand + ES modules + module shell + Projects CRUD with participants). Phases 2–8 build out the rest of the Projects module — see [tasks/plan.md](../tasks/plan.md).
 
 ---
 
@@ -44,7 +44,9 @@ app/
 │       │   ├── accounts.js             Accounts render + setupAccountsEditing
 │       │   └── import.js               CSV parse + render + setupImport
 │       ├── projects/
-│       │   └── index.js                Phase 0.4 stub; Phase 1+ adds CRUD/views/notifications
+│       │   ├── index.js                Module entry: list/form views, CRUD + participant editor
+│       │   ├── data.js                 Schema, validation, list mutators, sanitiser, load/save
+│       │   └── data.test.js            Unit tests for the data layer (run via /tests.html)
 │       └── pm-legacy/
 │           ├── index.js                Wrapper for the existing pm.js
 │           └── pm.js                   DLBooks PM (retired in Phase 8 → migrated into projects)
@@ -166,7 +168,17 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `master` (Phase 0 merged)
-- **Last commit:** `3b73808` — Bootstrap Projects module skeleton (Task 0.4)
-- **Next task:** Phase 1, Task 1.1 — Project entity CRUD ([plan §1.1](../tasks/plan.md#task-11-project-entity--create--read--update--delete))
+- **Active branch:** `family-planner/phase-1-projects-crud` (Phase 1 complete, awaiting Checkpoint B review before merge to master)
+- **Last commit:** `fd8055d` — Participant management on a project (Task 1.2)
+- **Next task:** Phase 2, Task 2.1 — Task entity within a project ([plan §2.1](../tasks/plan.md#task-21-task-entity-within-a-project))
 - **Branch convention:** L/M-sized tasks land on `family-planner/<slug>` feature branches with a smoke test before fast-forward merge to master. XS/S tasks can go direct to master.
+
+### Tests
+
+The Projects module has the first automated tests in this repo. Run them
+two ways:
+
+- **Browser:** start `python server.py`, open <http://localhost:8080/tests.html>. The page imports `js/modules/projects/data.test.js` and reports pass/fail counts for the data layer.
+- **CLI:** `node --input-type=module -e "import('./js/modules/projects/data.test.js').then(async m => { const r = await m.runProjectsDataTests(); console.log(r.pass + '/' + (r.pass + r.fail)); if (r.fail) process.exit(1); });"`
+
+Tests cover pure functions only (createProject, validateProject, list mutators, sanitiseProject). DOM and Firebase paths are still verified by manual smoke testing on the live deploy.

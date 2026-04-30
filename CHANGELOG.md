@@ -11,9 +11,14 @@ Rebranding "Financial Planner" → "Family Planner" and restructuring the app in
 - **Task 0.3** — Module registry + thin shell. `index.html` reduced to header + `#top-nav` + `#module-host`. New `shell.js` mounts modules from `modules.js` registry. Existing finance code moves into `js/modules/finance/`; PM DLBooks moves into `js/modules/pm-legacy/` pending Phase 8 migration. (commit `83bcd04`)
 - **Task 0.4** — Projects module skeleton: empty-state stub registered as third top-level module. (commit `3b73808`)
 
-### Phase 1+ (pending)
+### Phase 1 — Projects CRUD (complete, 2026-04-30)
 
-See [tasks/plan.md](../tasks/plan.md) for the full breakdown. Headline: project + task CRUD with dependencies, comments, attachments, milestones, audit trail; per-project list/timeline/calendar views; cross-project dashboard/overview/per-user/files views; **email notifications via n8n + M365 Outlook** (sensei infrastructure); on-screen celebrations; local AI helpers; and final retirement of the PM DLBooks tab via data migration.
+- **Task 1.1** — Project entity CRUD: schema (id, name, status, dates, participants, description, timestamps, archive flag), in-browser test runner at `/tests.html` (20 unit tests for the data layer), list view with project cards, create/edit form with inline validation (rejects end < start), delete-with-confirm. Persists via the new Firebase `projects` key with realtime listener for cross-device updates. (commit `0c93b0f`)
+- **Task 1.2** — Participant management: built-in Brad/Diana toggles plus a free-text "+ add participant" input with removable external chips. Removing an assigned participant prompts a warning (currently a no-op hook; wires up live in Task 2.1). Chip renderer exported as a shared helper. (commit `fd8055d`)
+
+### Phase 2+ (pending)
+
+See [tasks/plan.md](../tasks/plan.md) for the full breakdown. Next up: tasks + subtasks within a project, then dependencies/comments/audit/attachments/milestones, per-project views (list/timeline/calendar), cross-project views, **email notifications via n8n + M365 Outlook**, celebrations, local AI helpers, and final retirement of the PM DLBooks tab.
 
 ## v1.0.0 — 2026-03-26 (Financial Planner)
 
