@@ -90,7 +90,7 @@ This replaced the pre-Phase-0 cross-file globals. ES module bindings are read-on
 
 ### Render hooks (for Firebase realtime sync)
 
-`firebase-sync.js`'s realtime listeners need to call back into UI code without a hard import cycle. The shell registers callbacks at module-load time via `registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderPMTab })`. When another user changes data, the listener fires the appropriate hook.
+`firebase-sync.js`'s realtime listeners need to call back into UI code without a hard import cycle. The shell registers callbacks at module-load time via `registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderPMTab, renderProjectsTab })`. When another user changes data, the listener fires the appropriate hook.
 
 ---
 
@@ -127,6 +127,13 @@ This replaced the pre-Phase-0 cross-file globals. ES module bindings are read-on
 - `calcPaymentSchedule(item, weekDates)` returns a 52-week array
 - Respects revisions: uses `getEffectiveWeekly(item, paymentDate)` per payment
 - Mid-week revisions snap to the containing week's Monday
+
+### Data model (Projects module)
+- Single Firebase RTDB key `projects` under `household/family/`, holding `{ items: [...] }`. Phase 6 will add `prefs` and `notifications` siblings under the same root — the current single-blob shape is fine because each module's realtime listener only fires once per save and the per-event-kind splits aren't useful until then.
+- A project: `{ id, name, status, startDate, endDate, participants[], description, createdAt, updatedAt, archivedAt }`. Status enum: `planning|active|on-hold|completed|cancelled`. IDs are `p_<base36-time>_<6 random base36>`.
+- All list mutators in `app/js/modules/projects/data.js` are immutable (return new arrays). UI calls `setProjects(items)` which writes via `saveProjects` → `fbSave('projects', ...)`.
+- `sanitiseProject(p)` backfills missing fields when older shapes load — no migration script needed for v1's single-version schema.
+- Participants in v1 are constrained to `brad` and `diana` plus free-text strings. There is no per-user record; participant IDs are bare strings.
 
 ---
 
@@ -168,10 +175,40 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `family-planner/phase-1-projects-crud` (Phase 1 complete, awaiting Checkpoint B review before merge to master)
-- **Last commit:** `fd8055d` — Participant management on a project (Task 1.2)
+- **Active branch:** `family-planner/phase-1-projects-crud` (Phase 1 complete, awaiting Checkpoint B before merge to master)
+- **Last commit:** `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
+- **Phase 1 commits on the branch (newest first):**
+  - `0a50020` — Docs: CHANGELOG + HANDOVER updates
+  - `fd8055d` — Participant management on a project (Task 1.2)
+  - `0c93b0f` — Project entity CRUD with tests (Task 1.1)
 - **Next task:** Phase 2, Task 2.1 — Task entity within a project ([plan §2.1](../tasks/plan.md#task-21-task-entity-within-a-project))
 - **Branch convention:** L/M-sized tasks land on `family-planner/<slug>` feature branches with a smoke test before fast-forward merge to master. XS/S tasks can go direct to master.
+
+### Checkpoint B — to run before merging Phase 1
+
+Per [tasks/plan.md → Checkpoint B](../tasks/plan.md#checkpoint-b--after-11-12). Steps to run on the deployed live site (after fast-forward merge + `git push`):
+
+1. Sign in as Brad on browser A and Diana on browser B (or two private windows).
+2. **Create:** click `+ New Project`, fill name + start + end + status + description, save. Card appears.
+3. **Participants:** open the project, toggle Brad off then back on, add an external participant (e.g. "accountant"), remove the external chip with the × button. Save. The card reflects the chip changes.
+4. **Edit:** click an existing card, change the status, save. Status badge updates. Refresh — change persists.
+5. **Validation:** create a project with end date earlier than start date. Inline error: "End date must be on or after start date". No save.
+6. **Delete:** click delete on an existing card. Confirm prompt fires. Card disappears.
+7. **Two-browser sync:** with both browsers signed in, create a project in A. It should appear in B within ~2 seconds (realtime listener). Edit in B, refresh A.
+8. **Console check:** zero errors after the above flow on either browser.
+9. **Tests still green:** open <http://localhost:8080/tests.html> against your local copy → 20/20 pass.
+
+If anything regresses, do NOT merge — investigate on the branch.
+
+### Branch cleanup is automated
+
+A scheduled remote agent (`trig_01M8Bsfuv8XL1PgoQsz9EfHr`) fires once at **2026-05-06 23:00 UTC = 9am Sydney Mon 2026-05-07**. It checks `git merge-base --is-ancestor origin/family-planner/phase-1-projects-crud origin/master` and:
+- if reachable → `git push origin --delete family-planner/phase-1-projects-crud`
+- if not → posts a one-line nudge and does nothing.
+
+So after a successful Checkpoint B + merge, the origin branch will clean itself up. The local branch is your own to delete (`git branch -d family-planner/phase-1-projects-crud`).
+
+Manage at <https://claude.ai/code/routines/trig_01M8Bsfuv8XL1PgoQsz9EfHr>.
 
 ### Tests
 
@@ -182,3 +219,14 @@ two ways:
 - **CLI:** `node --input-type=module -e "import('./js/modules/projects/data.test.js').then(async m => { const r = await m.runProjectsDataTests(); console.log(r.pass + '/' + (r.pass + r.fail)); if (r.fail) process.exit(1); });"`
 
 Tests cover pure functions only (createProject, validateProject, list mutators, sanitiseProject). DOM and Firebase paths are still verified by manual smoke testing on the live deploy.
+
+### Quick session onboarding
+
+If you (or another agent) come back to this project cold:
+
+1. Read this file top-to-bottom.
+2. `cd app && git status && git log --oneline -10` — confirm what's actually committed.
+3. `git branch --show-current` — am I on `master` or the Phase 1 branch?
+4. Check [tasks/todo.md](../tasks/todo.md) and [tasks/user-actions.md](../tasks/user-actions.md) for the active checklist and any deferred manual ops.
+5. Run the test CLI one-liner above to sanity-check the data layer is green.
+6. Then pick up the "Next task" pointer above.
