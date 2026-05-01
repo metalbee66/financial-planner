@@ -16,9 +16,15 @@ Rebranding "Financial Planner" → "Family Planner" and restructuring the app in
 - **Task 1.1** — Project entity CRUD: schema (id, name, status, dates, participants, description, timestamps, archive flag), in-browser test runner at `/tests.html` (20 unit tests for the data layer), list view with project cards, create/edit form with inline validation (rejects end < start), delete-with-confirm. Persists via the new Firebase `projects` key with realtime listener for cross-device updates. (commit `0c93b0f`)
 - **Task 1.2** — Participant management: built-in Brad/Diana toggles plus a free-text "+ add participant" input with removable external chips. Removing an assigned participant prompts a warning (currently a no-op hook; wires up live in Task 2.1). Chip renderer exported as a shared helper. (commit `fd8055d`)
 
-### Phase 2+ (pending)
+### Phase 2 — Tasks & Subtasks (in progress, 2026-05-02)
 
-See [tasks/plan.md](../tasks/plan.md) for the full breakdown. Next up: tasks + subtasks within a project, then dependencies/comments/audit/attachments/milestones, per-project views (list/timeline/calendar), cross-project views, **email notifications via n8n + M365 Outlook**, celebrations, local AI helpers, and final retirement of the PM DLBooks tab.
+- **Task 2.1** — Task entity within a project: full task data layer (schema, validation, list mutators, completedAt auto-stamp on done transition); flat `tasks[]` array stored alongside `items[]` under the existing `projects` Firebase key for trivial cross-project aggregation in Phase 5; new project detail view with inline add row (name + assignee + due date, Enter submits with focus retention for rapid entry); task rows with inline status dropdown (per-status colour, persists on change), assignee chip, due date (red when overdue), delete; slide-in detail panel (right-side, CSS transform) for full edit; cascade delete drops a project's tasks in one save; project cards show `N/M open` stats. 18 new pure-data unit tests in `data.test.js`. (commit `38261be`)
+- **Playwright E2E harness** — first automated browser tests in this repo. 18 tests in `tests-e2e/smoke.spec.js` cover Phase 1.1 / 1.2 / 2.1 acceptance criteria plus a Phase 0 module-shell regression check. Firebase blocked at the network layer for hermetic runs. Run via `npm run test:e2e` (~80s). Full setup at `app/playwright.config.js`. (commit `76a8678`)
+- **Task 2.2** — Subtasks (one level deep, `parentTaskId`) — pending.
+
+### Phase 3+ (pending)
+
+See [tasks/plan.md](../tasks/plan.md) for the full breakdown. Next up after 2.2: dependencies/comments/audit/attachments/milestones, per-project views (list/timeline/calendar), cross-project views, **email notifications via n8n + M365 Outlook**, celebrations, local AI helpers, and final retirement of the PM DLBooks tab.
 
 ## v1.0.0 — 2026-03-26 (Financial Planner)
 

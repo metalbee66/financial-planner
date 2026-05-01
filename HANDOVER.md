@@ -1,6 +1,6 @@
 # Family Planner — Handover Notes
 
-> **State as of 2026-04-30:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0–1 of v2.0.0 are complete (rebrand + ES modules + module shell + Projects CRUD with participants). Phases 2–8 build out the rest of the Projects module — see [tasks/plan.md](../tasks/plan.md).
+> **State as of 2026-05-02:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0, 1 and Task 2.1 of v2.0.0 are complete (rebrand + ES modules + module shell + Projects CRUD with participants + task entity within a project). A Playwright E2E harness was added alongside Task 2.1 — 18 tests cover Phase 1 + 2.1 acceptance criteria. Phase 1 has not been merged to master yet (real-Firebase + two-user smoke unverified). Phases 2.2–8 build out the rest of the Projects module — see [tasks/plan.md](../tasks/plan.md).
 
 ---
 
@@ -44,16 +44,23 @@ app/
 │       │   ├── accounts.js             Accounts render + setupAccountsEditing
 │       │   └── import.js               CSV parse + render + setupImport
 │       ├── projects/
-│       │   ├── index.js                Module entry: list/form views, CRUD + participant editor
-│       │   ├── data.js                 Schema, validation, list mutators, sanitiser, load/save
-│       │   └── data.test.js            Unit tests for the data layer (run via /tests.html)
+│       │   ├── index.js                Module entry: list / detail / form views, task panel, all event wiring
+│       │   ├── data.js                 Project + task schemas, validation, list mutators, sanitisers, load/save
+│       │   └── data.test.js            Unit tests for the data layer (run via /tests.html, 40+ tests)
 │       └── pm-legacy/
 │           ├── index.js                Wrapper for the existing pm.js
 │           └── pm.js                   DLBooks PM (retired in Phase 8 → migrated into projects)
+├── tests-e2e/
+│   └── smoke.spec.js                   Playwright E2E smoke tests (Phase 1 + 2.1 acceptance criteria)
+├── playwright.config.js                Chromium-only, reuses dev server on :8080
+├── package.json                        Dev-only deps (Playwright). The deployed site stays vanilla JS.
+├── package-lock.json                   npm lockfile
 ├── server.py                           Local dev server (`python server.py`)
+├── tests.html                          In-browser unit-test runner for data.test.js
 ├── sample-data/                        Sample CSV for testing import
 ├── CHANGELOG.md                        Version history
-└── HANDOVER.md                         This file
+├── HANDOVER.md                         This file
+└── CLAUDE.md                           Project rules (deploy, test, code style)
 ```
 
 ---
@@ -129,11 +136,18 @@ This replaced the pre-Phase-0 cross-file globals. ES module bindings are read-on
 - Mid-week revisions snap to the containing week's Monday
 
 ### Data model (Projects module)
-- Single Firebase RTDB key `projects` under `household/family/`, holding `{ items: [...] }`. Phase 6 will add `prefs` and `notifications` siblings under the same root — the current single-blob shape is fine because each module's realtime listener only fires once per save and the per-event-kind splits aren't useful until then.
+- Single Firebase RTDB key `projects` under `household/family/`, holding `{ items: [...projects], tasks: [...tasks] }`. Phase 6 will add `prefs` and `notifications` siblings under the same root — the current single-blob shape is fine because each module's realtime listener only fires once per save and the per-event-kind splits aren't useful until then.
 - A project: `{ id, name, status, startDate, endDate, participants[], description, createdAt, updatedAt, archivedAt }`. Status enum: `planning|active|on-hold|completed|cancelled`. IDs are `p_<base36-time>_<6 random base36>`.
-- All list mutators in `app/js/modules/projects/data.js` are immutable (return new arrays). UI calls `setProjects(items)` which writes via `saveProjects` → `fbSave('projects', ...)`.
-- `sanitiseProject(p)` backfills missing fields when older shapes load — no migration script needed for v1's single-version schema.
-- Participants in v1 are constrained to `brad` and `diana` plus free-text strings. There is no per-user record; participant IDs are bare strings.
+- A task: `{ id, projectId, name, description, status, assignee, startDate, dueDate, priority, parentTaskId, dependsOn[], comments[], events[], attachments[], createdAt, updatedAt, completedAt }`. Status enum: `not-started|in-progress|review|done|blocked`. Priority enum: `low|normal|high`. IDs are `t_<base36-time>_<6 random base36>`. Tasks live as a **flat array** keyed by `projectId` rather than nested under each project — this keeps cross-project aggregate views (Phase 5) trivial.
+- `updateTaskInList` auto-stamps `completedAt` on the not-done → done transition and clears it on the reverse. The UI relies on this for sorting and the "Done" strikethrough.
+- All list mutators in `app/js/modules/projects/data.js` are immutable (return new arrays). UI calls `setProjects(items)` / `setTasks(tasks)` / `setBoth(items, tasks)` (single-save batched). Each writes via `saveProjects` → `fbSave('projects', ...)`. Cascade delete (project → its tasks) goes through `setBoth` so it's one atomic save and one toast.
+- `sanitiseProject(p)` and `sanitiseTask(t)` backfill missing fields when older shapes load — no migration script needed for v1's single-version schema. Tasks default to `tasks: []` when older payloads (pre-2.1) load.
+- Participants in v1 are constrained to `brad` and `diana` plus free-text strings. There is no per-user record; participant IDs are bare strings. Task `assignee` follows the same convention but can also be `null` (Unassigned).
+
+### View structure (Projects module)
+- The module's `index.js` renders one of three modes into its host element: **`list`** (project cards grid), **`detail`** (one project + its tasks), or **`form`** (create/edit project). `mode` is a small object held in the module — there is no router.
+- The **task slide-in panel** (`#task-panel`) lives in `document.body` rather than the module host, so it can overlay any view. CSS transform animates it in from the right; backdrop click / Esc / Cancel close without saving. When a task panel is open and the underlying view re-renders (e.g. after a state change), `render()` re-attaches the panel from the latest task data, or closes it if the task disappeared.
+- Navigation: card click → `goDetail(id)`; "Edit project" button → `goEdit(id)` (form remembers `detailProjectId` so save returns to detail). Saving a *new* project jumps straight into the detail view so the user can start adding tasks.
 
 ---
 
@@ -150,8 +164,9 @@ This replaced the pre-Phase-0 cross-file globals. ES module bindings are read-on
 
 ## Conventions
 
-- **No build tools.** ES modules served directly.
-- **Bracket-check JS files** before commit (`node --input-type=module --check < file.js` or visual scan).
+- **No build tools** for the deployed app. ES modules served directly. Playwright is dev-tooling only (gitignored `node_modules/`).
+- **Bracket-check JS files** before commit (`node --check <file>` or visual scan).
+- **Run `npm run test:e2e` before committing any UI change.** 18 tests, ~80s. If a test fails, fix the code or update the test — do not commit red.
 - **Edit specific files, not `-A`** — avoids accidentally committing local-only artefacts.
 - **Touch only what the task requires.** Refactors get their own commit/branch.
 
@@ -175,50 +190,53 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `family-planner/phase-1-projects-crud` (Phase 1 complete, awaiting Checkpoint B before merge to master)
-- **Last commit:** `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
-- **Phase 1 commits on the branch (newest first):**
-  - `0a50020` — Docs: CHANGELOG + HANDOVER updates
+- **Active branch:** `family-planner/phase-2-tasks` (Phase 2.1 complete; Phase 1 still unmerged. Phase-2-tasks branched off phase-1-projects-crud, so when phase-2 fast-forwards to master, both are merged together).
+- **Last commit:** `76a8678` — Add Playwright smoke-test harness
+- **Phase 2 commits on the branch (newest first):**
+  - `76a8678` — Add Playwright smoke-test harness (18 E2E tests, Firebase blocked for hermetic runs)
+  - `38261be` — Task entity CRUD inside a project (Task 2.1)
+- **Phase 1 commits inherited from parent branch (newest first):**
+  - `7ad3848` — Handover: Phase 1 wrap-up details
+  - `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
   - `fd8055d` — Participant management on a project (Task 1.2)
   - `0c93b0f` — Project entity CRUD with tests (Task 1.1)
-- **Next task:** Phase 2, Task 2.1 — Task entity within a project ([plan §2.1](../tasks/plan.md#task-21-task-entity-within-a-project))
+- **Next task:** Phase 2, Task 2.2 — Subtasks (one level deep, `parentTaskId`) ([plan §2.2](../tasks/plan.md#task-22-subtasks-one-level-deep-parenttaskid))
 - **Branch convention:** L/M-sized tasks land on `family-planner/<slug>` feature branches with a smoke test before fast-forward merge to master. XS/S tasks can go direct to master.
 
-### Checkpoint B — to run before merging Phase 1
+### Checkpoint B + 2.1 verification — to run before merging to master
 
-Per [tasks/plan.md → Checkpoint B](../tasks/plan.md#checkpoint-b--after-11-12). Steps to run on the deployed live site (after fast-forward merge + `git push`):
+The Playwright suite (`npm run test:e2e`, 18 tests, ~80s) covers all the **functional** acceptance criteria for Phase 1.1, 1.2, and 2.1 plus a Phase 0 module-shell regression check. Firebase is blocked at the network layer in tests so they run hermetically against localStorage.
 
-1. Sign in as Brad on browser A and Diana on browser B (or two private windows).
-2. **Create:** click `+ New Project`, fill name + start + end + status + description, save. Card appears.
-3. **Participants:** open the project, toggle Brad off then back on, add an external participant (e.g. "accountant"), remove the external chip with the × button. Save. The card reflects the chip changes.
-4. **Edit:** click an existing card, change the status, save. Status badge updates. Refresh — change persists.
-5. **Validation:** create a project with end date earlier than start date. Inline error: "End date must be on or after start date". No save.
-6. **Delete:** click delete on an existing card. Confirm prompt fires. Card disappears.
-7. **Two-browser sync:** with both browsers signed in, create a project in A. It should appear in B within ~2 seconds (realtime listener). Edit in B, refresh A.
-8. **Console check:** zero errors after the above flow on either browser.
-9. **Tests still green:** open <http://localhost:8080/tests.html> against your local copy → 20/20 pass.
+What the harness **doesn't** cover (and you still need to verify manually on the deployed live site after merge):
 
-If anything regresses, do NOT merge — investigate on the branch.
+1. **Real-Firebase round-trip.** Sign in as Brad, create a project + add a few tasks, hard-refresh: data persists. Open the Firebase console — payload at `household/family/projects` has both `items[]` and `tasks[]` arrays, no orphan tasks.
+2. **Two-browser realtime sync.** Browser A signs in as Brad, B as Diana (or two private windows). A creates a project; appears in B within ~2 sec. B adds a task; appears in A. A flips a status to "Done"; B sees the row dim and re-sort.
+3. **Visual layout.** Spot-check Projects list, detail view, slide-in panel on desktop. Mobile breakpoint at <600px collapses the task-row grid into stacked rows.
+4. **Console check.** Zero red errors on either browser after the above. (Browser-extension `asynchronous response… message channel closed` chatter is not an app issue — ignore it.)
 
-### Branch cleanup is automated
+If any of those regress, **do NOT merge** — investigate on the branch.
 
-A scheduled remote agent (`trig_01M8Bsfuv8XL1PgoQsz9EfHr`) fires once at **2026-05-06 23:00 UTC = 9am Sydney Mon 2026-05-07**. It checks `git merge-base --is-ancestor origin/family-planner/phase-1-projects-crud origin/master` and:
-- if reachable → `git push origin --delete family-planner/phase-1-projects-crud`
-- if not → posts a one-line nudge and does nothing.
+### Branch cleanup
 
-So after a successful Checkpoint B + merge, the origin branch will clean itself up. The local branch is your own to delete (`git branch -d family-planner/phase-1-projects-crud`).
+The phase-1 cleanup routine (`trig_01M8Bsfuv8XL1PgoQsz9EfHr`, fires 2026-05-06) still references `origin/family-planner/phase-1-projects-crud` and will check whether it's been merged into master. After phase-2-tasks fast-forwards to master (which carries phase-1 with it), that routine will succeed and delete the phase-1 origin branch.
 
-Manage at <https://claude.ai/code/routines/trig_01M8Bsfuv8XL1PgoQsz9EfHr>.
+A new cleanup routine should be scheduled for `family-planner/phase-2-tasks` after the merge — same pattern: 4–7 days out, check `git merge-base --is-ancestor`, delete on success, nudge on failure. Manage at <https://claude.ai/code/routines/>.
+
+Local branches are yours to delete:
+```
+git branch -d family-planner/phase-1-projects-crud family-planner/phase-2-tasks
+```
 
 ### Tests
 
-The Projects module has the first automated tests in this repo. Run them
-two ways:
+Two layers of automated tests, run them in this order before any commit:
 
-- **Browser:** start `python server.py`, open <http://localhost:8080/tests.html>. The page imports `js/modules/projects/data.test.js` and reports pass/fail counts for the data layer.
-- **CLI:** `node --input-type=module -e "import('./js/modules/projects/data.test.js').then(async m => { const r = await m.runProjectsDataTests(); console.log(r.pass + '/' + (r.pass + r.fail)); if (r.fail) process.exit(1); });"`
+1. **Pure-data unit tests** (`tests.html`) — fastest signal. Start `python server.py`, open <http://localhost:8080/tests.html>. Imports `js/modules/projects/data.test.js`. ~40 tests covering project + task pure functions (create, validate, list mutators, sanitisers, `completedAt` transitions). All-green expected.
+2. **E2E smoke tests** (`npm run test:e2e`) — covers all UI acceptance criteria from Phase 1 + 2.1 plus a module-shell regression check. ~80s, chromium-only, runs against the local dev server (auto-started if not already up). 18 tests; all-green expected.
 
-Tests cover pure functions only (createProject, validateProject, list mutators, sanitiseProject). DOM and Firebase paths are still verified by manual smoke testing on the live deploy.
+What the test layers do **not** cover (still manual): real-Firebase round-trip, two-user concurrent editing, visual sanity. Those need real network conditions and human eyes — see "Checkpoint B + 2.1 verification" above.
+
+To add tests for the next phase: append a new `test.describe(...)` block to `tests-e2e/smoke.spec.js`. Use the existing `createProject()` helper at the top of the file. Watch out for `hasText` substring matching colliding with status-dropdown option labels (e.g. a task named "One" matches "Done" — use distinctive names like "Task A", "Task B").
 
 ### Quick session onboarding
 
@@ -226,7 +244,7 @@ If you (or another agent) come back to this project cold:
 
 1. Read this file top-to-bottom.
 2. `cd app && git status && git log --oneline -10` — confirm what's actually committed.
-3. `git branch --show-current` — am I on `master` or the Phase 1 branch?
+3. `git branch --show-current` — am I on `master` or the active feature branch?
 4. Check [tasks/todo.md](../tasks/todo.md) and [tasks/user-actions.md](../tasks/user-actions.md) for the active checklist and any deferred manual ops.
-5. Run the test CLI one-liner above to sanity-check the data layer is green.
+5. `cd app && npm install` (one-time) → `npm run test:e2e` to sanity-check both data and UI layers are green. Then open <http://localhost:8080/tests.html> for the data-only layer.
 6. Then pick up the "Next task" pointer above.
