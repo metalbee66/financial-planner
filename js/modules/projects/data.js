@@ -15,15 +15,23 @@ import { showToast } from '../../data.js';
 
 export const PROJECTS_KEY = 'projects';
 export const PROJECT_STATUSES = ['planning', 'active', 'on-hold', 'completed', 'cancelled'];
+export const TASK_STATUSES = ['not-started', 'in-progress', 'review', 'done', 'blocked'];
+export const TASK_PRIORITIES = ['low', 'normal', 'high'];
 export const DEFAULT_PARTICIPANTS = ['brad', 'diana'];
-export const DEFAULT_PROJECTS = { items: [] };
+export const DEFAULT_PROJECTS = { items: [], tasks: [] };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
+const TASK_STATUS_SET = new Set(TASK_STATUSES);
+const TASK_PRIORITY_SET = new Set(TASK_PRIORITIES);
 
 function nowIso() { return new Date().toISOString(); }
 
 function generateId() {
     return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function generateTaskId() {
+    return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
 function trim(s) {
@@ -110,6 +118,107 @@ export function findProject(list, id) {
     return list.find(p => p.id === id) || null;
 }
 
+// ── Task helpers ──
+
+/** Build a fresh task. Caller should validate before save. */
+export function createTask(input) {
+    const inStatus = input && input.status;
+    const inPriority = input && input.priority;
+    const at = nowIso();
+    return {
+        id: generateTaskId(),
+        projectId: (input && input.projectId) || null,
+        name: trim(input && input.name),
+        description: trim(input && input.description),
+        status: TASK_STATUS_SET.has(inStatus) ? inStatus : 'not-started',
+        assignee: (input && input.assignee) || null,
+        startDate: (input && input.startDate) || null,
+        dueDate: (input && input.dueDate) || null,
+        priority: TASK_PRIORITY_SET.has(inPriority) ? inPriority : 'normal',
+        parentTaskId: (input && input.parentTaskId) || null,
+        dependsOn: Array.isArray(input && input.dependsOn) ? input.dependsOn.slice() : [],
+        comments: Array.isArray(input && input.comments) ? input.comments.slice() : [],
+        events: Array.isArray(input && input.events) ? input.events.slice() : [],
+        attachments: Array.isArray(input && input.attachments) ? input.attachments.slice() : [],
+        createdAt: at,
+        updatedAt: at,
+        completedAt: null,
+    };
+}
+
+export function sanitiseTask(t) {
+    if (!t || typeof t !== 'object') return null;
+    const at = nowIso();
+    return {
+        id: t.id || generateTaskId(),
+        projectId: t.projectId || null,
+        name: trim(t.name),
+        description: trim(t.description),
+        status: TASK_STATUS_SET.has(t.status) ? t.status : 'not-started',
+        assignee: t.assignee || null,
+        startDate: t.startDate || null,
+        dueDate: t.dueDate || null,
+        priority: TASK_PRIORITY_SET.has(t.priority) ? t.priority : 'normal',
+        parentTaskId: t.parentTaskId || null,
+        dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.slice() : [],
+        comments: Array.isArray(t.comments) ? t.comments.slice() : [],
+        events: Array.isArray(t.events) ? t.events.slice() : [],
+        attachments: Array.isArray(t.attachments) ? t.attachments.slice() : [],
+        createdAt: t.createdAt || at,
+        updatedAt: t.updatedAt || at,
+        completedAt: t.completedAt || null,
+    };
+}
+
+export function validateTask(t) {
+    if (!t || !trim(t.name)) return 'Name is required';
+    if (!t.projectId) return 'projectId is required';
+    if (!TASK_STATUS_SET.has(t.status)) return `Invalid status: ${t.status}`;
+    if (!TASK_PRIORITY_SET.has(t.priority)) return `Invalid priority: ${t.priority}`;
+    if (t.startDate && t.dueDate && t.dueDate < t.startDate) {
+        return 'Due date must be on or after start date';
+    }
+    return null;
+}
+
+export function addTaskToList(list, task) {
+    return list.concat([task]);
+}
+
+/**
+ * Patch a task by id. Bumps `updatedAt`. If the patch sets `status` to 'done'
+ * and the task wasn't already done, stamp `completedAt`; if it transitions
+ * away from 'done', clear `completedAt`.
+ */
+export function updateTaskInList(list, id, patch) {
+    const idx = list.findIndex(t => t.id === id);
+    if (idx < 0) return list;
+    const prev = list[idx];
+    const merged = { ...prev, ...patch, id, updatedAt: nowIso() };
+    if (patch && Object.prototype.hasOwnProperty.call(patch, 'status')) {
+        if (patch.status === 'done' && prev.status !== 'done') {
+            merged.completedAt = nowIso();
+        } else if (patch.status !== 'done' && prev.status === 'done') {
+            merged.completedAt = null;
+        }
+    }
+    const next = list.slice();
+    next[idx] = merged;
+    return next;
+}
+
+export function deleteTaskFromList(list, id) {
+    return list.filter(t => t.id !== id);
+}
+
+export function findTask(list, id) {
+    return list.find(t => t.id === id) || null;
+}
+
+export function findTasksByProject(list, projectId) {
+    return list.filter(t => t.projectId === projectId);
+}
+
 // ── Persistence ──
 
 export function loadProjects() {
@@ -120,7 +229,10 @@ export function loadProjects() {
         if (!parsed || !Array.isArray(parsed.items)) {
             return JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
         }
-        return { items: parsed.items.map(sanitiseProject).filter(Boolean) };
+        return {
+            items: parsed.items.map(sanitiseProject).filter(Boolean),
+            tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(sanitiseTask).filter(Boolean) : [],
+        };
     } catch (e) {
         console.error('loadProjects parse error:', e);
         return JSON.parse(JSON.stringify(DEFAULT_PROJECTS));

@@ -3,16 +3,20 @@
  *
  * Phase 1.1: project CRUD (name, dates, status, description, participants).
  * Phase 1.2 layered on top adds a richer participant chip editor.
+ * Phase 2.1: tasks within a project — inline add, row list with inline status
+ *   dropdown, slide-in detail panel for the full edit.
  *
- * The module owns one DOM host element and renders either the project list
- * or the create/edit form into it on each `render()` call. There is no
- * router — `mode` tracks which view is active. Tasks/views/notifications
- * arrive in Phases 2–7.
+ * The module owns one DOM host element and renders one of three modes into
+ * it: `list` (all projects), `detail` (one project + its tasks), or `form`
+ * (create/edit a project). The slide-in task panel is rendered into the
+ * document body and animates over the detail view.
  */
 
 import { state } from '../../state.js';
 import {
     PROJECT_STATUSES,
+    TASK_STATUSES,
+    TASK_PRIORITIES,
     DEFAULT_PARTICIPANTS,
     createProject,
     sanitiseProject,
@@ -21,6 +25,13 @@ import {
     updateProjectInList,
     deleteProjectFromList,
     findProject,
+    createTask,
+    validateTask,
+    addTaskToList,
+    updateTaskInList,
+    deleteTaskFromList,
+    findTask,
+    findTasksByProject,
     saveProjects,
 } from './data.js';
 
@@ -32,11 +43,22 @@ const STATUS_LABELS = {
     'cancelled': 'Cancelled',
 };
 
+const TASK_STATUS_LABELS = {
+    'not-started': 'Not started',
+    'in-progress': 'In progress',
+    'review': 'Review',
+    'done': 'Done',
+    'blocked': 'Blocked',
+};
+
+const TASK_PRIORITY_LABELS = { low: 'Low', normal: 'Normal', high: 'High' };
+
 const PARTICIPANT_LABELS = { brad: 'Brad', diana: 'Diana' };
 
 let host = null;
-let mode = { view: 'list', editingId: null };
+let mode = { view: 'list', editingId: null, detailProjectId: null };
 let mounted = false;
+let openTaskPanelId = null;
 
 export function mount(hostEl) {
     if (mounted) return;
@@ -50,15 +72,41 @@ export function renderProjectsTab() {
     render();
 }
 
-function getProjects() {
+function ensureProjectsData() {
     if (!state.projectsData || !Array.isArray(state.projectsData.items)) {
-        state.projectsData = { items: [] };
+        state.projectsData = { items: [], tasks: [] };
     }
+    if (!Array.isArray(state.projectsData.tasks)) {
+        state.projectsData.tasks = [];
+    }
+}
+
+function getProjects() {
+    ensureProjectsData();
     return state.projectsData.items;
 }
 
+function getTasks() {
+    ensureProjectsData();
+    return state.projectsData.tasks;
+}
+
 function setProjects(items) {
-    state.projectsData = { ...(state.projectsData || {}), items };
+    ensureProjectsData();
+    state.projectsData = { ...state.projectsData, items };
+    saveProjects(state.projectsData);
+}
+
+function setTasks(tasks) {
+    ensureProjectsData();
+    state.projectsData = { ...state.projectsData, tasks };
+    saveProjects(state.projectsData);
+}
+
+/** Single save for combined item+task mutations (e.g. cascade delete). */
+function setBoth(items, tasks) {
+    ensureProjectsData();
+    state.projectsData = { ...state.projectsData, items, tasks };
     saveProjects(state.projectsData);
 }
 
@@ -66,8 +114,16 @@ function render() {
     if (!host) return;
     if (mode.view === 'form') {
         renderForm();
+    } else if (mode.view === 'detail') {
+        renderDetail();
     } else {
         renderList();
+    }
+    // Re-attach the panel if a task was open before a re-render
+    if (openTaskPanelId) {
+        const t = findTask(getTasks(), openTaskPanelId);
+        if (t) renderTaskPanel(t);
+        else closeTaskPanel();
     }
 }
 
@@ -114,6 +170,12 @@ function renderCard(p) {
 
     const dateRange = formatDateRange(p.startDate, p.endDate);
     const participants = renderChipsHtml(p.participants);
+    const projectTasks = findTasksByProject(getTasks(), p.id);
+    const openCount = projectTasks.filter(t => t.status !== 'done').length;
+    const totalCount = projectTasks.length;
+    const taskStats = totalCount > 0
+        ? `<span class="project-card-stats">${openCount}/${totalCount} open</span>`
+        : '<span class="project-card-stats project-card-stats-empty">No tasks yet</span>';
 
     card.innerHTML = `
         <div class="project-card-head">
@@ -124,13 +186,171 @@ function renderCard(p) {
         ${p.description ? `<p class="project-card-desc">${escapeHtml(p.description)}</p>` : ''}
         <div class="project-card-foot">
             <div class="project-card-chips">${participants}</div>
+            ${taskStats}
         </div>
     `;
-    card.addEventListener('click', () => goEdit(p.id));
+    card.addEventListener('click', () => goDetail(p.id));
     card.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goEdit(p.id); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goDetail(p.id); }
     });
     return card;
+}
+
+// ── Detail view (one project + its tasks) ──
+
+function renderDetail() {
+    const p = findProject(getProjects(), mode.detailProjectId);
+    if (!p) {
+        // Project was deleted out from under us — bounce to list
+        goList();
+        return;
+    }
+
+    const dateRange = formatDateRange(p.startDate, p.endDate);
+    const participants = renderChipsHtml(p.participants);
+    const allTasks = findTasksByProject(getTasks(), p.id);
+    const openCount = allTasks.filter(t => t.status !== 'done').length;
+    const totalCount = allTasks.length;
+
+    host.innerHTML = `
+        <div class="projects-toolbar">
+            <button class="projects-back-btn" id="projects-back-btn" aria-label="Back to projects">← Back</button>
+            <h2 class="projects-title">${escapeHtml(p.name)}</h2>
+            <span class="status-badge status-${p.status}">${STATUS_LABELS[p.status] || p.status}</span>
+            <button class="btn-secondary" id="projects-edit-btn">Edit project</button>
+        </div>
+        <div class="project-detail-meta">
+            ${dateRange ? `<div class="project-detail-dates">${escapeHtml(dateRange)}</div>` : ''}
+            <div class="project-detail-chips">${participants}</div>
+            ${p.description ? `<p class="project-detail-desc">${escapeHtml(p.description)}</p>` : ''}
+        </div>
+        <div class="project-detail-tasks">
+            <div class="tasks-header">
+                <h3 class="tasks-title">Tasks</h3>
+                <span class="tasks-count">${totalCount === 0 ? 'No tasks yet' : `${openCount} open · ${totalCount} total`}</span>
+            </div>
+            <div class="tasks-add-row" id="tasks-add-row"></div>
+            <div class="tasks-list" id="tasks-list"></div>
+        </div>
+    `;
+
+    host.querySelector('#projects-back-btn').addEventListener('click', goList);
+    host.querySelector('#projects-edit-btn').addEventListener('click', () => goEdit(p.id));
+
+    renderAddTaskRow(host.querySelector('#tasks-add-row'), p);
+    renderTasksList(host.querySelector('#tasks-list'), p, allTasks);
+}
+
+function renderAddTaskRow(root, project) {
+    root.innerHTML = `
+        <input type="text" class="task-add-name" id="task-add-name" placeholder="+ Add a task…" maxlength="200" autocomplete="off" />
+        <select class="task-add-assignee" id="task-add-assignee">
+            <option value="">Unassigned</option>
+            ${project.participants.map(p =>
+                `<option value="${escapeAttr(p)}">${escapeHtml(participantLabel(p))}</option>`
+            ).join('')}
+        </select>
+        <input type="date" class="task-add-due" id="task-add-due" aria-label="Due date" />
+        <button type="button" class="btn-primary task-add-submit" id="task-add-submit">Add</button>
+    `;
+    const nameEl = root.querySelector('#task-add-name');
+    const assigneeEl = root.querySelector('#task-add-assignee');
+    const dueEl = root.querySelector('#task-add-due');
+    const btn = root.querySelector('#task-add-submit');
+
+    const submit = () => {
+        const name = nameEl.value.trim();
+        if (!name) { nameEl.focus(); return; }
+        const t = createTask({
+            name,
+            projectId: project.id,
+            assignee: assigneeEl.value || null,
+            dueDate: dueEl.value || null,
+        });
+        const err = validateTask(t);
+        if (err) { alert(err); return; }
+        setTasks(addTaskToList(getTasks(), t));
+        render();
+        // Restore focus to the name input for rapid entry
+        const nx = host.querySelector('#task-add-name');
+        if (nx) nx.focus();
+    };
+    btn.addEventListener('click', submit);
+    nameEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    });
+}
+
+function renderTasksList(root, project, tasks) {
+    if (tasks.length === 0) {
+        root.innerHTML = '<div class="tasks-empty">No tasks. Add one above.</div>';
+        return;
+    }
+    root.innerHTML = '';
+    // Sort: open first (by due date asc, nulls last), done last (by completedAt desc)
+    const open = tasks.filter(t => t.status !== 'done').sort(taskSortComparator);
+    const done = tasks.filter(t => t.status === 'done')
+        .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
+    open.concat(done).forEach(t => root.appendChild(renderTaskRow(t, project)));
+}
+
+function taskSortComparator(a, b) {
+    const ad = a.dueDate || '9999-99-99';
+    const bd = b.dueDate || '9999-99-99';
+    if (ad !== bd) return ad.localeCompare(bd);
+    return (a.createdAt || '').localeCompare(b.createdAt || '');
+}
+
+function renderTaskRow(t, project) {
+    const row = document.createElement('div');
+    row.className = 'task-row' + (t.status === 'done' ? ' task-row-done' : '');
+    row.dataset.taskId = t.id;
+
+    const assigneeHtml = t.assignee
+        ? `<span class="chip${DEFAULT_PARTICIPANTS.includes(t.assignee) ? '' : ' chip-external'}"><span class="chip-avatar">${escapeHtml(initialOf(participantLabel(t.assignee)))}</span><span class="chip-label">${escapeHtml(participantLabel(t.assignee))}</span></span>`
+        : '<span class="task-row-unassigned">Unassigned</span>';
+
+    const dueHtml = t.dueDate
+        ? `<span class="task-row-due${isOverdue(t) ? ' task-row-due-overdue' : ''}">${escapeHtml(formatDate(t.dueDate))}</span>`
+        : '<span class="task-row-due task-row-due-empty">—</span>';
+
+    row.innerHTML = `
+        <button type="button" class="task-row-name" aria-label="Open task">${escapeHtml(t.name)}</button>
+        <select class="task-row-status status-${t.status}" aria-label="Status">
+            ${TASK_STATUSES.map(s =>
+                `<option value="${s}"${s === t.status ? ' selected' : ''}>${TASK_STATUS_LABELS[s]}</option>`
+            ).join('')}
+        </select>
+        <span class="task-row-assignee">${assigneeHtml}</span>
+        ${dueHtml}
+        <button type="button" class="task-row-delete" aria-label="Delete task">×</button>
+    `;
+
+    row.querySelector('.task-row-name').addEventListener('click', () => openTaskPanel(t.id));
+    row.querySelector('.task-row-status').addEventListener('change', (e) => {
+        const next = updateTaskInList(getTasks(), t.id, { status: e.target.value });
+        setTasks(next);
+        render();
+    });
+    row.querySelector('.task-row-delete').addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm(`Delete task "${t.name}"?`)) return;
+        setTasks(deleteTaskFromList(getTasks(), t.id));
+        if (openTaskPanelId === t.id) closeTaskPanel();
+        render();
+    });
+
+    return row;
+}
+
+function isOverdue(t) {
+    if (!t.dueDate || t.status === 'done') return false;
+    const today = new Date().toISOString().slice(0, 10);
+    return t.dueDate < today;
+}
+
+function participantLabel(p) {
+    return PARTICIPANT_LABELS[p] || p;
 }
 
 // ── Form view (create or edit) ──
@@ -193,8 +413,8 @@ function renderForm() {
     // Wire participant editor (Task 1.2 component)
     renderParticipantEditor(host.querySelector('#pf-participants'), draft.participants);
 
-    host.querySelector('#projects-back-btn').addEventListener('click', goList);
-    host.querySelector('#pf-cancel').addEventListener('click', goList);
+    host.querySelector('#projects-back-btn').addEventListener('click', goAfterForm);
+    host.querySelector('#pf-cancel').addEventListener('click', goAfterForm);
 
     if (editing) {
         host.querySelector('#pf-delete').addEventListener('click', () => onDelete(editing));
@@ -245,24 +465,232 @@ function onSubmit(editingId) {
 
     if (editingId) {
         setProjects(updateProjectInList(getProjects(), editingId, form));
+        goAfterForm();
     } else {
         setProjects(addProjectToList(getProjects(), next));
+        // For new projects, jump straight into the detail view so the user
+        // can start adding tasks. detailProjectId wasn't set before save.
+        goDetail(next.id);
     }
-
-    goList();
 }
 
 function onDelete(p) {
     if (!confirm(`Delete project "${p.name}"? This cannot be undone.`)) return;
-    setProjects(deleteProjectFromList(getProjects(), p.id));
+    // Cascade: drop the project's tasks too. They have no other anchor.
+    const remainingTasks = getTasks().filter(t => t.projectId !== p.id);
+    const remainingProjects = deleteProjectFromList(getProjects(), p.id);
+    setBoth(remainingProjects, remainingTasks);
+    closeTaskPanel();
     goList();
 }
 
 // ── View transitions ──
 
-function goList() { mode = { view: 'list', editingId: null }; render(); }
-function goCreate() { mode = { view: 'form', editingId: null }; render(); }
-function goEdit(id) { mode = { view: 'form', editingId: id }; render(); }
+function goList() {
+    mode = { view: 'list', editingId: null, detailProjectId: null };
+    closeTaskPanel();
+    render();
+}
+function goCreate() {
+    mode = { view: 'form', editingId: null, detailProjectId: mode.detailProjectId };
+    render();
+}
+function goEdit(id) {
+    mode = { view: 'form', editingId: id, detailProjectId: mode.detailProjectId };
+    render();
+}
+function goDetail(id) {
+    mode = { view: 'detail', editingId: null, detailProjectId: id };
+    render();
+}
+
+/** After form save/cancel: go back to detail if we came from there, else list. */
+function goAfterForm() {
+    if (mode.detailProjectId && findProject(getProjects(), mode.detailProjectId)) {
+        goDetail(mode.detailProjectId);
+    } else {
+        goList();
+    }
+}
+
+// ── Task slide-in panel (Task 2.1) ──
+
+/**
+ * The task panel lives in document.body (not in `host`) so it can overlay any
+ * project view and animate from off-screen via CSS transform. It manages its
+ * own form state via direct DOM reads on save; the panel is destroyed on
+ * close so there's no stale state to clean up.
+ */
+
+function openTaskPanel(taskId) {
+    openTaskPanelId = taskId;
+    const t = findTask(getTasks(), taskId);
+    if (!t) { closeTaskPanel(); return; }
+    renderTaskPanel(t);
+}
+
+function closeTaskPanel() {
+    openTaskPanelId = null;
+    const existing = document.getElementById('task-panel');
+    if (existing) existing.remove();
+    const backdrop = document.getElementById('task-panel-backdrop');
+    if (backdrop) backdrop.remove();
+}
+
+function renderTaskPanel(t) {
+    // Replace any existing panel so each render reflects current data
+    const existing = document.getElementById('task-panel');
+    if (existing) existing.remove();
+    const existingBackdrop = document.getElementById('task-panel-backdrop');
+    if (existingBackdrop) existingBackdrop.remove();
+
+    const project = findProject(getProjects(), t.projectId);
+    const projectName = project ? project.name : '(unknown project)';
+    const assigneeOptions = project ? project.participants : DEFAULT_PARTICIPANTS;
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'task-panel-backdrop';
+    backdrop.className = 'task-panel-backdrop';
+    backdrop.addEventListener('click', closeTaskPanel);
+    document.body.appendChild(backdrop);
+
+    const panel = document.createElement('aside');
+    panel.id = 'task-panel';
+    panel.className = 'task-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', `Task: ${t.name}`);
+    panel.innerHTML = `
+        <div class="task-panel-head">
+            <span class="task-panel-project">${escapeHtml(projectName)}</span>
+            <button type="button" class="task-panel-close" aria-label="Close panel">×</button>
+        </div>
+        <div class="task-panel-body">
+            <div class="form-row">
+                <label for="tp-name">Name</label>
+                <input type="text" id="tp-name" maxlength="200" value="${escapeAttr(t.name)}" />
+            </div>
+            <div class="form-row form-row-grid">
+                <div>
+                    <label for="tp-status">Status</label>
+                    <select id="tp-status">
+                        ${TASK_STATUSES.map(s =>
+                            `<option value="${s}"${s === t.status ? ' selected' : ''}>${TASK_STATUS_LABELS[s]}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div>
+                    <label for="tp-priority">Priority</label>
+                    <select id="tp-priority">
+                        ${TASK_PRIORITIES.map(p =>
+                            `<option value="${p}"${p === t.priority ? ' selected' : ''}>${TASK_PRIORITY_LABELS[p]}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div>
+                    <label for="tp-assignee">Assignee</label>
+                    <select id="tp-assignee">
+                        <option value=""${!t.assignee ? ' selected' : ''}>Unassigned</option>
+                        ${assigneeOptions.map(p =>
+                            `<option value="${escapeAttr(p)}"${p === t.assignee ? ' selected' : ''}>${escapeHtml(participantLabel(p))}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row form-row-grid">
+                <div>
+                    <label for="tp-start">Start date</label>
+                    <input type="date" id="tp-start" value="${escapeAttr(t.startDate || '')}" />
+                </div>
+                <div>
+                    <label for="tp-due">Due date</label>
+                    <input type="date" id="tp-due" value="${escapeAttr(t.dueDate || '')}" />
+                </div>
+            </div>
+            <div class="form-row">
+                <label for="tp-desc">Description</label>
+                <textarea id="tp-desc" rows="6" maxlength="4000">${escapeHtml(t.description)}</textarea>
+            </div>
+            <div class="form-error" id="tp-error" role="alert" aria-live="polite"></div>
+            <div class="task-panel-meta">
+                Created ${escapeHtml(formatDateTime(t.createdAt))}
+                ${t.completedAt ? `· Completed ${escapeHtml(formatDateTime(t.completedAt))}` : ''}
+            </div>
+        </div>
+        <div class="task-panel-foot">
+            <button type="button" class="btn-danger" id="tp-delete">Delete</button>
+            <div class="task-panel-foot-right">
+                <button type="button" class="btn-secondary" id="tp-cancel">Cancel</button>
+                <button type="button" class="btn-primary" id="tp-save">Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(panel);
+
+    // Slide-in: add the open class on next frame so the transition runs
+    requestAnimationFrame(() => {
+        panel.classList.add('task-panel-open');
+        backdrop.classList.add('task-panel-backdrop-open');
+    });
+
+    panel.querySelector('.task-panel-close').addEventListener('click', closeTaskPanel);
+    panel.querySelector('#tp-cancel').addEventListener('click', closeTaskPanel);
+    panel.querySelector('#tp-delete').addEventListener('click', () => {
+        if (!confirm(`Delete task "${t.name}"?`)) return;
+        setTasks(deleteTaskFromList(getTasks(), t.id));
+        closeTaskPanel();
+        render();
+    });
+    panel.querySelector('#tp-save').addEventListener('click', () => onTaskPanelSave(t));
+
+    // Esc closes
+    panel.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); closeTaskPanel(); }
+    });
+    panel.querySelector('#tp-name').focus();
+}
+
+function onTaskPanelSave(orig) {
+    const panel = document.getElementById('task-panel');
+    if (!panel) return;
+    const patch = {
+        name: panel.querySelector('#tp-name').value.trim(),
+        status: panel.querySelector('#tp-status').value,
+        priority: panel.querySelector('#tp-priority').value,
+        assignee: panel.querySelector('#tp-assignee').value || null,
+        startDate: panel.querySelector('#tp-start').value || null,
+        dueDate: panel.querySelector('#tp-due').value || null,
+        description: panel.querySelector('#tp-desc').value,
+    };
+    const merged = { ...orig, ...patch };
+    const err = validateTask(merged);
+    if (err) {
+        const errEl = panel.querySelector('#tp-error');
+        errEl.textContent = err;
+        errEl.style.display = '';
+        return;
+    }
+    setTasks(updateTaskInList(getTasks(), orig.id, patch));
+    closeTaskPanel();
+    render();
+}
+
+function formatDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+}
+
+function formatDate(iso) {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+}
 
 // ── Participant editor (Task 1.2) ──
 

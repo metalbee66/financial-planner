@@ -15,7 +15,7 @@ import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
 import { migrateOutgoing, DEFAULT_CY, DEFAULT_NY } from './data.js';
 import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
 import { DEFAULT_PM } from './modules/pm-legacy/pm.js';
-import { DEFAULT_PROJECTS, sanitiseProject } from './modules/projects/data.js';
+import { DEFAULT_PROJECTS, sanitiseProject, sanitiseTask } from './modules/projects/data.js';
 import { state } from './state.js';
 
 let firebaseApp = null;
@@ -189,7 +189,11 @@ export function setupRealtimeListeners() {
 
     fbListen('projects', (data) => {
         if (data && Array.isArray(data.items)) {
-            state.projectsData = { ...data, items: data.items.map(sanitiseProject).filter(Boolean) };
+            state.projectsData = {
+                ...data,
+                items: data.items.map(sanitiseProject).filter(Boolean),
+                tasks: Array.isArray(data.tasks) ? data.tasks.map(sanitiseTask).filter(Boolean) : [],
+            };
             if (renderProjectsTab) renderProjectsTab();
         }
     });
@@ -223,7 +227,11 @@ export async function initialSync() {
 
         const fbProjects = await fbLoad('projects');
         if (fbProjects && Array.isArray(fbProjects.items)) {
-            state.projectsData = { ...fbProjects, items: fbProjects.items.map(sanitiseProject).filter(Boolean) };
+            state.projectsData = {
+                ...fbProjects,
+                items: fbProjects.items.map(sanitiseProject).filter(Boolean),
+                tasks: Array.isArray(fbProjects.tasks) ? fbProjects.tasks.map(sanitiseTask).filter(Boolean) : [],
+            };
         }
 
         console.log('Data loaded from Firebase.');

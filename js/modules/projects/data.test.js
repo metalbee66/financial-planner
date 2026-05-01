@@ -10,6 +10,8 @@
 
 import {
     PROJECT_STATUSES,
+    TASK_STATUSES,
+    TASK_PRIORITIES,
     DEFAULT_PARTICIPANTS,
     createProject,
     validateProject,
@@ -18,6 +20,14 @@ import {
     deleteProjectFromList,
     findProject,
     sanitiseProject,
+    createTask,
+    sanitiseTask,
+    validateTask,
+    addTaskToList,
+    updateTaskInList,
+    deleteTaskFromList,
+    findTask,
+    findTasksByProject,
 } from './data.js';
 
 const tests = [];
@@ -173,6 +183,160 @@ test('sanitiseProject preserves valid fields', () => {
     eq(out.id, p.id);
     eq(out.status, 'active');
     eq(out.createdAt, p.createdAt);
+});
+
+// ── createTask ──
+
+test('createTask populates id, timestamps, defaults', () => {
+    const t = createTask({ name: 'Buy seeds', projectId: 'p_x' });
+    truthy(t.id && t.id.startsWith('t_'), 'id should start with t_');
+    eq(t.projectId, 'p_x');
+    eq(t.status, 'not-started');
+    eq(t.priority, 'normal');
+    eq(t.dependsOn, []);
+    eq(t.comments, []);
+    eq(t.events, []);
+    eq(t.attachments, []);
+    eq(t.parentTaskId, null);
+    eq(t.completedAt, null);
+    truthy(t.createdAt, 'createdAt set');
+    eq(t.createdAt, t.updatedAt, 'updatedAt === createdAt on create');
+});
+
+test('createTask trims name and description', () => {
+    const t = createTask({ name: '  Plant  ', description: '  notes  ', projectId: 'p_x' });
+    eq(t.name, 'Plant');
+    eq(t.description, 'notes');
+});
+
+test('createTask falls back to defaults for unknown enums', () => {
+    const t = createTask({ name: 'X', projectId: 'p_x', status: 'bogus', priority: 'urgent' });
+    eq(t.status, 'not-started');
+    eq(t.priority, 'normal');
+});
+
+test('createTask ids are unique across rapid calls', () => {
+    const ids = new Set();
+    for (let i = 0; i < 50; i++) ids.add(createTask({ name: 'X', projectId: 'p' }).id);
+    eq(ids.size, 50);
+});
+
+test('TASK_STATUSES exposes the planned enum', () => {
+    eq(TASK_STATUSES, ['not-started', 'in-progress', 'review', 'done', 'blocked']);
+});
+
+test('TASK_PRIORITIES exposes the planned enum', () => {
+    eq(TASK_PRIORITIES, ['low', 'normal', 'high']);
+});
+
+// ── validateTask ──
+
+test('validateTask rejects missing name', () => {
+    const t = createTask({ name: '', projectId: 'p' });
+    truthy(validateTask(t));
+});
+
+test('validateTask rejects missing projectId', () => {
+    const t = createTask({ name: 'X', projectId: '' });
+    truthy(validateTask(t));
+});
+
+test('validateTask rejects unknown status/priority', () => {
+    const t = createTask({ name: 'X', projectId: 'p' });
+    t.status = 'nope';
+    truthy(validateTask(t));
+    const t2 = createTask({ name: 'X', projectId: 'p' });
+    t2.priority = 'nope';
+    truthy(validateTask(t2));
+});
+
+test('validateTask rejects due before start', () => {
+    const t = createTask({ name: 'X', projectId: 'p', startDate: '2026-05-10', dueDate: '2026-05-01' });
+    truthy(validateTask(t));
+});
+
+test('validateTask accepts equal start and due', () => {
+    const t = createTask({ name: 'X', projectId: 'p', startDate: '2026-05-10', dueDate: '2026-05-10' });
+    falsy(validateTask(t));
+});
+
+// ── task list mutators ──
+
+test('addTaskToList appends and is immutable', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const next = addTaskToList([a], b);
+    eq(next.length, 2);
+    eq(next[1].id, b.id);
+});
+
+test('updateTaskInList patches and bumps updatedAt', async () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    await new Promise(r => setTimeout(r, 5));
+    const next = updateTaskInList([t], t.id, { name: 'A renamed' });
+    eq(next[0].name, 'A renamed');
+    truthy(next[0].updatedAt >= t.updatedAt);
+});
+
+test('updateTaskInList stamps completedAt when status -> done', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    eq(t.completedAt, null);
+    const next = updateTaskInList([t], t.id, { status: 'done' });
+    truthy(next[0].completedAt, 'completedAt set on transition to done');
+});
+
+test('updateTaskInList clears completedAt when leaving done', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const done = updateTaskInList([t], t.id, { status: 'done' });
+    truthy(done[0].completedAt);
+    const reopened = updateTaskInList(done, t.id, { status: 'in-progress' });
+    eq(reopened[0].completedAt, null);
+});
+
+test('updateTaskInList returns same ref when id missing', () => {
+    const list = [createTask({ name: 'A', projectId: 'p' })];
+    eq(updateTaskInList(list, 'no-such', { name: 'X' }), list);
+});
+
+test('deleteTaskFromList removes by id', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const next = deleteTaskFromList([a, b], a.id);
+    eq(next.length, 1);
+    eq(next[0].id, b.id);
+});
+
+test('findTask + findTasksByProject filter correctly', () => {
+    const a = createTask({ name: 'A', projectId: 'p1' });
+    const b = createTask({ name: 'B', projectId: 'p1' });
+    const c = createTask({ name: 'C', projectId: 'p2' });
+    eq(findTask([a, b, c], b.id).name, 'B');
+    eq(findTask([a, b, c], 'nope'), null);
+    eq(findTasksByProject([a, b, c], 'p1').length, 2);
+    eq(findTasksByProject([a, b, c], 'p2').length, 1);
+    eq(findTasksByProject([a, b, c], 'pX').length, 0);
+});
+
+// ── sanitiseTask ──
+
+test('sanitiseTask backfills missing fields on legacy data', () => {
+    const fixed = sanitiseTask({ id: 't_legacy', name: 'Old', projectId: 'p1' });
+    eq(fixed.status, 'not-started');
+    eq(fixed.priority, 'normal');
+    eq(fixed.dependsOn, []);
+    eq(fixed.comments, []);
+    eq(fixed.events, []);
+    eq(fixed.attachments, []);
+    truthy(fixed.createdAt);
+    truthy(fixed.updatedAt);
+});
+
+test('sanitiseTask preserves valid fields', () => {
+    const t = createTask({ name: 'X', projectId: 'p', status: 'in-progress', priority: 'high' });
+    const out = sanitiseTask(t);
+    eq(out.id, t.id);
+    eq(out.status, 'in-progress');
+    eq(out.priority, 'high');
 });
 
 // ── runner ──
