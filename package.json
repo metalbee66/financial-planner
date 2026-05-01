@@ -1,0 +1,16 @@
+{
+  "name": "family-planner",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Static planner app deployed to GitHub Pages. This package.json exists only to host Playwright dev-tooling — the deployed site is plain vanilla JS with no build step.",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
