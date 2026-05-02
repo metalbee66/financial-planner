@@ -32,6 +32,9 @@ import {
     deleteTaskFromList,
     findTask,
     findTasksByProject,
+    findSubtasks,
+    promoteSubtasksInList,
+    deleteTaskCascadeFromList,
     saveProjects,
 } from './data.js';
 
@@ -287,11 +290,20 @@ function renderTasksList(root, project, tasks) {
         return;
     }
     root.innerHTML = '';
-    // Sort: open first (by due date asc, nulls last), done last (by completedAt desc)
-    const open = tasks.filter(t => t.status !== 'done').sort(taskSortComparator);
-    const done = tasks.filter(t => t.status === 'done')
+    // Top-level: open first (due asc, nulls last), then done (completedAt desc).
+    // Subtasks render indented under their parent regardless of their own state,
+    // so siblings stay grouped (sorted by createdAt asc — order added).
+    const tops = tasks.filter(t => !t.parentTaskId);
+    const openTops = tops.filter(t => t.status !== 'done').sort(taskSortComparator);
+    const doneTops = tops.filter(t => t.status === 'done')
         .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
-    open.concat(done).forEach(t => root.appendChild(renderTaskRow(t, project)));
+    openTops.concat(doneTops).forEach(t => {
+        root.appendChild(renderTaskRow(t, project, false));
+        const subs = findSubtasks(tasks, t.id)
+            .slice()
+            .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+        subs.forEach(s => root.appendChild(renderTaskRow(s, project, true)));
+    });
 }
 
 function taskSortComparator(a, b) {
@@ -301,9 +313,11 @@ function taskSortComparator(a, b) {
     return (a.createdAt || '').localeCompare(b.createdAt || '');
 }
 
-function renderTaskRow(t, project) {
+function renderTaskRow(t, project, isSubtask) {
     const row = document.createElement('div');
-    row.className = 'task-row' + (t.status === 'done' ? ' task-row-done' : '');
+    row.className = 'task-row'
+        + (t.status === 'done' ? ' task-row-done' : '')
+        + (isSubtask ? ' task-row-subtask' : '');
     row.dataset.taskId = t.id;
 
     const assigneeHtml = t.assignee
@@ -334,13 +348,46 @@ function renderTaskRow(t, project) {
     });
     row.querySelector('.task-row-delete').addEventListener('click', (e) => {
         e.stopPropagation();
-        if (!confirm(`Delete task "${t.name}"?`)) return;
-        setTasks(deleteTaskFromList(getTasks(), t.id));
-        if (openTaskPanelId === t.id) closeTaskPanel();
-        render();
+        deleteTaskWithSubtaskPrompt(t);
     });
 
     return row;
+}
+
+/**
+ * Delete a task. If it has subtasks, ask whether to also delete them or
+ * promote them to top-level. Two sequential confirms keep this consistent
+ * with the rest of the codebase's native-confirm style — no custom modal.
+ *
+ *   confirm 1: "Delete task X? (it has N subtasks)"   → OK proceed, Cancel abort
+ *   confirm 2: "Also delete the N subtasks?"          → OK cascade,  Cancel promote
+ */
+function deleteTaskWithSubtaskPrompt(t) {
+    const tasks = getTasks();
+    const subs = findSubtasks(tasks, t.id);
+    if (subs.length === 0) {
+        if (!confirm(`Delete task "${t.name}"?`)) return;
+        setTasks(deleteTaskFromList(tasks, t.id));
+        if (openTaskPanelId === t.id) closeTaskPanel();
+        render();
+        return;
+    }
+    const n = subs.length;
+    if (!confirm(`Delete task "${t.name}"? It has ${n} subtask${n === 1 ? '' : 's'}.`)) return;
+    const cascade = confirm(
+        `Also delete the ${n} subtask${n === 1 ? '' : 's'}?\n\n` +
+        `OK = delete them too.\nCancel = promote them to top-level tasks.`
+    );
+    let next;
+    if (cascade) {
+        next = deleteTaskCascadeFromList(tasks, t.id);
+    } else {
+        const promoted = promoteSubtasksInList(tasks, t.id);
+        next = deleteTaskFromList(promoted, t.id);
+    }
+    setTasks(next);
+    if (openTaskPanelId === t.id) closeTaskPanel();
+    render();
 }
 
 function isOverdue(t) {
@@ -611,6 +658,20 @@ function renderTaskPanel(t) {
                 <textarea id="tp-desc" rows="6" maxlength="4000">${escapeHtml(t.description)}</textarea>
             </div>
             <div class="form-error" id="tp-error" role="alert" aria-live="polite"></div>
+            ${t.parentTaskId ? '' : `
+                <div class="task-panel-subtasks" id="tp-subtasks-section">
+                    <div class="task-panel-subtasks-head">
+                        <h4>Subtasks</h4>
+                        <button type="button" class="btn-secondary" id="tp-add-subtask-btn">+ Subtask</button>
+                    </div>
+                    <div class="task-panel-subtask-add" id="tp-subtask-add" hidden>
+                        <input type="text" id="tp-subtask-name" placeholder="Subtask name" maxlength="200" autocomplete="off" />
+                        <button type="button" class="btn-primary" id="tp-subtask-submit">Add</button>
+                        <button type="button" class="btn-secondary" id="tp-subtask-cancel">Cancel</button>
+                    </div>
+                    <ul class="task-panel-subtask-list" id="tp-subtask-list"></ul>
+                </div>
+            `}
             <div class="task-panel-meta">
                 Created ${escapeHtml(formatDateTime(t.createdAt))}
                 ${t.completedAt ? `· Completed ${escapeHtml(formatDateTime(t.completedAt))}` : ''}
@@ -634,19 +695,92 @@ function renderTaskPanel(t) {
 
     panel.querySelector('.task-panel-close').addEventListener('click', closeTaskPanel);
     panel.querySelector('#tp-cancel').addEventListener('click', closeTaskPanel);
-    panel.querySelector('#tp-delete').addEventListener('click', () => {
-        if (!confirm(`Delete task "${t.name}"?`)) return;
-        setTasks(deleteTaskFromList(getTasks(), t.id));
-        closeTaskPanel();
-        render();
-    });
+    panel.querySelector('#tp-delete').addEventListener('click', () => deleteTaskWithSubtaskPrompt(t));
     panel.querySelector('#tp-save').addEventListener('click', () => onTaskPanelSave(t));
+
+    if (!t.parentTaskId) wireSubtaskSection(panel, t);
 
     // Esc closes
     panel.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { e.preventDefault(); closeTaskPanel(); }
     });
     panel.querySelector('#tp-name').focus();
+}
+
+function wireSubtaskSection(panel, parent) {
+    const addBtn = panel.querySelector('#tp-add-subtask-btn');
+    const addRow = panel.querySelector('#tp-subtask-add');
+    const nameEl = panel.querySelector('#tp-subtask-name');
+    const submitBtn = panel.querySelector('#tp-subtask-submit');
+    const cancelBtn = panel.querySelector('#tp-subtask-cancel');
+    const list = panel.querySelector('#tp-subtask-list');
+
+    addBtn.addEventListener('click', () => {
+        addRow.hidden = false;
+        addBtn.hidden = true;
+        nameEl.focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+        addRow.hidden = true;
+        addBtn.hidden = false;
+        nameEl.value = '';
+    });
+    const submit = () => {
+        const name = nameEl.value.trim();
+        if (!name) { nameEl.focus(); return; }
+        const sub = createTask({
+            name,
+            projectId: parent.projectId,
+            parentTaskId: parent.id,
+        });
+        const err = validateTask(sub);
+        if (err) { alert(err); return; }
+        setTasks(addTaskToList(getTasks(), sub));
+        nameEl.value = '';
+        // Re-render the panel so the new subtask appears in its list, then
+        // refocus the input so the user can keep adding.
+        render();
+        const refocused = document.querySelector('#tp-subtask-name');
+        if (refocused) refocused.focus();
+    };
+    submitBtn.addEventListener('click', submit);
+    nameEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    });
+
+    // Render existing subtasks (compact: name + status + delete)
+    const subs = findSubtasks(getTasks(), parent.id)
+        .slice()
+        .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    if (subs.length === 0) {
+        list.innerHTML = '<li class="task-panel-subtask-empty">No subtasks yet.</li>';
+        return;
+    }
+    list.innerHTML = '';
+    subs.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'task-panel-subtask' + (s.status === 'done' ? ' task-panel-subtask-done' : '');
+        li.innerHTML = `
+            <button type="button" class="task-panel-subtask-name" aria-label="Open subtask">${escapeHtml(s.name)}</button>
+            <select class="task-panel-subtask-status status-${s.status}" aria-label="Status">
+                ${TASK_STATUSES.map(st =>
+                    `<option value="${st}"${st === s.status ? ' selected' : ''}>${TASK_STATUS_LABELS[st]}</option>`
+                ).join('')}
+            </select>
+            <button type="button" class="task-panel-subtask-delete" aria-label="Delete subtask">×</button>
+        `;
+        li.querySelector('.task-panel-subtask-name').addEventListener('click', () => openTaskPanel(s.id));
+        li.querySelector('.task-panel-subtask-status').addEventListener('change', (e) => {
+            setTasks(updateTaskInList(getTasks(), s.id, { status: e.target.value }));
+            render();
+        });
+        li.querySelector('.task-panel-subtask-delete').addEventListener('click', () => {
+            if (!confirm(`Delete subtask "${s.name}"?`)) return;
+            setTasks(deleteTaskFromList(getTasks(), s.id));
+            render();
+        });
+        list.appendChild(li);
+    });
 }
 
 function onTaskPanelSave(orig) {

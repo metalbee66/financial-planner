@@ -28,6 +28,9 @@ import {
     deleteTaskFromList,
     findTask,
     findTasksByProject,
+    findSubtasks,
+    promoteSubtasksInList,
+    deleteTaskCascadeFromList,
 } from './data.js';
 
 const tests = [];
@@ -337,6 +340,79 @@ test('sanitiseTask preserves valid fields', () => {
     eq(out.id, t.id);
     eq(out.status, 'in-progress');
     eq(out.priority, 'high');
+});
+
+// ── subtasks (Task 2.2) ──
+
+test('findSubtasks returns children of a parent', () => {
+    const parent = createTask({ name: 'Parent', projectId: 'p' });
+    const childA = createTask({ name: 'A', projectId: 'p', parentTaskId: parent.id });
+    const childB = createTask({ name: 'B', projectId: 'p', parentTaskId: parent.id });
+    const unrelated = createTask({ name: 'U', projectId: 'p' });
+    const subs = findSubtasks([parent, childA, childB, unrelated], parent.id);
+    eq(subs.length, 2);
+    eq(subs.map(t => t.name).sort(), ['A', 'B']);
+});
+
+test('findSubtasks returns empty array when parent has no children', () => {
+    const parent = createTask({ name: 'Lonely', projectId: 'p' });
+    eq(findSubtasks([parent], parent.id), []);
+});
+
+test('createTask accepts parentTaskId', () => {
+    const t = createTask({ name: 'Sub', projectId: 'p', parentTaskId: 't_parent' });
+    eq(t.parentTaskId, 't_parent');
+});
+
+test('promoteSubtasksInList sets parentTaskId=null on all children', () => {
+    const parent = createTask({ name: 'Parent', projectId: 'p' });
+    const a = createTask({ name: 'A', projectId: 'p', parentTaskId: parent.id });
+    const b = createTask({ name: 'B', projectId: 'p', parentTaskId: parent.id });
+    const c = createTask({ name: 'C', projectId: 'p', parentTaskId: parent.id });
+    const next = promoteSubtasksInList([parent, a, b, c], parent.id);
+    eq(next.length, 4);
+    const promoted = next.filter(t => t.id !== parent.id);
+    promoted.forEach(t => eq(t.parentTaskId, null, `${t.name} should be promoted`));
+});
+
+test('promoteSubtasksInList does not touch unrelated tasks', () => {
+    const p1 = createTask({ name: 'P1', projectId: 'p' });
+    const p2 = createTask({ name: 'P2', projectId: 'p' });
+    const c1 = createTask({ name: 'C1', projectId: 'p', parentTaskId: p1.id });
+    const c2 = createTask({ name: 'C2', projectId: 'p', parentTaskId: p2.id });
+    const next = promoteSubtasksInList([p1, p2, c1, c2], p1.id);
+    const c2After = next.find(t => t.id === c2.id);
+    eq(c2After.parentTaskId, p2.id, 'unrelated child stays nested');
+});
+
+test('promoteSubtasksInList returns same list when parent has no children', () => {
+    const lonely = createTask({ name: 'Lonely', projectId: 'p' });
+    const list = [lonely];
+    eq(promoteSubtasksInList(list, lonely.id), list);
+});
+
+test('deleteTaskCascadeFromList removes parent and all subtasks', () => {
+    const parent = createTask({ name: 'Parent', projectId: 'p' });
+    const a = createTask({ name: 'A', projectId: 'p', parentTaskId: parent.id });
+    const b = createTask({ name: 'B', projectId: 'p', parentTaskId: parent.id });
+    const sibling = createTask({ name: 'Sibling', projectId: 'p' });
+    const next = deleteTaskCascadeFromList([parent, a, b, sibling], parent.id);
+    eq(next.length, 1);
+    eq(next[0].id, sibling.id);
+});
+
+test('deleteTaskCascadeFromList of a leaf task removes only that task', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const next = deleteTaskCascadeFromList([a, b], a.id);
+    eq(next.length, 1);
+    eq(next[0].id, b.id);
+});
+
+test('sanitiseTask preserves parentTaskId', () => {
+    const t = createTask({ name: 'Sub', projectId: 'p', parentTaskId: 't_parent' });
+    const out = sanitiseTask(t);
+    eq(out.parentTaskId, 't_parent');
 });
 
 // ── runner ──

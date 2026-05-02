@@ -219,6 +219,37 @@ export function findTasksByProject(list, projectId) {
     return list.filter(t => t.projectId === projectId);
 }
 
+// ── Subtasks (Task 2.2) ──
+
+/** Tasks whose `parentTaskId` matches the given id. Order preserved from input. */
+export function findSubtasks(list, parentId) {
+    if (!parentId) return [];
+    return list.filter(t => t.parentTaskId === parentId);
+}
+
+/**
+ * Set `parentTaskId = null` on every child of `parentId`, promoting them to
+ * top-level. Returns same ref if there are no children (so callers can avoid
+ * a redundant Firebase save).
+ */
+export function promoteSubtasksInList(list, parentId) {
+    const at = nowIso();
+    let touched = false;
+    const next = list.map(t => {
+        if (t.parentTaskId === parentId) {
+            touched = true;
+            return { ...t, parentTaskId: null, updatedAt: at };
+        }
+        return t;
+    });
+    return touched ? next : list;
+}
+
+/** Remove a task and any of its children. One-level model so no recursion. */
+export function deleteTaskCascadeFromList(list, taskId) {
+    return list.filter(t => t.id !== taskId && t.parentTaskId !== taskId);
+}
+
 // ── Persistence ──
 
 export function loadProjects() {

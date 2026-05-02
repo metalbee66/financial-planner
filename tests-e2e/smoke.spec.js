@@ -13,6 +13,11 @@
  *   Phase 2.1 — tasks: inline add (Enter + focus retention), inline status
  *               change, slide-in panel, delete, cascade delete, sort,
  *               overdue styling, persistence round-trip via localStorage.
+ *   Phase 2.2 — subtasks: + Subtask UI on parent panel only, indented render,
+ *               delete-parent prompt (cascade vs promote), persistence.
+ *
+ * Plus a `tests.html` driver that runs the in-browser data-layer unit suite
+ * and asserts 0 failures — keeps unit + e2e in one CI command.
  *
  * What this does NOT cover (still smoke-test manually):
  *   - Real Firebase round-trip across browser tabs
@@ -272,6 +277,145 @@ test.describe('Phase 2.1 — Tasks within a project', () => {
         await backToList(page);
         const stats = page.locator('.project-card', { hasText: 'Count check' }).locator('.project-card-stats');
         await expect(stats).toHaveText('2/3 open');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 2.2 — Subtasks', () => {
+
+    async function openTaskPanel(page, taskName) {
+        await page.locator('.task-row-name', { hasText: taskName }).click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+    }
+
+    async function addSubtask(page, name) {
+        await page.locator('#tp-add-subtask-btn').click();
+        await page.locator('#tp-subtask-name').fill(name);
+        await page.locator('#tp-subtask-name').press('Enter');
+    }
+
+    test('+ Subtask button is shown on parent panels but hidden on subtask panels', async ({ page }) => {
+        await createProject(page, { name: 'Nest test' });
+        await page.locator('#task-add-name').fill('Parent');
+        await page.locator('#task-add-name').press('Enter');
+
+        await openTaskPanel(page, 'Parent');
+        await expect(page.locator('#tp-add-subtask-btn')).toBeVisible();
+        await addSubtask(page, 'Child A');
+        // Re-render leaves the section in place; reopen panel to be safe
+        await page.locator('.task-panel-close').click();
+
+        // Open the subtask's panel — no + Subtask button (one level deep)
+        await openTaskPanel(page, 'Child A');
+        await expect(page.locator('#tp-add-subtask-btn')).toHaveCount(0);
+    });
+
+    test('subtask renders indented under its parent', async ({ page }) => {
+        await createProject(page, { name: 'Indent test' });
+        await page.locator('#task-add-name').fill('Top');
+        await page.locator('#task-add-name').press('Enter');
+
+        await openTaskPanel(page, 'Top');
+        await addSubtask(page, 'Under Top');
+        await page.locator('.task-panel-close').click();
+
+        const rows = page.locator('.task-row');
+        await expect(rows).toHaveCount(2);
+        // Subtask row is the second one and carries the subtask class
+        await expect(rows.nth(1)).toHaveClass(/task-row-subtask/);
+        await expect(rows.nth(1).locator('.task-row-name')).toHaveText('Under Top');
+    });
+
+    test('delete parent → promote: subtasks become top-level', async ({ page }) => {
+        await createProject(page, { name: 'Promote test' });
+        await page.locator('#task-add-name').fill('Boss');
+        await page.locator('#task-add-name').press('Enter');
+
+        await openTaskPanel(page, 'Boss');
+        await addSubtask(page, 'Sub 1');
+        await addSubtask(page, 'Sub 2');
+        await addSubtask(page, 'Sub 3');
+        await page.locator('.task-panel-close').click();
+
+        // Sanity: 1 parent + 3 indented subtasks
+        await expect(page.locator('.task-row')).toHaveCount(4);
+        await expect(page.locator('.task-row-subtask')).toHaveCount(3);
+
+        // Delete parent: confirm 1 = OK (proceed), confirm 2 = Cancel (promote)
+        const dialogs = [];
+        page.on('dialog', d => {
+            dialogs.push(d.message());
+            if (dialogs.length === 1) d.accept();
+            else d.dismiss();
+        });
+        await page.locator('.task-row', { hasText: 'Boss' }).locator('.task-row-delete').click();
+
+        // Wait for both confirms to fire
+        await expect.poll(() => dialogs.length).toBe(2);
+        expect(dialogs[0]).toContain('3 subtasks');
+        expect(dialogs[1]).toContain('promote');
+
+        // 3 rows remain, all top-level (no subtask class)
+        await expect(page.locator('.task-row')).toHaveCount(3);
+        await expect(page.locator('.task-row-subtask')).toHaveCount(0);
+        // All 3 names persist
+        for (const n of ['Sub 1', 'Sub 2', 'Sub 3']) {
+            await expect(page.locator('.task-row-name', { hasText: n })).toBeVisible();
+        }
+    });
+
+    test('delete parent → cascade: subtasks deleted too', async ({ page }) => {
+        await createProject(page, { name: 'Cascade test' });
+        await page.locator('#task-add-name').fill('Boss');
+        await page.locator('#task-add-name').press('Enter');
+
+        await openTaskPanel(page, 'Boss');
+        await addSubtask(page, 'Sub A');
+        await addSubtask(page, 'Sub B');
+        await page.locator('.task-panel-close').click();
+        await expect(page.locator('.task-row')).toHaveCount(3);
+
+        // Both confirms = OK → cascade
+        page.on('dialog', d => d.accept());
+        await page.locator('.task-row', { hasText: 'Boss' }).locator('.task-row-delete').click();
+
+        await expect(page.locator('.task-row')).toHaveCount(0);
+        await expect(page.locator('.tasks-empty')).toBeVisible();
+    });
+
+    test('subtask state survives reload', async ({ page }) => {
+        await createProject(page, { name: 'Persist subs' });
+        await page.locator('#task-add-name').fill('Parent');
+        await page.locator('#task-add-name').press('Enter');
+
+        await openTaskPanel(page, 'Parent');
+        await addSubtask(page, 'Child');
+        await page.locator('.task-panel-close').click();
+
+        await page.reload();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Persist subs' }).click();
+        const rows = page.locator('.task-row');
+        await expect(rows).toHaveCount(2);
+        await expect(rows.nth(1)).toHaveClass(/task-row-subtask/);
+        await expect(rows.nth(1).locator('.task-row-name')).toHaveText('Child');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('In-browser data-layer unit suite', () => {
+
+    test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {
+        const errors = [];
+        page.on('pageerror', e => errors.push(e.message));
+        await page.goto('/tests.html');
+        // The runner appends a `.test-summary` element when done
+        const summary = page.locator('.test-summary');
+        await expect(summary).toBeVisible({ timeout: 10_000 });
+        await expect(summary).toHaveClass(/ok/);
+        await expect(summary).toContainText(/^\d+ passed, 0 failed$/);
+        // No script errors loading the test modules
+        expect(errors).toEqual([]);
     });
 });
 

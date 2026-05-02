@@ -1522,3 +1522,102 @@ select.editable { width: 100px; cursor: pointer; }
     .task-row-due { grid-area: due; }
     .task-row-delete { grid-area: delete; }
 }
+
+/* ── Phase 2.2: subtasks ── */
+.task-row-subtask {
+    margin-left: 28px;
+    border-left: 2px solid var(--border);
+    padding-left: 12px;
+}
+.task-panel-subtasks {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+.task-panel-subtasks-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.task-panel-subtasks-head h4 {
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.task-panel-subtask-add {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.task-panel-subtask-add input[type="text"] {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+}
+.task-panel-subtask-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.task-panel-subtask {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+}
+.task-panel-subtask-done .task-panel-subtask-name {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+.task-panel-subtask-name {
+    background: none;
+    border: none;
+    text-align: left;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    padding: 2px 0;
+}
+.task-panel-subtask-name:hover { color: var(--accent); }
+.task-panel-subtask-status {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.82rem;
+}
+.task-panel-subtask-delete {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0 6px;
+}
+.task-panel-subtask-delete:hover { color: var(--red); }
+.task-panel-subtask-empty {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    font-style: italic;
+    padding: 4px 0;
+}
+@media (max-width: 600px) {
+    .task-row-subtask { margin-left: 12px; padding-left: 8px; }
+    .task-panel-subtask-add { grid-template-columns: 1fr; }
+}
