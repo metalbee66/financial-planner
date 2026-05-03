@@ -31,6 +31,10 @@ import {
     findSubtasks,
     promoteSubtasksInList,
     deleteTaskCascadeFromList,
+    addDependency,
+    removeDependency,
+    wouldCreateCycle,
+    countBlockingDeps,
 } from './data.js';
 
 const tests = [];
@@ -413,6 +417,143 @@ test('sanitiseTask preserves parentTaskId', () => {
     const t = createTask({ name: 'Sub', projectId: 'p', parentTaskId: 't_parent' });
     const out = sanitiseTask(t);
     eq(out.parentTaskId, 't_parent');
+});
+
+// ── dependencies (Task 3.1) ──
+
+test('addDependency adds a dep id to dependsOn and bumps updatedAt', async () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    await new Promise(r => setTimeout(r, 5));
+    const next = addDependency([a, b], a.id, b.id);
+    const aNext = next.find(t => t.id === a.id);
+    eq(aNext.dependsOn, [b.id]);
+    truthy(aNext.updatedAt >= a.updatedAt, 'updatedAt should not regress');
+    eq(next.find(t => t.id === b.id), b, 'b is unchanged');
+});
+
+test('addDependency is idempotent — duplicate adds do not stack', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    let list = addDependency([a, b], a.id, b.id);
+    list = addDependency(list, a.id, b.id);
+    const aOut = list.find(t => t.id === a.id);
+    eq(aOut.dependsOn, [b.id]);
+});
+
+test('addDependency returns same ref when target task missing', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const list = [a];
+    eq(addDependency(list, 'no-such', a.id), list);
+});
+
+test('addDependency refuses self-dependency (returns same ref)', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const list = [a];
+    eq(addDependency(list, a.id, a.id), list);
+});
+
+test('addDependency refuses a cycle (returns same ref)', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    // A depends on B
+    const after1 = addDependency([a, b], a.id, b.id);
+    // Now adding B->A would cycle (A->B->A). addDependency should refuse.
+    const after2 = addDependency(after1, b.id, a.id);
+    eq(after2, after1, 'cycle attempt returns same list');
+});
+
+test('removeDependency drops the dep id and bumps updatedAt', async () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const c = createTask({ name: 'C', projectId: 'p' });
+    let list = addDependency([a, b, c], a.id, b.id);
+    list = addDependency(list, a.id, c.id);
+    await new Promise(r => setTimeout(r, 5));
+    const next = removeDependency(list, a.id, b.id);
+    const aOut = next.find(t => t.id === a.id);
+    eq(aOut.dependsOn, [c.id]);
+    truthy(aOut.updatedAt >= a.updatedAt);
+});
+
+test('removeDependency is a no-op when the dep is not present', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const list = [a, b];
+    eq(removeDependency(list, a.id, b.id), list);
+});
+
+test('wouldCreateCycle: direct self-dep is a cycle', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    truthy(wouldCreateCycle([a], a.id, a.id));
+});
+
+test('wouldCreateCycle: A depends on B, then B->A would cycle', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const list = addDependency([a, b], a.id, b.id);
+    truthy(wouldCreateCycle(list, b.id, a.id));
+});
+
+test('wouldCreateCycle: A->B->C->A is a cycle (transitive)', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const c = createTask({ name: 'C', projectId: 'p' });
+    let list = addDependency([a, b, c], a.id, b.id);
+    list = addDependency(list, b.id, c.id);
+    truthy(wouldCreateCycle(list, c.id, a.id));
+});
+
+test('wouldCreateCycle: independent edges are fine', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const c = createTask({ name: 'C', projectId: 'p' });
+    const list = addDependency([a, b, c], a.id, b.id);
+    falsy(wouldCreateCycle(list, a.id, c.id), 'A->C alongside A->B is fine');
+});
+
+test('wouldCreateCycle handles missing tasks gracefully', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    falsy(wouldCreateCycle([a], a.id, 'no-such-task'));
+});
+
+test('countBlockingDeps: 0 when no deps', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    eq(countBlockingDeps([a], a), 0);
+});
+
+test('countBlockingDeps: counts deps that are not done', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const c = createTask({ name: 'C', projectId: 'p' });
+    let list = addDependency([a, b, c], a.id, b.id);
+    list = addDependency(list, a.id, c.id);
+    const aOut = list.find(t => t.id === a.id);
+    eq(countBlockingDeps(list, aOut), 2);
+});
+
+test('countBlockingDeps: ignores done deps', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    let list = addDependency([a, b], a.id, b.id);
+    list = updateTaskInList(list, b.id, { status: 'done' });
+    const aOut = list.find(t => t.id === a.id);
+    eq(countBlockingDeps(list, aOut), 0);
+});
+
+test('countBlockingDeps: ignores deps that no longer exist (deleted task)', () => {
+    const a = createTask({ name: 'A', projectId: 'p' });
+    const b = createTask({ name: 'B', projectId: 'p' });
+    const list = addDependency([a, b], a.id, b.id);
+    const aOut = list.find(t => t.id === a.id);
+    // B is no longer in the list — simulates a deleted prerequisite
+    eq(countBlockingDeps([aOut], aOut), 0);
+});
+
+test('sanitiseTask preserves dependsOn array', () => {
+    const a = createTask({ name: 'A', projectId: 'p', dependsOn: ['t_x', 't_y'] });
+    const out = sanitiseTask(a);
+    eq(out.dependsOn, ['t_x', 't_y']);
 });
 
 // ── runner ──

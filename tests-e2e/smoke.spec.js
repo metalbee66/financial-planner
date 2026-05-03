@@ -15,6 +15,9 @@
  *               overdue styling, persistence round-trip via localStorage.
  *   Phase 2.2 — subtasks: + Subtask UI on parent panel only, indented render,
  *               delete-parent prompt (cascade vs promote), persistence.
+ *   Phase 3.1 — task dependencies: add/remove via panel picker, cycle attempt
+ *               rejected with inline error, "Blocked by N" badge appears on
+ *               row and clears when prerequisite is marked done.
  *
  * Plus a `tests.html` driver that runs the in-browser data-layer unit suite
  * and asserts 0 failures — keeps unit + e2e in one CI command.
@@ -399,6 +402,131 @@ test.describe('Phase 2.2 — Subtasks', () => {
         await expect(rows).toHaveCount(2);
         await expect(rows.nth(1)).toHaveClass(/task-row-subtask/);
         await expect(rows.nth(1).locator('.task-row-name')).toHaveText('Child');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3.1 — Task dependencies', () => {
+
+    async function openTaskPanel(page, taskName) {
+        // Use a CSS selector + has-text to avoid matching the "Blocked by N"
+        // badge inside the same button when it appears in later tests.
+        await page.locator('.task-row', { hasText: taskName })
+            .locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+    }
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    test('panel exposes a Dependencies section with picker + empty list', async ({ page }) => {
+        await createProject(page, { name: 'Dep panel' });
+        await addTask(page, 'Solo');
+        await openTaskPanel(page, 'Solo');
+        await expect(page.locator('#tp-deps-section')).toBeVisible();
+        await expect(page.locator('#tp-deps-picker')).toBeVisible();
+        await expect(page.locator('.task-panel-deps-empty')).toContainText('No dependencies');
+    });
+
+    test('add a dependency: appears in list, badge appears on the dependent row', async ({ page }) => {
+        await createProject(page, { name: 'Add dep' });
+        await addTask(page, 'Prereq');
+        await addTask(page, 'Dependent');
+
+        await openTaskPanel(page, 'Dependent');
+        // Picker should offer "Prereq" and not "Dependent"
+        const optionLabels = await page.locator('#tp-deps-picker option').allTextContents();
+        expect(optionLabels).toContain('Prereq');
+        expect(optionLabels).not.toContain('Dependent');
+
+        await page.locator('#tp-deps-picker').selectOption({ label: 'Prereq' });
+        await page.locator('#tp-deps-add-btn').click();
+
+        // Dep listed in the panel; empty-state gone
+        await expect(page.locator('.task-panel-deps-empty')).toHaveCount(0);
+        await expect(page.locator('.task-panel-dep-name', { hasText: 'Prereq' })).toBeVisible();
+
+        // Close panel and check the row badge
+        await page.locator('.task-panel-close').click();
+        const dependentRow = page.locator('.task-row', { hasText: 'Dependent' });
+        await expect(dependentRow.locator('.task-row-blocked')).toContainText('Blocked by 1');
+        // Prereq row has no badge
+        await expect(page.locator('.task-row', { hasText: 'Prereq' }).locator('.task-row-blocked')).toHaveCount(0);
+    });
+
+    test('marking prerequisite done clears the blocked badge', async ({ page }) => {
+        await createProject(page, { name: 'Unblock' });
+        await addTask(page, 'Prereq');
+        await addTask(page, 'Dependent');
+
+        await openTaskPanel(page, 'Dependent');
+        await page.locator('#tp-deps-picker').selectOption({ label: 'Prereq' });
+        await page.locator('#tp-deps-add-btn').click();
+        await page.locator('.task-panel-close').click();
+
+        // Confirm badge is there
+        await expect(
+            page.locator('.task-row', { hasText: 'Dependent' }).locator('.task-row-blocked')
+        ).toBeVisible();
+
+        // Mark Prereq done via the inline status select
+        await page.locator('.task-row', { hasText: 'Prereq' })
+            .locator('.task-row-status').selectOption('done');
+
+        // Badge gone (Prereq is no longer unmet)
+        await expect(
+            page.locator('.task-row', { hasText: 'Dependent' }).locator('.task-row-blocked')
+        ).toHaveCount(0);
+    });
+
+    test('removing a dependency clears the badge', async ({ page }) => {
+        await createProject(page, { name: 'Remove dep' });
+        await addTask(page, 'Prereq');
+        await addTask(page, 'Dependent');
+
+        await openTaskPanel(page, 'Dependent');
+        await page.locator('#tp-deps-picker').selectOption({ label: 'Prereq' });
+        await page.locator('#tp-deps-add-btn').click();
+        await expect(page.locator('.task-panel-dep-name', { hasText: 'Prereq' })).toBeVisible();
+
+        // Click the × on the dep row inside the panel
+        await page.locator('.task-panel-dep', { hasText: 'Prereq' })
+            .locator('.task-panel-dep-remove').click();
+
+        await expect(page.locator('.task-panel-deps-empty')).toBeVisible();
+        await page.locator('.task-panel-close').click();
+        await expect(
+            page.locator('.task-row', { hasText: 'Dependent' }).locator('.task-row-blocked')
+        ).toHaveCount(0);
+    });
+
+    test('cycle attempt is rejected with a clear inline error', async ({ page }) => {
+        await createProject(page, { name: 'Cycle check' });
+        await addTask(page, 'A task');
+        await addTask(page, 'B task');
+        await addTask(page, 'C task');
+
+        // A depends on B
+        await openTaskPanel(page, 'A task');
+        await page.locator('#tp-deps-picker').selectOption({ label: 'B task' });
+        await page.locator('#tp-deps-add-btn').click();
+        await page.locator('.task-panel-close').click();
+
+        // B depends on C
+        await openTaskPanel(page, 'B task');
+        await page.locator('#tp-deps-picker').selectOption({ label: 'C task' });
+        await page.locator('#tp-deps-add-btn').click();
+        await page.locator('.task-panel-close').click();
+
+        // Now attempt C -> A (would form A->B->C->A): rejected with error,
+        // dep list stays empty.
+        await openTaskPanel(page, 'C task');
+        await page.locator('#tp-deps-picker').selectOption({ label: 'A task' });
+        await page.locator('#tp-deps-add-btn').click();
+        await expect(page.locator('#tp-deps-error')).toContainText(/cycle/i);
+        await expect(page.locator('.task-panel-deps-empty')).toBeVisible();
     });
 });
 

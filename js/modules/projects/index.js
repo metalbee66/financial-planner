@@ -35,6 +35,10 @@ import {
     findSubtasks,
     promoteSubtasksInList,
     deleteTaskCascadeFromList,
+    addDependency,
+    removeDependency,
+    wouldCreateCycle,
+    countBlockingDeps,
     saveProjects,
 } from './data.js';
 
@@ -328,8 +332,13 @@ function renderTaskRow(t, project, isSubtask) {
         ? `<span class="task-row-due${isOverdue(t) ? ' task-row-due-overdue' : ''}">${escapeHtml(formatDate(t.dueDate))}</span>`
         : '<span class="task-row-due task-row-due-empty">—</span>';
 
+    const blockedCount = t.status === 'done' ? 0 : countBlockingDeps(getTasks(), t);
+    const blockedBadge = blockedCount > 0
+        ? `<span class="task-row-blocked" title="Blocked by ${blockedCount} unmet ${blockedCount === 1 ? 'dependency' : 'dependencies'}">⛔ Blocked by ${blockedCount}</span>`
+        : '';
+
     row.innerHTML = `
-        <button type="button" class="task-row-name" aria-label="Open task">${escapeHtml(t.name)}</button>
+        <button type="button" class="task-row-name" aria-label="Open task">${escapeHtml(t.name)}${blockedBadge}</button>
         <select class="task-row-status status-${t.status}" aria-label="Status">
             ${TASK_STATUSES.map(s =>
                 `<option value="${s}"${s === t.status ? ' selected' : ''}>${TASK_STATUS_LABELS[s]}</option>`
@@ -658,6 +667,19 @@ function renderTaskPanel(t) {
                 <textarea id="tp-desc" rows="6" maxlength="4000">${escapeHtml(t.description)}</textarea>
             </div>
             <div class="form-error" id="tp-error" role="alert" aria-live="polite"></div>
+            <div class="task-panel-deps" id="tp-deps-section">
+                <div class="task-panel-deps-head">
+                    <h4>Dependencies</h4>
+                </div>
+                <div class="task-panel-deps-add">
+                    <select id="tp-deps-picker" aria-label="Choose a task to depend on">
+                        <option value="">— Add a dependency —</option>
+                    </select>
+                    <button type="button" class="btn-secondary" id="tp-deps-add-btn">+ Add</button>
+                </div>
+                <div class="form-error" id="tp-deps-error" role="alert" aria-live="polite"></div>
+                <ul class="task-panel-deps-list" id="tp-deps-list"></ul>
+            </div>
             ${t.parentTaskId ? '' : `
                 <div class="task-panel-subtasks" id="tp-subtasks-section">
                     <div class="task-panel-subtasks-head">
@@ -698,6 +720,7 @@ function renderTaskPanel(t) {
     panel.querySelector('#tp-delete').addEventListener('click', () => deleteTaskWithSubtaskPrompt(t));
     panel.querySelector('#tp-save').addEventListener('click', () => onTaskPanelSave(t));
 
+    wireDepsSection(panel, t);
     if (!t.parentTaskId) wireSubtaskSection(panel, t);
 
     // Esc closes
@@ -705,6 +728,87 @@ function renderTaskPanel(t) {
         if (e.key === 'Escape') { e.preventDefault(); closeTaskPanel(); }
     });
     panel.querySelector('#tp-name').focus();
+}
+
+/**
+ * Wires the Dependencies section in the task panel. The picker lists other
+ * tasks in the same project that aren't already a dep and aren't this task.
+ * Cycle attempts surface a clear error in `#tp-deps-error` rather than being
+ * silently filtered, so the user understands why the dep was rejected.
+ */
+function wireDepsSection(panel, task) {
+    const picker = panel.querySelector('#tp-deps-picker');
+    const addBtn = panel.querySelector('#tp-deps-add-btn');
+    const errEl = panel.querySelector('#tp-deps-error');
+    const list = panel.querySelector('#tp-deps-list');
+
+    redrawDeps();
+
+    addBtn.addEventListener('click', () => {
+        const depId = picker.value;
+        if (!depId) return;
+        showDepsError('');
+        if (wouldCreateCycle(getTasks(), task.id, depId)) {
+            const dep = findTask(getTasks(), depId);
+            const depName = dep ? dep.name : 'that task';
+            showDepsError(`Cannot add dependency on "${depName}" — it would create a cycle.`);
+            return;
+        }
+        const next = addDependency(getTasks(), task.id, depId);
+        if (next === getTasks()) return;
+        setTasks(next);
+        // Re-render the panel via the host render so the row badges + dep
+        // list both reflect the new state. render() re-attaches the panel
+        // from the latest task data via the openTaskPanelId guard.
+        render();
+    });
+
+    function redrawDeps() {
+        const tasks = getTasks();
+        const fresh = findTask(tasks, task.id) || task;
+        const deps = (fresh.dependsOn || [])
+            .map(id => findTask(tasks, id))
+            .filter(Boolean);
+
+        // Build picker options: same project, not self, not already a dep
+        const existingIds = new Set(fresh.dependsOn || []);
+        const candidates = tasks.filter(t =>
+            t.projectId === fresh.projectId &&
+            t.id !== fresh.id &&
+            !existingIds.has(t.id)
+        );
+        picker.innerHTML = '<option value="">— Add a dependency —</option>'
+            + candidates.map(c =>
+                `<option value="${escapeAttr(c.id)}">${escapeHtml(c.name)}</option>`
+            ).join('');
+
+        if (deps.length === 0) {
+            list.innerHTML = '<li class="task-panel-deps-empty">No dependencies.</li>';
+            return;
+        }
+        list.innerHTML = '';
+        deps.forEach(d => {
+            const li = document.createElement('li');
+            li.className = 'task-panel-dep' + (d.status === 'done' ? ' task-panel-dep-done' : '');
+            li.innerHTML = `
+                <span class="task-panel-dep-name">${escapeHtml(d.name)}</span>
+                <span class="task-panel-dep-status status-${d.status}">${TASK_STATUS_LABELS[d.status] || d.status}</span>
+                <button type="button" class="task-panel-dep-remove" aria-label="Remove dependency">×</button>
+            `;
+            li.querySelector('.task-panel-dep-remove').addEventListener('click', () => {
+                const next = removeDependency(getTasks(), task.id, d.id);
+                if (next === getTasks()) return;
+                setTasks(next);
+                render();
+            });
+            list.appendChild(li);
+        });
+    }
+
+    function showDepsError(msg) {
+        errEl.textContent = msg || '';
+        errEl.style.display = msg ? '' : 'none';
+    }
 }
 
 function wireSubtaskSection(panel, parent) {

@@ -1617,7 +1617,105 @@ select.editable { width: 100px; cursor: pointer; }
     font-style: italic;
     padding: 4px 0;
 }
+/* Task dependencies (Task 3.1) */
+.task-row-blocked {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 6px;
+    background: rgba(255, 82, 82, 0.14);
+    color: var(--red);
+    border: 1px solid rgba(255, 82, 82, 0.4);
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.4;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.task-panel-deps {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.task-panel-deps-head h4 {
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.task-panel-deps-add {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+}
+.task-panel-deps-add select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-family: inherit;
+}
+.task-panel-deps-add select:focus { border-color: var(--accent); outline: none; }
+
+.task-panel-deps-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.task-panel-dep {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.task-panel-dep-done .task-panel-dep-name { text-decoration: line-through; opacity: 0.6; }
+.task-panel-dep-name { color: var(--text); word-break: break-word; }
+.task-panel-dep-status {
+    font-size: 0.72rem;
+    font-family: var(--mono);
+    padding: 2px 6px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+}
+.task-panel-dep-status.status-done { color: var(--green); border-color: rgba(0,200,83,0.4); }
+.task-panel-dep-status.status-in-progress { color: var(--accent); border-color: rgba(0,176,240,0.4); }
+.task-panel-dep-status.status-blocked { color: var(--red); border-color: rgba(255,82,82,0.4); }
+.task-panel-dep-remove {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0 4px;
+}
+.task-panel-dep-remove:hover { color: var(--red); }
+.task-panel-deps-empty {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    font-style: italic;
+    padding: 4px 0;
+}
+
 @media (max-width: 600px) {
     .task-row-subtask { margin-left: 12px; padding-left: 8px; }
     .task-panel-subtask-add { grid-template-columns: 1fr; }
+    .task-panel-deps-add { grid-template-columns: 1fr; }
+    .task-row-blocked { margin-left: 0; margin-top: 2px; }
 }

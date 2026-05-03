@@ -250,6 +250,83 @@ export function deleteTaskCascadeFromList(list, taskId) {
     return list.filter(t => t.id !== taskId && t.parentTaskId !== taskId);
 }
 
+// ── Dependencies (Task 3.1) ──
+
+/**
+ * Returns true if adding `candidateDepId` to `taskId.dependsOn[]` would form
+ * a cycle in the directed graph of `dependsOn` edges. Self-deps are cycles.
+ * Missing tasks are treated as leaves (so referencing a deleted prerequisite
+ * is harmless rather than a phantom cycle).
+ */
+export function wouldCreateCycle(list, taskId, candidateDepId) {
+    if (!taskId || !candidateDepId) return false;
+    if (taskId === candidateDepId) return true;
+    // A new edge taskId -> candidateDepId is a cycle iff candidateDepId can
+    // already reach taskId via existing edges. DFS from candidateDepId.
+    const byId = new Map(list.map(t => [t.id, t]));
+    const seen = new Set();
+    const stack = [candidateDepId];
+    while (stack.length) {
+        const id = stack.pop();
+        if (id === taskId) return true;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const node = byId.get(id);
+        if (!node || !Array.isArray(node.dependsOn)) continue;
+        for (const next of node.dependsOn) stack.push(next);
+    }
+    return false;
+}
+
+/**
+ * Add `depId` to `taskId.dependsOn[]`. Returns same list ref when:
+ *   - taskId not found
+ *   - depId is the same as taskId (self-dep)
+ *   - depId is already in dependsOn
+ *   - adding it would create a cycle
+ * Otherwise returns a new list with the dep appended and updatedAt bumped.
+ */
+export function addDependency(list, taskId, depId) {
+    const idx = list.findIndex(t => t.id === taskId);
+    if (idx < 0) return list;
+    if (!depId || depId === taskId) return list;
+    const task = list[idx];
+    const existing = Array.isArray(task.dependsOn) ? task.dependsOn : [];
+    if (existing.includes(depId)) return list;
+    if (wouldCreateCycle(list, taskId, depId)) return list;
+    const next = list.slice();
+    next[idx] = { ...task, dependsOn: existing.concat([depId]), updatedAt: nowIso() };
+    return next;
+}
+
+/** Remove `depId` from `taskId.dependsOn[]`. Same-ref no-op when absent. */
+export function removeDependency(list, taskId, depId) {
+    const idx = list.findIndex(t => t.id === taskId);
+    if (idx < 0) return list;
+    const task = list[idx];
+    const existing = Array.isArray(task.dependsOn) ? task.dependsOn : [];
+    if (!existing.includes(depId)) return list;
+    const next = list.slice();
+    next[idx] = { ...task, dependsOn: existing.filter(d => d !== depId), updatedAt: nowIso() };
+    return next;
+}
+
+/**
+ * Number of unmet prerequisites for `task`. A dep is "unmet" when the
+ * referenced task exists in `list` and its status is not 'done'. Deleted
+ * prerequisites (id no longer in list) are skipped, not counted as blocking.
+ */
+export function countBlockingDeps(list, task) {
+    if (!task || !Array.isArray(task.dependsOn) || task.dependsOn.length === 0) return 0;
+    const byId = new Map(list.map(t => [t.id, t]));
+    let n = 0;
+    for (const depId of task.dependsOn) {
+        const dep = byId.get(depId);
+        if (dep && dep.status !== 'done') n++;
+    }
+    return n;
+}
+
 // ── Persistence ──
 
 export function loadProjects() {
