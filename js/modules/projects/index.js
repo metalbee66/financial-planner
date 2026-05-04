@@ -45,6 +45,16 @@ import {
     createEvent,
     addEventToTask,
     taskPatchEvents,
+    createFileAttachment,
+    createUrlAttachment,
+    validateFileAttachment,
+    validateUrlAttachment,
+    addAttachmentToTask,
+    removeAttachmentFromTask,
+    taskAttachmentSize,
+    formatBytes,
+    MAX_INLINE_ATTACHMENT_SIZE,
+    TASK_ATTACHMENT_WARN_SIZE,
     saveProjects,
 } from './data.js';
 
@@ -162,6 +172,34 @@ function applyRemoveDependency(taskId, depId) {
         kind: 'dependency_removed',
         by: currentUserEmail(),
         before: depId,
+    });
+    setTasks(addEventToTask(next, taskId, evt));
+    return true;
+}
+
+/** Append an attachment + log `attachment_added` in one save. */
+function applyAddAttachment(taskId, attachment) {
+    const tasks = getTasks();
+    const next = addAttachmentToTask(tasks, taskId, attachment);
+    if (next === tasks) return false;
+    const evt = createEvent({
+        kind: 'attachment_added',
+        by: currentUserEmail(),
+        after: attachment.name,
+    });
+    setTasks(addEventToTask(next, taskId, evt));
+    return true;
+}
+
+/** Remove an attachment + log `attachment_removed` in one save. */
+function applyRemoveAttachment(taskId, attachment) {
+    const tasks = getTasks();
+    const next = removeAttachmentFromTask(tasks, taskId, attachment.id);
+    if (next === tasks) return false;
+    const evt = createEvent({
+        kind: 'attachment_removed',
+        by: currentUserEmail(),
+        before: attachment.name,
     });
     setTasks(addEventToTask(next, taskId, evt));
     return true;
@@ -729,6 +767,27 @@ function renderTaskPanel(t) {
                 <div class="form-error" id="tp-deps-error" role="alert" aria-live="polite"></div>
                 <ul class="task-panel-deps-list" id="tp-deps-list"></ul>
             </div>
+            <div class="task-panel-attachments" id="tp-attachments-section">
+                <h4>Attachments</h4>
+                <ul class="task-panel-attachments-list" id="tp-attachments-list"></ul>
+                <div class="task-panel-attachments-warn" id="tp-attachments-warn" hidden></div>
+                <div class="task-panel-attachments-controls">
+                    <div class="task-panel-attachments-dropzone" id="tp-attachments-dropzone">
+                        <input type="file" id="tp-attachments-file-input" hidden />
+                        <button type="button" class="btn-secondary" id="tp-attachments-pick-btn">Choose file</button>
+                        <span class="task-panel-attachments-hint">or drop a file (max ${escapeHtml(formatBytes(MAX_INLINE_ATTACHMENT_SIZE))})</span>
+                    </div>
+                    <details class="task-panel-attachments-url">
+                        <summary>Add URL link</summary>
+                        <div class="task-panel-attachments-url-form">
+                            <input type="text" id="tp-attachments-url-name" placeholder="Title" maxlength="200" />
+                            <input type="url" id="tp-attachments-url-url" placeholder="https://…" maxlength="500" />
+                            <button type="button" class="btn-primary" id="tp-attachments-url-add">Add link</button>
+                        </div>
+                    </details>
+                </div>
+                <div class="form-error" id="tp-attachments-error" role="alert" aria-live="polite"></div>
+            </div>
             ${t.parentTaskId ? '' : `
                 <div class="task-panel-subtasks" id="tp-subtasks-section">
                     <div class="task-panel-subtasks-head">
@@ -779,6 +838,7 @@ function renderTaskPanel(t) {
     panel.querySelector('#tp-save').addEventListener('click', () => onTaskPanelSave(t));
 
     wireDepsSection(panel, t);
+    wireAttachmentsSection(panel, t);
     if (!t.parentTaskId) wireSubtaskSection(panel, t);
     wireActivitySection(panel, t);
 
@@ -864,6 +924,167 @@ function wireDepsSection(panel, task) {
         errEl.textContent = msg || '';
         errEl.style.display = msg ? '' : 'none';
     }
+}
+
+/**
+ * Wires the Attachments section. Two attachment shapes per plan §3.4:
+ *
+ *   - file: drop-zone or file picker reads ≤500 KB into a base64 dataUri,
+ *     stored inline on the task. Larger files are rejected at the input
+ *     boundary with a clear size-limit message.
+ *   - url: title + http(s) URL stored as a reference; opens in a new tab.
+ *
+ * Attachments render as chips with a download/open link plus a × remove
+ * button. Both add and remove flow through applyAddAttachment / applyRemove
+ * Attachment so they auto-log audit events. A cumulative-size warning surfaces
+ * when inline files on this task exceed TASK_ATTACHMENT_WARN_SIZE (1 MB) so
+ * the user knows they're approaching Firebase RTDB's practical row limit.
+ */
+function wireAttachmentsSection(panel, task) {
+    const list = panel.querySelector('#tp-attachments-list');
+    const warnEl = panel.querySelector('#tp-attachments-warn');
+    const errEl = panel.querySelector('#tp-attachments-error');
+    const dropzone = panel.querySelector('#tp-attachments-dropzone');
+    const fileInput = panel.querySelector('#tp-attachments-file-input');
+    const pickBtn = panel.querySelector('#tp-attachments-pick-btn');
+    const urlNameEl = panel.querySelector('#tp-attachments-url-name');
+    const urlUrlEl = panel.querySelector('#tp-attachments-url-url');
+    const urlAddBtn = panel.querySelector('#tp-attachments-url-add');
+
+    redrawAttachments();
+
+    pickBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files && fileInput.files[0]) {
+            ingestFile(fileInput.files[0]);
+            fileInput.value = '';
+        }
+    });
+
+    // Drag & drop. We listen on the dropzone but treat the panel as the
+    // visual target — keeps the hover state subtle.
+    ['dragenter', 'dragover'].forEach(ev => {
+        dropzone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.add('task-panel-attachments-dropzone-active');
+        });
+    });
+    ['dragleave', 'drop'].forEach(ev => {
+        dropzone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.remove('task-panel-attachments-dropzone-active');
+        });
+    });
+    dropzone.addEventListener('drop', (e) => {
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) ingestFile(f);
+    });
+
+    urlAddBtn.addEventListener('click', addUrl);
+    urlUrlEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addUrl(); }
+    });
+
+    function ingestFile(file) {
+        showError('');
+        if (file.size > MAX_INLINE_ATTACHMENT_SIZE) {
+            // Reject at the boundary so we never read an oversize file into memory
+            showError(`File too large — limit is ${formatBytes(MAX_INLINE_ATTACHMENT_SIZE)}, "${file.name}" is ${formatBytes(file.size)}. Try adding a URL link instead.`);
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            const draft = {
+                name: file.name,
+                size: file.size,
+                type: file.type || 'application/octet-stream',
+                dataUri: reader.result,
+                addedBy: currentUserEmail(),
+            };
+            const err = validateFileAttachment(draft);
+            if (err) { showError(err); return; }
+            const att = createFileAttachment(draft);
+            applyAddAttachment(task.id, att);
+            render();
+        };
+        reader.onerror = () => showError('Could not read file.');
+        reader.readAsDataURL(file);
+    }
+
+    function addUrl() {
+        showError('');
+        const draft = {
+            name: urlNameEl.value,
+            url: urlUrlEl.value,
+            addedBy: currentUserEmail(),
+        };
+        const err = validateUrlAttachment(draft);
+        if (err) { showError(err); urlNameEl.focus(); return; }
+        const att = createUrlAttachment(draft);
+        applyAddAttachment(task.id, att);
+        // Clear form and re-render
+        urlNameEl.value = '';
+        urlUrlEl.value = '';
+        render();
+    }
+
+    function showError(msg) {
+        errEl.textContent = msg || '';
+        errEl.style.display = msg ? '' : 'none';
+    }
+
+    function redrawAttachments() {
+        const fresh = findTask(getTasks(), task.id) || task;
+        const items = Array.isArray(fresh.attachments) ? fresh.attachments : [];
+
+        const total = taskAttachmentSize(fresh);
+        if (total > TASK_ATTACHMENT_WARN_SIZE) {
+            warnEl.hidden = false;
+            warnEl.textContent = `⚠ ${formatBytes(total)} of inline files on this task. Consider URL links to keep saves fast.`;
+        } else {
+            warnEl.hidden = true;
+            warnEl.textContent = '';
+        }
+
+        if (items.length === 0) {
+            list.innerHTML = '<li class="task-panel-attachment-empty">No attachments.</li>';
+            return;
+        }
+        list.innerHTML = '';
+        items.forEach(a => list.appendChild(renderAttachmentItem(a)));
+    }
+}
+
+function renderAttachmentItem(a) {
+    const li = document.createElement('li');
+    li.className = 'task-panel-attachment task-panel-attachment-' + (a.kind === 'url' ? 'url' : 'file');
+    li.dataset.attachmentId = a.id;
+
+    const icon = a.kind === 'url' ? '🔗' : '📎';
+    const sub = a.kind === 'file'
+        ? `${escapeHtml(formatBytes(a.size))} · ${escapeHtml(a.type || 'file')}`
+        : escapeHtml(a.url);
+
+    // Anchor: download for inline files (download attribute + dataUri href),
+    // open-in-new-tab for URL refs.
+    const anchorAttrs = a.kind === 'url'
+        ? `href="${escapeAttr(a.url)}" target="_blank" rel="noopener noreferrer"`
+        : `href="${escapeAttr(a.dataUri)}" download="${escapeAttr(a.name)}"`;
+
+    li.innerHTML = `
+        <span class="task-panel-attachment-icon" aria-hidden="true">${icon}</span>
+        <a class="task-panel-attachment-name" ${anchorAttrs}>${escapeHtml(a.name || '(untitled)')}</a>
+        <span class="task-panel-attachment-sub">${sub}</span>
+        <button type="button" class="task-panel-attachment-remove" aria-label="Remove attachment">×</button>
+    `;
+    li.querySelector('.task-panel-attachment-remove').addEventListener('click', () => {
+        if (!confirm(`Remove "${a.name}"?`)) return;
+        applyRemoveAttachment(openTaskPanelId, a);
+        render();
+    });
+    return li;
 }
 
 function wireSubtaskSection(panel, parent) {
@@ -1049,6 +1270,8 @@ function eventIconFor(kind) {
         case 'due_date_changed': return '📅';
         case 'dependency_added': return '🔗';
         case 'dependency_removed': return '✂';
+        case 'attachment_added': return '📎';
+        case 'attachment_removed': return '🗑';
         default: return '·';
     }
 }
@@ -1085,6 +1308,10 @@ function formatEventSummary(e, tasks) {
             const name = dep ? dep.name : 'a deleted task';
             return `${author} removed dependency on <em>${escapeHtml(name)}</em>`;
         }
+        case 'attachment_added':
+            return `${author} attached <em>${escapeHtml(e.after || 'a file')}</em>`;
+        case 'attachment_removed':
+            return `${author} removed attachment <em>${escapeHtml(e.before || 'a file')}</em>`;
         default:
             return `${author} ${escapeHtml(e.kind)}`;
     }

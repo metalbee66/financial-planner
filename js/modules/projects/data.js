@@ -42,6 +42,10 @@ function generateEventId() {
     return 'e_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+function generateAttachmentId() {
+    return 'a_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
 function trim(s) {
     return typeof s === 'string' ? s.trim() : '';
 }
@@ -431,6 +435,108 @@ export function taskPatchEvents(prev, patch, by) {
         events.push(createEvent({ kind, by, before, after }));
     }
     return events;
+}
+
+// ── Attachments (Task 3.4) ──
+
+/**
+ * Hard limit for inline (base64-encoded) files. Per plan §3.4: "drag-drop
+ * or file-picker for files ≤500 KB". Anything bigger should be added as a
+ * URL reference instead — Firebase RTDB row sizes get unworkable past this
+ * point even for a single attachment, let alone several per task.
+ */
+export const MAX_INLINE_ATTACHMENT_SIZE = 500 * 1024;
+
+/** Soft warning threshold for cumulative inline-file bytes per task. */
+export const TASK_ATTACHMENT_WARN_SIZE = 1024 * 1024;
+
+/** Human-readable byte formatting shared by error messages and the UI. */
+export function formatBytes(n) {
+    if (!Number.isFinite(n) || n <= 0) return '0 B';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')} MB`;
+}
+
+/** Build an inline (base64) file attachment. Caller should validate first. */
+export function createFileAttachment(input) {
+    const addedBy = trim(input && input.addedBy);
+    return {
+        id: generateAttachmentId(),
+        kind: 'file',
+        name: trim(input && input.name),
+        size: (input && Number.isFinite(input.size)) ? input.size : 0,
+        type: trim(input && input.type),
+        dataUri: (input && input.dataUri) || '',
+        addedBy: addedBy || 'anonymous',
+        addedAt: nowIso(),
+    };
+}
+
+/** Build a URL-reference attachment. Caller should validate first. */
+export function createUrlAttachment(input) {
+    const addedBy = trim(input && input.addedBy);
+    return {
+        id: generateAttachmentId(),
+        kind: 'url',
+        name: trim(input && input.name),
+        url: trim(input && input.url),
+        addedBy: addedBy || 'anonymous',
+        addedAt: nowIso(),
+    };
+}
+
+export function validateFileAttachment(input) {
+    if (!input || !trim(input.name)) return 'File name is required';
+    if (!Number.isFinite(input.size) || input.size <= 0) return 'File size must be greater than zero';
+    if (input.size > MAX_INLINE_ATTACHMENT_SIZE) {
+        return `File too large — limit is ${formatBytes(MAX_INLINE_ATTACHMENT_SIZE)}, this one is ${formatBytes(input.size)}.`;
+    }
+    if (!trim(input.dataUri)) return 'File data is missing';
+    return null;
+}
+
+export function validateUrlAttachment(input) {
+    if (!input || !trim(input.name)) return 'Title is required';
+    const url = trim(input && input.url);
+    if (!url) return 'URL is required';
+    if (!/^https?:\/\//i.test(url)) return 'URL must start with http:// or https://';
+    return null;
+}
+
+export function addAttachmentToTask(list, taskId, attachment) {
+    const idx = list.findIndex(t => t.id === taskId);
+    if (idx < 0) return list;
+    const task = list[idx];
+    const existing = Array.isArray(task.attachments) ? task.attachments : [];
+    const next = list.slice();
+    next[idx] = { ...task, attachments: existing.concat([attachment]), updatedAt: nowIso() };
+    return next;
+}
+
+export function removeAttachmentFromTask(list, taskId, attachmentId) {
+    const idx = list.findIndex(t => t.id === taskId);
+    if (idx < 0) return list;
+    const task = list[idx];
+    const existing = Array.isArray(task.attachments) ? task.attachments : [];
+    if (!existing.some(a => a.id === attachmentId)) return list;
+    const next = list.slice();
+    next[idx] = {
+        ...task,
+        attachments: existing.filter(a => a.id !== attachmentId),
+        updatedAt: nowIso(),
+    };
+    return next;
+}
+
+/** Sum of inline-file `size` bytes on a task. URL refs contribute nothing. */
+export function taskAttachmentSize(task) {
+    if (!task || !Array.isArray(task.attachments)) return 0;
+    let total = 0;
+    for (const a of task.attachments) {
+        if (a && a.kind === 'file' && Number.isFinite(a.size)) total += a.size;
+    }
+    return total;
 }
 
 // ── Persistence ──

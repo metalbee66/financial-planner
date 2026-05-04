@@ -23,6 +23,9 @@
  *   Phase 3.3 — activity feed: status / assignee / due-date changes log
  *               events, dep add/remove log events, comments + events
  *               render interleaved by timestamp.
+ *   Phase 3.4 — file attachments: file picker accepts ≤500 KB, oversize
+ *               rejected, URL refs accepted, chips render with download/
+ *               open links, remove + audit-event integration, persistence.
  *
  * Plus a `tests.html` driver that runs the in-browser data-layer unit suite
  * and asserts 0 failures — keeps unit + e2e in one CI command.
@@ -733,6 +736,146 @@ test.describe('Phase 3.3 — Activity / audit-trail feed', () => {
         await page.locator('.project-card', { hasText: 'Persist events' }).click();
         await page.locator('.task-row', { hasText: 'Long-lived' }).locator('.task-row-name').click();
         await expect(page.locator('.task-panel-event[data-kind="status_changed"]')).toHaveCount(1);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3.4 — File attachments', () => {
+
+    async function openTaskPanel(page, taskName) {
+        await page.locator('.task-row', { hasText: taskName })
+            .locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+    }
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    test('section shows the empty state and ≤500 KB hint', async ({ page }) => {
+        await createProject(page, { name: 'Att empty' });
+        await addTask(page, 'Solo');
+        await openTaskPanel(page, 'Solo');
+        await expect(page.locator('#tp-attachments-section')).toBeVisible();
+        await expect(page.locator('.task-panel-attachment-empty')).toContainText('No attachments');
+        await expect(page.locator('.task-panel-attachments-hint')).toContainText('500 KB');
+    });
+
+    test('inline file ≤500 KB attaches with download link + audit event', async ({ page }) => {
+        await createProject(page, { name: 'Att file' });
+        await addTask(page, 'Doc job');
+        await openTaskPanel(page, 'Doc job');
+
+        await page.locator('#tp-attachments-file-input').setInputFiles({
+            name: 'notes.txt',
+            mimeType: 'text/plain',
+            buffer: Buffer.from('hello attachment'),
+        });
+
+        const item = page.locator('.task-panel-attachment-file', { hasText: 'notes.txt' });
+        await expect(item).toBeVisible();
+        const link = item.locator('.task-panel-attachment-name');
+        await expect(link).toHaveAttribute('download', 'notes.txt');
+        await expect(link).toHaveAttribute('href', /^data:/);
+
+        // Audit event logged in activity feed
+        await expect(
+            page.locator('.task-panel-event[data-kind="attachment_added"]')
+        ).toContainText('notes.txt');
+    });
+
+    test('files larger than 500 KB are rejected with size message', async ({ page }) => {
+        await createProject(page, { name: 'Att big' });
+        await addTask(page, 'Big upload');
+        await openTaskPanel(page, 'Big upload');
+
+        // 600 KB of zeros → exceeds the 500 KB cap
+        await page.locator('#tp-attachments-file-input').setInputFiles({
+            name: 'big.bin',
+            mimeType: 'application/octet-stream',
+            buffer: Buffer.alloc(600 * 1024, 0),
+        });
+
+        await expect(page.locator('#tp-attachments-error')).toContainText(/too large|500 KB/i);
+        // No chip created
+        await expect(page.locator('.task-panel-attachment')).toHaveCount(0);
+        // No audit event either
+        await expect(page.locator('.task-panel-event[data-kind="attachment_added"]')).toHaveCount(0);
+    });
+
+    test('URL ref attaches with target=_blank link', async ({ page }) => {
+        await createProject(page, { name: 'Att url' });
+        await addTask(page, 'Link job');
+        await openTaskPanel(page, 'Link job');
+
+        await page.locator('details.task-panel-attachments-url').click();
+        await page.locator('#tp-attachments-url-name').fill('Spec doc');
+        await page.locator('#tp-attachments-url-url').fill('https://example.com/spec');
+        await page.locator('#tp-attachments-url-add').click();
+
+        const item = page.locator('.task-panel-attachment-url', { hasText: 'Spec doc' });
+        await expect(item).toBeVisible();
+        const link = item.locator('.task-panel-attachment-name');
+        await expect(link).toHaveAttribute('href', 'https://example.com/spec');
+        await expect(link).toHaveAttribute('target', '_blank');
+        await expect(
+            page.locator('.task-panel-event[data-kind="attachment_added"]')
+        ).toContainText('Spec doc');
+    });
+
+    test('URL ref rejects bad URL with inline error', async ({ page }) => {
+        await createProject(page, { name: 'Att bad url' });
+        await addTask(page, 'Link job');
+        await openTaskPanel(page, 'Link job');
+
+        await page.locator('details.task-panel-attachments-url').click();
+        await page.locator('#tp-attachments-url-name').fill('No scheme');
+        await page.locator('#tp-attachments-url-url').fill('example.com');
+        await page.locator('#tp-attachments-url-add').click();
+
+        await expect(page.locator('#tp-attachments-error')).toContainText(/http/i);
+        await expect(page.locator('.task-panel-attachment')).toHaveCount(0);
+    });
+
+    test('removing an attachment logs an attachment_removed event', async ({ page }) => {
+        await createProject(page, { name: 'Att remove' });
+        await addTask(page, 'Job');
+        await openTaskPanel(page, 'Job');
+
+        await page.locator('details.task-panel-attachments-url').click();
+        await page.locator('#tp-attachments-url-name').fill('Doomed');
+        await page.locator('#tp-attachments-url-url').fill('https://example.com/x');
+        await page.locator('#tp-attachments-url-add').click();
+        await expect(page.locator('.task-panel-attachment')).toHaveCount(1);
+
+        page.once('dialog', d => d.accept());
+        await page.locator('.task-panel-attachment-remove').click();
+
+        await expect(page.locator('.task-panel-attachment')).toHaveCount(0);
+        await expect(page.locator('.task-panel-attachment-empty')).toBeVisible();
+        await expect(
+            page.locator('.task-panel-event[data-kind="attachment_removed"]')
+        ).toContainText('Doomed');
+    });
+
+    test('attachments persist across reload', async ({ page }) => {
+        await createProject(page, { name: 'Persist atts' });
+        await addTask(page, 'Saved');
+        await openTaskPanel(page, 'Saved');
+
+        await page.locator('#tp-attachments-file-input').setInputFiles({
+            name: 'note.txt',
+            mimeType: 'text/plain',
+            buffer: Buffer.from('persists'),
+        });
+        await expect(page.locator('.task-panel-attachment', { hasText: 'note.txt' })).toBeVisible();
+
+        await page.reload();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Persist atts' }).click();
+        await page.locator('.task-row', { hasText: 'Saved' }).locator('.task-row-name').click();
+        await expect(page.locator('.task-panel-attachment', { hasText: 'note.txt' })).toBeVisible();
     });
 });
 

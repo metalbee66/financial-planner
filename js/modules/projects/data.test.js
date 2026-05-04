@@ -40,6 +40,15 @@ import {
     createEvent,
     addEventToTask,
     taskPatchEvents,
+    createFileAttachment,
+    createUrlAttachment,
+    validateFileAttachment,
+    validateUrlAttachment,
+    addAttachmentToTask,
+    removeAttachmentFromTask,
+    taskAttachmentSize,
+    formatBytes,
+    MAX_INLINE_ATTACHMENT_SIZE,
 } from './data.js';
 
 const tests = [];
@@ -729,6 +738,138 @@ test('sanitiseTask preserves events array', () => {
     const out = sanitiseTask(t);
     eq(out.events.length, 1);
     eq(out.events[0].kind, 'status_changed');
+});
+
+// ── attachments (Task 3.4) ──
+
+test('MAX_INLINE_ATTACHMENT_SIZE is 500 KB', () => {
+    eq(MAX_INLINE_ATTACHMENT_SIZE, 500 * 1024);
+});
+
+test('createFileAttachment populates id, kind, fields, addedAt', () => {
+    const a = createFileAttachment({ name: 'x.png', size: 1234, type: 'image/png', dataUri: 'data:image/png;base64,abc', addedBy: 'b' });
+    truthy(a.id && a.id.startsWith('a_'), 'id should start with a_');
+    eq(a.kind, 'file');
+    eq(a.name, 'x.png');
+    eq(a.size, 1234);
+    eq(a.type, 'image/png');
+    eq(a.dataUri, 'data:image/png;base64,abc');
+    eq(a.addedBy, 'b');
+    truthy(a.addedAt);
+});
+
+test('createFileAttachment defaults addedBy to anonymous', () => {
+    eq(createFileAttachment({ name: 'x', size: 1, dataUri: 'd' }).addedBy, 'anonymous');
+});
+
+test('createUrlAttachment populates id, kind=url, name, url, addedBy', () => {
+    const a = createUrlAttachment({ name: 'Spec', url: 'https://example.com/spec', addedBy: 'b' });
+    truthy(a.id && a.id.startsWith('a_'), 'id should start with a_');
+    eq(a.kind, 'url');
+    eq(a.name, 'Spec');
+    eq(a.url, 'https://example.com/spec');
+    eq(a.addedBy, 'b');
+});
+
+test('validateFileAttachment rejects missing name / dataUri / size', () => {
+    truthy(validateFileAttachment({ name: '', size: 100, dataUri: 'd' }), 'no name');
+    truthy(validateFileAttachment({ name: 'x', size: 100, dataUri: '' }), 'no dataUri');
+    truthy(validateFileAttachment({ name: 'x', size: 0, dataUri: 'd' }), 'zero size');
+});
+
+test('validateFileAttachment rejects files larger than 500 KB with explicit size', () => {
+    const err = validateFileAttachment({ name: 'big', size: 600 * 1024, dataUri: 'd' });
+    truthy(err);
+    truthy(/500/.test(err) || /KB/.test(err) || /MB/.test(err), 'message should mention size limit');
+});
+
+test('validateFileAttachment accepts a 500 KB file (boundary)', () => {
+    falsy(validateFileAttachment({ name: 'edge', size: MAX_INLINE_ATTACHMENT_SIZE, dataUri: 'd' }));
+});
+
+test('validateUrlAttachment rejects missing name / url / non-http URL', () => {
+    truthy(validateUrlAttachment({ name: '', url: 'https://x' }), 'no name');
+    truthy(validateUrlAttachment({ name: 'x', url: '' }), 'no url');
+    truthy(validateUrlAttachment({ name: 'x', url: 'ftp://x' }), 'non-http');
+    truthy(validateUrlAttachment({ name: 'x', url: 'example.com' }), 'no scheme');
+});
+
+test('validateUrlAttachment accepts http and https', () => {
+    falsy(validateUrlAttachment({ name: 'a', url: 'https://example.com' }));
+    falsy(validateUrlAttachment({ name: 'a', url: 'http://example.com' }));
+});
+
+test('addAttachmentToTask appends and bumps updatedAt', async () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const a = createUrlAttachment({ name: 'doc', url: 'https://x', addedBy: 'b' });
+    await new Promise(r => setTimeout(r, 5));
+    const next = addAttachmentToTask([t], t.id, a);
+    const tNext = next.find(x => x.id === t.id);
+    eq(tNext.attachments.length, 1);
+    eq(tNext.attachments[0].id, a.id);
+    truthy(tNext.updatedAt >= t.updatedAt);
+});
+
+test('addAttachmentToTask same-ref no-op when task missing', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const list = [t];
+    const a = createUrlAttachment({ name: 'd', url: 'https://x' });
+    eq(addAttachmentToTask(list, 'no-such', a), list);
+});
+
+test('removeAttachmentFromTask filters by id and bumps updatedAt', async () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const a = createUrlAttachment({ name: 'a1', url: 'https://x' });
+    const b = createUrlAttachment({ name: 'a2', url: 'https://y' });
+    let list = addAttachmentToTask([t], t.id, a);
+    list = addAttachmentToTask(list, t.id, b);
+    await new Promise(r => setTimeout(r, 5));
+    const next = removeAttachmentFromTask(list, t.id, a.id);
+    const tOut = next.find(x => x.id === t.id);
+    eq(tOut.attachments.length, 1);
+    eq(tOut.attachments[0].id, b.id);
+});
+
+test('removeAttachmentFromTask same-ref no-op when attachment missing', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const list = [t];
+    eq(removeAttachmentFromTask(list, t.id, 'no-such'), list);
+    eq(removeAttachmentFromTask(list, 'no-task', 'no-such'), list);
+});
+
+test('taskAttachmentSize sums file sizes only (URL refs do not count)', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const file1 = createFileAttachment({ name: 'a', size: 100, dataUri: 'd' });
+    const file2 = createFileAttachment({ name: 'b', size: 250, dataUri: 'd' });
+    const url = createUrlAttachment({ name: 'c', url: 'https://x' });
+    let list = addAttachmentToTask([t], t.id, file1);
+    list = addAttachmentToTask(list, t.id, file2);
+    list = addAttachmentToTask(list, t.id, url);
+    const tOut = list.find(x => x.id === t.id);
+    eq(taskAttachmentSize(tOut), 350);
+});
+
+test('taskAttachmentSize is 0 for tasks with no attachments or only URLs', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    eq(taskAttachmentSize(t), 0);
+    const url = createUrlAttachment({ name: 'c', url: 'https://x' });
+    const list = addAttachmentToTask([t], t.id, url);
+    eq(taskAttachmentSize(list[0]), 0);
+});
+
+test('formatBytes produces human-readable units', () => {
+    eq(formatBytes(0), '0 B');
+    eq(formatBytes(512), '512 B');
+    eq(formatBytes(2048), '2 KB');
+    eq(formatBytes(1572864), '1.5 MB');
+});
+
+test('sanitiseTask preserves attachments array', () => {
+    const a = createUrlAttachment({ name: 'doc', url: 'https://x' });
+    const t = createTask({ name: 'A', projectId: 'p', attachments: [a] });
+    const out = sanitiseTask(t);
+    eq(out.attachments.length, 1);
+    eq(out.attachments[0].url, 'https://x');
 });
 
 // ── runner ──
