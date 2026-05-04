@@ -38,6 +38,10 @@ function generateCommentId() {
     return 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+function generateEventId() {
+    return 'e_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
 function trim(s) {
     return typeof s === 'string' ? s.trim() : '';
 }
@@ -362,6 +366,71 @@ export function addCommentToTask(list, taskId, comment) {
     const next = list.slice();
     next[idx] = { ...task, comments: existing.concat([comment]), updatedAt: nowIso() };
     return next;
+}
+
+// ── Activity / audit-trail (Task 3.3) ──
+
+/**
+ * Map of task field → event kind for the audit-tracked subset. Per plan §3.3
+ * we log status/assignee/dueDate changes plus dependency add/remove (those
+ * have their own helpers because they're list deltas, not field overwrites).
+ * Untracked fields (name, description, priority, startDate) intentionally
+ * don't generate events to keep the feed focused on user-meaningful changes.
+ */
+const TRACKED_FIELD_EVENT_KINDS = {
+    status: 'status_changed',
+    assignee: 'assignee_changed',
+    dueDate: 'due_date_changed',
+};
+
+/**
+ * Build a fresh audit event. Like createComment, blank `by` falls back to
+ * `'anonymous'` so the UI can pass the current user's email straight through.
+ */
+export function createEvent(input) {
+    const by = trim(input && input.by);
+    const before = (input && Object.prototype.hasOwnProperty.call(input, 'before')) ? input.before : null;
+    const after = (input && Object.prototype.hasOwnProperty.call(input, 'after')) ? input.after : null;
+    return {
+        id: generateEventId(),
+        kind: (input && input.kind) || 'unknown',
+        by: by || 'anonymous',
+        at: nowIso(),
+        before: before == null ? null : before,
+        after: after == null ? null : after,
+    };
+}
+
+/**
+ * Append `event` to `taskId.events[]`. Same-ref no-op when the task isn't
+ * found. Bumps `updatedAt` because the activity feed is part of the task.
+ */
+export function addEventToTask(list, taskId, event) {
+    const idx = list.findIndex(t => t.id === taskId);
+    if (idx < 0) return list;
+    const task = list[idx];
+    const existing = Array.isArray(task.events) ? task.events : [];
+    const next = list.slice();
+    next[idx] = { ...task, events: existing.concat([event]), updatedAt: nowIso() };
+    return next;
+}
+
+/**
+ * Diff `prev` against `patch` over the audit-tracked fields and return one
+ * event per actual change. Empty array for untracked fields, no-op patches,
+ * or null inputs. Caller appends each via `addEventToTask`.
+ */
+export function taskPatchEvents(prev, patch, by) {
+    if (!prev || !patch) return [];
+    const events = [];
+    for (const [field, kind] of Object.entries(TRACKED_FIELD_EVENT_KINDS)) {
+        if (!Object.prototype.hasOwnProperty.call(patch, field)) continue;
+        const before = prev[field] == null ? null : prev[field];
+        const after = patch[field] == null ? null : patch[field];
+        if (before === after) continue;
+        events.push(createEvent({ kind, by, before, after }));
+    }
+    return events;
 }
 
 // ── Persistence ──

@@ -1720,8 +1720,8 @@ select.editable { width: 100px; cursor: pointer; }
     .task-row-blocked { margin-left: 0; margin-top: 2px; }
 }
 
-/* ── Phase 3.2: comments ── */
-.task-panel-comments {
+/* ── Phase 3.2 / 3.3: activity feed (comments + events) ── */
+.task-panel-activity {
     margin-top: 18px;
     padding-top: 14px;
     border-top: 1px solid var(--border);
@@ -1729,7 +1729,7 @@ select.editable { width: 100px; cursor: pointer; }
     flex-direction: column;
     gap: 10px;
 }
-.task-panel-comments h4 {
+.task-panel-activity h4 {
     margin: 0;
     color: var(--accent);
     font-size: 0.85rem;
@@ -1737,13 +1737,45 @@ select.editable { width: 100px; cursor: pointer; }
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
-.task-panel-comments-list {
+.task-panel-activity-list {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+.task-panel-event {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: baseline;
+    padding: 4px 8px;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    border-left: 2px solid var(--border);
+}
+.task-panel-event-icon {
+    font-size: 0.9rem;
+    line-height: 1;
+}
+.task-panel-event-text { color: var(--text-dim); word-break: break-word; }
+.task-panel-event-text strong { color: var(--text); font-weight: 600; }
+.task-panel-event-text em {
+    color: var(--text);
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    background: var(--surface);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+}
+.task-panel-event-time {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    font-family: var(--mono);
+    flex-shrink: 0;
 }
 .task-panel-comment {
     padding: 8px 10px;

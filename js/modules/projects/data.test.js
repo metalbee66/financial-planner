@@ -37,6 +37,9 @@ import {
     countBlockingDeps,
     createComment,
     addCommentToTask,
+    createEvent,
+    addEventToTask,
+    taskPatchEvents,
 } from './data.js';
 
 const tests = [];
@@ -627,6 +630,105 @@ test('sanitiseTask preserves comments array', () => {
     const out = sanitiseTask(t);
     eq(out.comments.length, 1);
     eq(out.comments[0].text, 'hello');
+});
+
+// ── activity / audit-trail (Task 3.3) ──
+
+test('createEvent populates id, kind, by, at, before, after', () => {
+    const e = createEvent({ kind: 'status_changed', by: 'brad@x', before: 'not-started', after: 'in-progress' });
+    truthy(e.id && e.id.startsWith('e_'), 'id should start with e_');
+    eq(e.kind, 'status_changed');
+    eq(e.by, 'brad@x');
+    eq(e.before, 'not-started');
+    eq(e.after, 'in-progress');
+    truthy(e.at, 'timestamp set');
+});
+
+test('createEvent defaults by to anonymous when blank', () => {
+    eq(createEvent({ kind: 'status_changed' }).by, 'anonymous');
+    eq(createEvent({ kind: 'status_changed', by: '   ' }).by, 'anonymous');
+});
+
+test('createEvent defaults before/after to null when omitted', () => {
+    const e = createEvent({ kind: 'status_changed', by: 'b' });
+    eq(e.before, null);
+    eq(e.after, null);
+});
+
+test('addEventToTask appends and bumps updatedAt', async () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const e = createEvent({ kind: 'status_changed', by: 'b', before: 'not-started', after: 'in-progress' });
+    await new Promise(r => setTimeout(r, 5));
+    const next = addEventToTask([t], t.id, e);
+    const tNext = next.find(x => x.id === t.id);
+    eq(tNext.events.length, 1);
+    eq(tNext.events[0].id, e.id);
+    truthy(tNext.updatedAt >= t.updatedAt, 'updatedAt should not regress');
+});
+
+test('addEventToTask preserves chronological order', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const e1 = createEvent({ kind: 'status_changed', by: 'b' });
+    const e2 = createEvent({ kind: 'assignee_changed', by: 'b' });
+    let list = addEventToTask([t], t.id, e1);
+    list = addEventToTask(list, t.id, e2);
+    const tOut = list.find(x => x.id === t.id);
+    eq(tOut.events.map(e => e.kind), ['status_changed', 'assignee_changed']);
+});
+
+test('addEventToTask returns same ref when taskId missing', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const e = createEvent({ kind: 'status_changed', by: 'b' });
+    const list = [t];
+    eq(addEventToTask(list, 'no-such-task', e), list);
+});
+
+test('taskPatchEvents emits an event for each tracked field that changed', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', status: 'not-started', assignee: null, dueDate: null });
+    const patch = { status: 'in-progress', assignee: 'brad', dueDate: '2026-06-01' };
+    const events = taskPatchEvents(prev, patch, 'user@x');
+    eq(events.length, 3);
+    const kinds = events.map(e => e.kind).sort();
+    eq(kinds, ['assignee_changed', 'due_date_changed', 'status_changed']);
+    events.forEach(e => eq(e.by, 'user@x'));
+});
+
+test('taskPatchEvents captures before/after on each event', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', status: 'not-started' });
+    const events = taskPatchEvents(prev, { status: 'review' }, 'b');
+    eq(events.length, 1);
+    eq(events[0].before, 'not-started');
+    eq(events[0].after, 'review');
+});
+
+test('taskPatchEvents ignores no-op patches (same value)', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', status: 'in-progress' });
+    eq(taskPatchEvents(prev, { status: 'in-progress' }, 'b'), []);
+});
+
+test('taskPatchEvents ignores untracked fields (name, description, priority)', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', priority: 'normal' });
+    eq(taskPatchEvents(prev, { name: 'B', description: 'new', priority: 'high' }, 'b'), []);
+});
+
+test('taskPatchEvents handles a patch that misses some tracked fields', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', status: 'not-started', assignee: null });
+    const events = taskPatchEvents(prev, { assignee: 'diana' }, 'b');
+    eq(events.length, 1);
+    eq(events[0].kind, 'assignee_changed');
+});
+
+test('taskPatchEvents returns [] for empty/null inputs', () => {
+    eq(taskPatchEvents(null, {}, 'b'), []);
+    eq(taskPatchEvents(createTask({ name: 'A', projectId: 'p' }), null, 'b'), []);
+});
+
+test('sanitiseTask preserves events array', () => {
+    const e = createEvent({ kind: 'status_changed', by: 'b', before: 'not-started', after: 'done' });
+    const t = createTask({ name: 'A', projectId: 'p', events: [e] });
+    const out = sanitiseTask(t);
+    eq(out.events.length, 1);
+    eq(out.events[0].kind, 'status_changed');
 });
 
 // ── runner ──

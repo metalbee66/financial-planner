@@ -20,6 +20,9 @@
  *               row and clears when prerequisite is marked done.
  *   Phase 3.2 — comments: append-only thread on task panel, empty rejected,
  *               persists across reload.
+ *   Phase 3.3 — activity feed: status / assignee / due-date changes log
+ *               events, dep add/remove log events, comments + events
+ *               render interleaved by timestamp.
  *
  * Plus a `tests.html` driver that runs the in-browser data-layer unit suite
  * and asserts 0 failures — keeps unit + e2e in one CI command.
@@ -546,12 +549,12 @@ test.describe('Phase 3.2 — Task comments', () => {
         await page.locator('#task-add-name').press('Enter');
     }
 
-    test('panel exposes a Comments section with empty state', async ({ page }) => {
+    test('panel exposes an Activity section with empty state', async ({ page }) => {
         await createProject(page, { name: 'Comments empty' });
         await addTask(page, 'Solo');
         await openTaskPanel(page, 'Solo');
-        await expect(page.locator('#tp-comments-section')).toBeVisible();
-        await expect(page.locator('.task-panel-comment-empty')).toContainText('No comments yet');
+        await expect(page.locator('#tp-activity-section')).toBeVisible();
+        await expect(page.locator('.task-panel-comment-empty')).toContainText('No activity yet');
     });
 
     test('post a comment: appears in list with author + relative time', async ({ page }) => {
@@ -612,6 +615,124 @@ test.describe('Phase 3.2 — Task comments', () => {
         await page.locator('.project-card', { hasText: 'Persist comments' }).click();
         await page.locator('.task-row', { hasText: 'Saved' }).locator('.task-row-name').click();
         await expect(page.locator('.task-panel-comment-text')).toHaveText('Survives reload');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3.3 — Activity / audit-trail feed', () => {
+
+    async function openTaskPanel(page, taskName) {
+        await page.locator('.task-row', { hasText: taskName })
+            .locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+    }
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    test('inline status change appends a status_changed event', async ({ page }) => {
+        await createProject(page, { name: 'Status audit' });
+        await addTask(page, 'Job');
+
+        await page.locator('.task-row', { hasText: 'Job' })
+            .locator('.task-row-status').selectOption('in-progress');
+
+        await openTaskPanel(page, 'Job');
+        const event = page.locator('.task-panel-event[data-kind="status_changed"]');
+        await expect(event).toHaveCount(1);
+        await expect(event).toContainText(/Not started/);
+        await expect(event).toContainText(/In progress/);
+    });
+
+    test('panel save logs separate events for assignee and due-date changes', async ({ page }) => {
+        await createProject(page, { name: 'Field audit' });
+        await addTask(page, 'Plan');
+        await openTaskPanel(page, 'Plan');
+
+        await page.locator('#tp-assignee').selectOption('brad');
+        await page.locator('#tp-due').fill('2026-12-31');
+        await page.locator('#tp-save').click();
+
+        // Reopen the panel — closing on save destroys the panel DOM
+        await openTaskPanel(page, 'Plan');
+        await expect(page.locator('.task-panel-event[data-kind="assignee_changed"]')).toHaveCount(1);
+        await expect(page.locator('.task-panel-event[data-kind="due_date_changed"]')).toHaveCount(1);
+        await expect(page.locator('.task-panel-event[data-kind="due_date_changed"]'))
+            .toContainText('31/12/2026');
+    });
+
+    test('adding and removing a dependency each log an event', async ({ page }) => {
+        await createProject(page, { name: 'Dep audit' });
+        await addTask(page, 'Pre');
+        await addTask(page, 'Post');
+
+        await openTaskPanel(page, 'Post');
+        await page.locator('#tp-deps-picker').selectOption({ label: 'Pre' });
+        await page.locator('#tp-deps-add-btn').click();
+        await expect(page.locator('.task-panel-event[data-kind="dependency_added"]'))
+            .toContainText('Pre');
+
+        await page.locator('.task-panel-dep', { hasText: 'Pre' })
+            .locator('.task-panel-dep-remove').click();
+        await expect(page.locator('.task-panel-event[data-kind="dependency_removed"]'))
+            .toContainText('Pre');
+    });
+
+    test('comment + events render interleaved in chronological order', async ({ page }) => {
+        await createProject(page, { name: 'Interleave' });
+        await addTask(page, 'Item');
+
+        // 1. Status change via inline dropdown
+        await page.locator('.task-row', { hasText: 'Item' })
+            .locator('.task-row-status').selectOption('in-progress');
+        // 2. Comment via panel
+        await openTaskPanel(page, 'Item');
+        await page.locator('#tp-comment-text').fill('Mid-flight comment');
+        await page.locator('#tp-comment-submit').click();
+        await expect(page.locator('.task-panel-comment-text')).toHaveText('Mid-flight comment');
+        // 3. Due-date change via panel save
+        await page.locator('#tp-due').fill('2026-08-15');
+        await page.locator('#tp-save').click();
+
+        await openTaskPanel(page, 'Item');
+        // Three entries in the order: status event → comment → due-date event
+        const entries = page.locator('#tp-activity-list > li');
+        await expect(entries).toHaveCount(3);
+        await expect(entries.nth(0)).toHaveClass(/task-panel-event/);
+        await expect(entries.nth(0)).toHaveAttribute('data-kind', 'status_changed');
+        await expect(entries.nth(1)).toHaveClass(/task-panel-comment/);
+        await expect(entries.nth(2)).toHaveClass(/task-panel-event/);
+        await expect(entries.nth(2)).toHaveAttribute('data-kind', 'due_date_changed');
+    });
+
+    test('untracked field changes (name, priority) do not log events', async ({ page }) => {
+        await createProject(page, { name: 'No noise' });
+        await addTask(page, 'Original');
+        await openTaskPanel(page, 'Original');
+
+        await page.locator('#tp-name').fill('Renamed');
+        await page.locator('#tp-priority').selectOption('high');
+        await page.locator('#tp-save').click();
+
+        await openTaskPanel(page, 'Renamed');
+        await expect(page.locator('.task-panel-event')).toHaveCount(0);
+        // Activity feed shows the empty-state since no events or comments yet
+        await expect(page.locator('.task-panel-comment-empty')).toContainText('No activity yet');
+    });
+
+    test('events persist across reload', async ({ page }) => {
+        await createProject(page, { name: 'Persist events' });
+        await addTask(page, 'Long-lived');
+        await page.locator('.task-row', { hasText: 'Long-lived' })
+            .locator('.task-row-status').selectOption('done');
+
+        await page.reload();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Persist events' }).click();
+        await page.locator('.task-row', { hasText: 'Long-lived' }).locator('.task-row-name').click();
+        await expect(page.locator('.task-panel-event[data-kind="status_changed"]')).toHaveCount(1);
     });
 });
 

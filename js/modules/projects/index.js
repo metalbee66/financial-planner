@@ -42,6 +42,9 @@ import {
     countBlockingDeps,
     createComment,
     addCommentToTask,
+    createEvent,
+    addEventToTask,
+    taskPatchEvents,
     saveProjects,
 } from './data.js';
 
@@ -118,6 +121,50 @@ function setBoth(items, tasks) {
     ensureProjectsData();
     state.projectsData = { ...state.projectsData, items, tasks };
     saveProjects(state.projectsData);
+}
+
+/**
+ * Patch a task and auto-log audit events for any tracked field that changed
+ * (status / assignee / due-date — see TRACKED_FIELD_EVENT_KINDS in data.js).
+ * Every UI site that mutates a task should go through here so the activity
+ * feed stays consistent. One save per call.
+ */
+function applyTaskPatch(taskId, patch) {
+    const tasks = getTasks();
+    const prev = findTask(tasks, taskId);
+    if (!prev) return;
+    const events = taskPatchEvents(prev, patch, currentUserEmail());
+    let next = updateTaskInList(tasks, taskId, patch);
+    for (const e of events) next = addEventToTask(next, taskId, e);
+    setTasks(next);
+}
+
+/** Add a dep + log a `dependency_added` event in one save. Returns boolean. */
+function applyAddDependency(taskId, depId) {
+    const tasks = getTasks();
+    const next = addDependency(tasks, taskId, depId);
+    if (next === tasks) return false;
+    const evt = createEvent({
+        kind: 'dependency_added',
+        by: currentUserEmail(),
+        after: depId,
+    });
+    setTasks(addEventToTask(next, taskId, evt));
+    return true;
+}
+
+/** Remove a dep + log a `dependency_removed` event in one save. */
+function applyRemoveDependency(taskId, depId) {
+    const tasks = getTasks();
+    const next = removeDependency(tasks, taskId, depId);
+    if (next === tasks) return false;
+    const evt = createEvent({
+        kind: 'dependency_removed',
+        by: currentUserEmail(),
+        before: depId,
+    });
+    setTasks(addEventToTask(next, taskId, evt));
+    return true;
 }
 
 function render() {
@@ -354,8 +401,7 @@ function renderTaskRow(t, project, isSubtask) {
 
     row.querySelector('.task-row-name').addEventListener('click', () => openTaskPanel(t.id));
     row.querySelector('.task-row-status').addEventListener('change', (e) => {
-        const next = updateTaskInList(getTasks(), t.id, { status: e.target.value });
-        setTasks(next);
+        applyTaskPatch(t.id, { status: e.target.value });
         render();
     });
     row.querySelector('.task-row-delete').addEventListener('click', (e) => {
@@ -697,9 +743,9 @@ function renderTaskPanel(t) {
                     <ul class="task-panel-subtask-list" id="tp-subtask-list"></ul>
                 </div>
             `}
-            <div class="task-panel-comments" id="tp-comments-section">
-                <h4>Comments</h4>
-                <ul class="task-panel-comments-list" id="tp-comments-list"></ul>
+            <div class="task-panel-activity" id="tp-activity-section">
+                <h4>Activity</h4>
+                <ul class="task-panel-activity-list" id="tp-activity-list"></ul>
                 <div class="task-panel-comments-composer">
                     <textarea id="tp-comment-text" rows="2" maxlength="2000" placeholder="Add a comment…"></textarea>
                     <div class="form-error" id="tp-comment-error" role="alert" aria-live="polite"></div>
@@ -734,7 +780,7 @@ function renderTaskPanel(t) {
 
     wireDepsSection(panel, t);
     if (!t.parentTaskId) wireSubtaskSection(panel, t);
-    wireCommentsSection(panel, t);
+    wireActivitySection(panel, t);
 
     // Esc closes
     panel.addEventListener('keydown', (e) => {
@@ -767,9 +813,7 @@ function wireDepsSection(panel, task) {
             showDepsError(`Cannot add dependency on "${depName}" — it would create a cycle.`);
             return;
         }
-        const next = addDependency(getTasks(), task.id, depId);
-        if (next === getTasks()) return;
-        setTasks(next);
+        if (!applyAddDependency(task.id, depId)) return;
         // Re-render the panel via the host render so the row badges + dep
         // list both reflect the new state. render() re-attaches the panel
         // from the latest task data via the openTaskPanelId guard.
@@ -809,9 +853,7 @@ function wireDepsSection(panel, task) {
                 <button type="button" class="task-panel-dep-remove" aria-label="Remove dependency">×</button>
             `;
             li.querySelector('.task-panel-dep-remove').addEventListener('click', () => {
-                const next = removeDependency(getTasks(), task.id, d.id);
-                if (next === getTasks()) return;
-                setTasks(next);
+                if (!applyRemoveDependency(task.id, d.id)) return;
                 render();
             });
             list.appendChild(li);
@@ -888,7 +930,7 @@ function wireSubtaskSection(panel, parent) {
         `;
         li.querySelector('.task-panel-subtask-name').addEventListener('click', () => openTaskPanel(s.id));
         li.querySelector('.task-panel-subtask-status').addEventListener('change', (e) => {
-            setTasks(updateTaskInList(getTasks(), s.id, { status: e.target.value }));
+            applyTaskPatch(s.id, { status: e.target.value });
             render();
         });
         li.querySelector('.task-panel-subtask-delete').addEventListener('click', () => {
@@ -901,21 +943,22 @@ function wireSubtaskSection(panel, parent) {
 }
 
 /**
- * Wires the Comments section in the task panel. Append-only: there is no
- * edit/delete UI because comments are part of the audit trail. Author is
- * the signed-in Firebase user's email when available, else 'anonymous' so
- * localStorage-only sessions still work.
+ * Wires the Activity section in the task panel. Combined feed of audit
+ * events (status/assignee/dueDate/dep changes — see TRACKED_FIELD_EVENT_KINDS)
+ * and append-only comments, sorted by timestamp ascending so the newest
+ * entry sits at the bottom right above the composer.
  *
- * Empty/whitespace-only input is rejected with an inline error rather than
- * silently doing nothing — keeps parity with the other forms in this panel.
+ * Comments stay append-only (no edit/delete UI) because the feed is the
+ * audit trail. Author of a new comment is the signed-in Firebase user's
+ * email when available, else 'anonymous'.
  */
-function wireCommentsSection(panel, task) {
-    const list = panel.querySelector('#tp-comments-list');
+function wireActivitySection(panel, task) {
+    const list = panel.querySelector('#tp-activity-list');
     const textEl = panel.querySelector('#tp-comment-text');
     const submitBtn = panel.querySelector('#tp-comment-submit');
     const errEl = panel.querySelector('#tp-comment-error');
 
-    redrawComments();
+    redrawActivity();
 
     const submit = () => {
         const text = textEl.value.trim();
@@ -948,26 +991,102 @@ function wireCommentsSection(panel, task) {
         }
     });
 
-    function redrawComments() {
-        const fresh = findTask(getTasks(), task.id) || task;
-        const comments = Array.isArray(fresh.comments) ? fresh.comments : [];
-        if (comments.length === 0) {
-            list.innerHTML = '<li class="task-panel-comment-empty">No comments yet.</li>';
+    function redrawActivity() {
+        const tasks = getTasks();
+        const fresh = findTask(tasks, task.id) || task;
+        const comments = (Array.isArray(fresh.comments) ? fresh.comments : [])
+            .map(c => ({ kind: 'comment', at: c.createdAt, data: c }));
+        const events = (Array.isArray(fresh.events) ? fresh.events : [])
+            .map(e => ({ kind: 'event', at: e.at, data: e }));
+        const merged = comments.concat(events).sort(
+            (a, b) => (a.at || '').localeCompare(b.at || '')
+        );
+        if (merged.length === 0) {
+            list.innerHTML = '<li class="task-panel-comment-empty">No activity yet.</li>';
             return;
         }
         list.innerHTML = '';
-        comments.forEach(c => {
-            const li = document.createElement('li');
-            li.className = 'task-panel-comment';
-            li.innerHTML = `
-                <div class="task-panel-comment-meta">
-                    <span class="task-panel-comment-author">${escapeHtml(c.author || 'anonymous')}</span>
-                    <span class="task-panel-comment-time" title="${escapeAttr(formatDateTime(c.createdAt))}">${escapeHtml(formatRelativeTime(c.createdAt))}</span>
-                </div>
-                <div class="task-panel-comment-text">${escapeHtml(c.text)}</div>
-            `;
-            list.appendChild(li);
-        });
+        for (const entry of merged) {
+            list.appendChild(
+                entry.kind === 'comment'
+                    ? renderCommentEntry(entry.data)
+                    : renderEventEntry(entry.data, tasks)
+            );
+        }
+    }
+}
+
+function renderCommentEntry(c) {
+    const li = document.createElement('li');
+    li.className = 'task-panel-comment';
+    li.innerHTML = `
+        <div class="task-panel-comment-meta">
+            <span class="task-panel-comment-author">${escapeHtml(c.author || 'anonymous')}</span>
+            <span class="task-panel-comment-time" title="${escapeAttr(formatDateTime(c.createdAt))}">${escapeHtml(formatRelativeTime(c.createdAt))}</span>
+        </div>
+        <div class="task-panel-comment-text">${escapeHtml(c.text)}</div>
+    `;
+    return li;
+}
+
+function renderEventEntry(e, tasks) {
+    const li = document.createElement('li');
+    li.className = 'task-panel-event';
+    li.dataset.kind = e.kind;
+    const summary = formatEventSummary(e, tasks);
+    li.innerHTML = `
+        <span class="task-panel-event-icon" aria-hidden="true">${eventIconFor(e.kind)}</span>
+        <span class="task-panel-event-text">${summary}</span>
+        <span class="task-panel-event-time" title="${escapeAttr(formatDateTime(e.at))}">${escapeHtml(formatRelativeTime(e.at))}</span>
+    `;
+    return li;
+}
+
+function eventIconFor(kind) {
+    switch (kind) {
+        case 'status_changed': return '↻';
+        case 'assignee_changed': return '👤';
+        case 'due_date_changed': return '📅';
+        case 'dependency_added': return '🔗';
+        case 'dependency_removed': return '✂';
+        default: return '·';
+    }
+}
+
+/**
+ * Render an event as inline HTML. `before`/`after` semantics depend on kind:
+ *   - status_changed / assignee_changed / due_date_changed: literal field values
+ *   - dependency_added: `after` = depId; dependency_removed: `before` = depId
+ * Looks up dep task names against the current task list — falls back to a
+ * neutral label if the referenced task has been deleted.
+ */
+function formatEventSummary(e, tasks) {
+    const author = `<strong>${escapeHtml(e.by || 'anonymous')}</strong>`;
+    switch (e.kind) {
+        case 'status_changed':
+            return `${author} changed status from <em>${escapeHtml(TASK_STATUS_LABELS[e.before] || e.before || '—')}</em> to <em>${escapeHtml(TASK_STATUS_LABELS[e.after] || e.after || '—')}</em>`;
+        case 'assignee_changed': {
+            const before = e.before ? participantLabel(e.before) : 'unassigned';
+            const after = e.after ? participantLabel(e.after) : 'unassigned';
+            return `${author} changed assignee from <em>${escapeHtml(before)}</em> to <em>${escapeHtml(after)}</em>`;
+        }
+        case 'due_date_changed': {
+            const before = e.before ? formatDate(e.before) : 'no due date';
+            const after = e.after ? formatDate(e.after) : 'no due date';
+            return `${author} changed due date from <em>${escapeHtml(before)}</em> to <em>${escapeHtml(after)}</em>`;
+        }
+        case 'dependency_added': {
+            const dep = tasks.find(t => t.id === e.after);
+            const name = dep ? dep.name : 'a deleted task';
+            return `${author} added dependency on <em>${escapeHtml(name)}</em>`;
+        }
+        case 'dependency_removed': {
+            const dep = tasks.find(t => t.id === e.before);
+            const name = dep ? dep.name : 'a deleted task';
+            return `${author} removed dependency on <em>${escapeHtml(name)}</em>`;
+        }
+        default:
+            return `${author} ${escapeHtml(e.kind)}`;
     }
 }
 
@@ -1013,7 +1132,7 @@ function onTaskPanelSave(orig) {
         errEl.style.display = '';
         return;
     }
-    setTasks(updateTaskInList(getTasks(), orig.id, patch));
+    applyTaskPatch(orig.id, patch);
     closeTaskPanel();
     render();
 }
