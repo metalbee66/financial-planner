@@ -35,6 +35,8 @@ import {
     removeDependency,
     wouldCreateCycle,
     countBlockingDeps,
+    createComment,
+    addCommentToTask,
 } from './data.js';
 
 const tests = [];
@@ -554,6 +556,77 @@ test('sanitiseTask preserves dependsOn array', () => {
     const a = createTask({ name: 'A', projectId: 'p', dependsOn: ['t_x', 't_y'] });
     const out = sanitiseTask(a);
     eq(out.dependsOn, ['t_x', 't_y']);
+});
+
+// ── comments (Task 3.2) ──
+
+test('createComment populates id, author, text, createdAt', () => {
+    const c = createComment({ author: 'brad@example.com', text: 'looks good' });
+    truthy(c.id && c.id.startsWith('c_'), 'id should start with c_');
+    eq(c.author, 'brad@example.com');
+    eq(c.text, 'looks good');
+    truthy(c.createdAt, 'createdAt set');
+});
+
+test('createComment trims text', () => {
+    const c = createComment({ author: 'b', text: '  hi  ' });
+    eq(c.text, 'hi');
+});
+
+test('createComment defaults author to anonymous when missing', () => {
+    eq(createComment({ text: 'hi' }).author, 'anonymous');
+    eq(createComment({ author: '', text: 'hi' }).author, 'anonymous');
+    eq(createComment({ author: '   ', text: 'hi' }).author, 'anonymous');
+});
+
+test('createComment ids are unique across rapid calls', () => {
+    const ids = new Set();
+    for (let i = 0; i < 50; i++) ids.add(createComment({ author: 'b', text: 'x' }).id);
+    eq(ids.size, 50);
+});
+
+test('addCommentToTask appends and bumps updatedAt', async () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const c = createComment({ author: 'b', text: 'hello' });
+    await new Promise(r => setTimeout(r, 5));
+    const next = addCommentToTask([t], t.id, c);
+    const tNext = next.find(x => x.id === t.id);
+    eq(tNext.comments.length, 1);
+    eq(tNext.comments[0].id, c.id);
+    truthy(tNext.updatedAt >= t.updatedAt, 'updatedAt should not regress');
+});
+
+test('addCommentToTask preserves chronological order (newest at end)', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const c1 = createComment({ author: 'b', text: 'first' });
+    const c2 = createComment({ author: 'd', text: 'second' });
+    let list = addCommentToTask([t], t.id, c1);
+    list = addCommentToTask(list, t.id, c2);
+    const tOut = list.find(x => x.id === t.id);
+    eq(tOut.comments.map(c => c.text), ['first', 'second']);
+});
+
+test('addCommentToTask returns same ref when taskId missing', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const list = [t];
+    const c = createComment({ author: 'b', text: 'hi' });
+    eq(addCommentToTask(list, 'no-such-task', c), list);
+});
+
+test('addCommentToTask is immutable (does not mutate input list or task)', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const list = [t];
+    const c = createComment({ author: 'b', text: 'hi' });
+    addCommentToTask(list, t.id, c);
+    eq(list[0].comments.length, 0, 'original task untouched');
+});
+
+test('sanitiseTask preserves comments array', () => {
+    const c = createComment({ author: 'b', text: 'hello' });
+    const t = createTask({ name: 'A', projectId: 'p', comments: [c] });
+    const out = sanitiseTask(t);
+    eq(out.comments.length, 1);
+    eq(out.comments[0].text, 'hello');
 });
 
 // ── runner ──

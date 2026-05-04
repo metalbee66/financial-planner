@@ -34,6 +34,10 @@ function generateTaskId() {
     return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
 
+function generateCommentId() {
+    return 'c_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
 function trim(s) {
     return typeof s === 'string' ? s.trim() : '';
 }
@@ -325,6 +329,39 @@ export function countBlockingDeps(list, task) {
         if (dep && dep.status !== 'done') n++;
     }
     return n;
+}
+
+// ── Comments (Task 3.2) ──
+
+/**
+ * Build a fresh comment. Append-only — there is intentionally no
+ * updateComment / deleteComment helper; comments are part of the audit trail.
+ * Empty/whitespace-only authors fall back to 'anonymous' so the UI can pass
+ * the current user's email straight through without null-checking.
+ */
+export function createComment(input) {
+    const author = trim(input && input.author);
+    return {
+        id: generateCommentId(),
+        author: author || 'anonymous',
+        text: trim(input && input.text),
+        createdAt: nowIso(),
+    };
+}
+
+/**
+ * Append `comment` to `taskId.comments[]`. Returns same list ref when the
+ * task isn't found so callers can avoid a redundant Firebase save. Bumps
+ * the task's `updatedAt` because the comment thread is part of the task.
+ */
+export function addCommentToTask(list, taskId, comment) {
+    const idx = list.findIndex(t => t.id === taskId);
+    if (idx < 0) return list;
+    const task = list[idx];
+    const existing = Array.isArray(task.comments) ? task.comments : [];
+    const next = list.slice();
+    next[idx] = { ...task, comments: existing.concat([comment]), updatedAt: nowIso() };
+    return next;
 }
 
 // ── Persistence ──

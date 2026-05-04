@@ -18,6 +18,8 @@
  *   Phase 3.1 — task dependencies: add/remove via panel picker, cycle attempt
  *               rejected with inline error, "Blocked by N" badge appears on
  *               row and clears when prerequisite is marked done.
+ *   Phase 3.2 — comments: append-only thread on task panel, empty rejected,
+ *               persists across reload.
  *
  * Plus a `tests.html` driver that runs the in-browser data-layer unit suite
  * and asserts 0 failures — keeps unit + e2e in one CI command.
@@ -527,6 +529,89 @@ test.describe('Phase 3.1 — Task dependencies', () => {
         await page.locator('#tp-deps-add-btn').click();
         await expect(page.locator('#tp-deps-error')).toContainText(/cycle/i);
         await expect(page.locator('.task-panel-deps-empty')).toBeVisible();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3.2 — Task comments', () => {
+
+    async function openTaskPanel(page, taskName) {
+        await page.locator('.task-row', { hasText: taskName })
+            .locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+    }
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    test('panel exposes a Comments section with empty state', async ({ page }) => {
+        await createProject(page, { name: 'Comments empty' });
+        await addTask(page, 'Solo');
+        await openTaskPanel(page, 'Solo');
+        await expect(page.locator('#tp-comments-section')).toBeVisible();
+        await expect(page.locator('.task-panel-comment-empty')).toContainText('No comments yet');
+    });
+
+    test('post a comment: appears in list with author + relative time', async ({ page }) => {
+        await createProject(page, { name: 'Add comment' });
+        await addTask(page, 'Discuss');
+        await openTaskPanel(page, 'Discuss');
+
+        await page.locator('#tp-comment-text').fill('Looks good');
+        await page.locator('#tp-comment-submit').click();
+
+        await expect(page.locator('.task-panel-comment-empty')).toHaveCount(0);
+        const comment = page.locator('.task-panel-comment').first();
+        await expect(comment.locator('.task-panel-comment-text')).toHaveText('Looks good');
+        // No Firebase user → falls back to 'anonymous'
+        await expect(comment.locator('.task-panel-comment-author')).toHaveText('anonymous');
+        await expect(comment.locator('.task-panel-comment-time')).toContainText(/just now|sec ago/);
+        // Composer cleared after re-render
+        await expect(page.locator('#tp-comment-text')).toHaveValue('');
+    });
+
+    test('empty input is rejected with inline error', async ({ page }) => {
+        await createProject(page, { name: 'Empty reject' });
+        await addTask(page, 'A task');
+        await openTaskPanel(page, 'A task');
+
+        await page.locator('#tp-comment-text').fill('   ');
+        await page.locator('#tp-comment-submit').click();
+
+        await expect(page.locator('#tp-comment-error')).toContainText(/empty/i);
+        await expect(page.locator('.task-panel-comment')).toHaveCount(0);
+    });
+
+    test('comments render in chronological order (oldest first)', async ({ page }) => {
+        await createProject(page, { name: 'Order check' });
+        await addTask(page, 'Thread');
+        await openTaskPanel(page, 'Thread');
+
+        for (const msg of ['First', 'Second', 'Third']) {
+            await page.locator('#tp-comment-text').fill(msg);
+            await page.locator('#tp-comment-submit').click();
+            // Wait for the re-render to clear the composer before posting next
+            await expect(page.locator('#tp-comment-text')).toHaveValue('');
+        }
+        const texts = await page.locator('.task-panel-comment-text').allTextContents();
+        expect(texts).toEqual(['First', 'Second', 'Third']);
+    });
+
+    test('comments persist across reload', async ({ page }) => {
+        await createProject(page, { name: 'Persist comments' });
+        await addTask(page, 'Saved');
+        await openTaskPanel(page, 'Saved');
+        await page.locator('#tp-comment-text').fill('Survives reload');
+        await page.locator('#tp-comment-submit').click();
+        await expect(page.locator('.task-panel-comment-text')).toHaveText('Survives reload');
+
+        await page.reload();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Persist comments' }).click();
+        await page.locator('.task-row', { hasText: 'Saved' }).locator('.task-row-name').click();
+        await expect(page.locator('.task-panel-comment-text')).toHaveText('Survives reload');
     });
 });
 

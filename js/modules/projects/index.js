@@ -13,6 +13,7 @@
  */
 
 import { state } from '../../state.js';
+import { currentUser } from '../../firebase-sync.js';
 import {
     PROJECT_STATUSES,
     TASK_STATUSES,
@@ -39,6 +40,8 @@ import {
     removeDependency,
     wouldCreateCycle,
     countBlockingDeps,
+    createComment,
+    addCommentToTask,
     saveProjects,
 } from './data.js';
 
@@ -694,6 +697,15 @@ function renderTaskPanel(t) {
                     <ul class="task-panel-subtask-list" id="tp-subtask-list"></ul>
                 </div>
             `}
+            <div class="task-panel-comments" id="tp-comments-section">
+                <h4>Comments</h4>
+                <ul class="task-panel-comments-list" id="tp-comments-list"></ul>
+                <div class="task-panel-comments-composer">
+                    <textarea id="tp-comment-text" rows="2" maxlength="2000" placeholder="Add a comment…"></textarea>
+                    <div class="form-error" id="tp-comment-error" role="alert" aria-live="polite"></div>
+                    <button type="button" class="btn-primary" id="tp-comment-submit">Post comment</button>
+                </div>
+            </div>
             <div class="task-panel-meta">
                 Created ${escapeHtml(formatDateTime(t.createdAt))}
                 ${t.completedAt ? `· Completed ${escapeHtml(formatDateTime(t.completedAt))}` : ''}
@@ -722,6 +734,7 @@ function renderTaskPanel(t) {
 
     wireDepsSection(panel, t);
     if (!t.parentTaskId) wireSubtaskSection(panel, t);
+    wireCommentsSection(panel, t);
 
     // Esc closes
     panel.addEventListener('keydown', (e) => {
@@ -885,6 +898,99 @@ function wireSubtaskSection(panel, parent) {
         });
         list.appendChild(li);
     });
+}
+
+/**
+ * Wires the Comments section in the task panel. Append-only: there is no
+ * edit/delete UI because comments are part of the audit trail. Author is
+ * the signed-in Firebase user's email when available, else 'anonymous' so
+ * localStorage-only sessions still work.
+ *
+ * Empty/whitespace-only input is rejected with an inline error rather than
+ * silently doing nothing — keeps parity with the other forms in this panel.
+ */
+function wireCommentsSection(panel, task) {
+    const list = panel.querySelector('#tp-comments-list');
+    const textEl = panel.querySelector('#tp-comment-text');
+    const submitBtn = panel.querySelector('#tp-comment-submit');
+    const errEl = panel.querySelector('#tp-comment-error');
+
+    redrawComments();
+
+    const submit = () => {
+        const text = textEl.value.trim();
+        if (!text) {
+            errEl.textContent = 'Comment cannot be empty.';
+            errEl.style.display = '';
+            textEl.focus();
+            return;
+        }
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+        const c = createComment({
+            author: currentUserEmail(),
+            text,
+        });
+        const next = addCommentToTask(getTasks(), task.id, c);
+        if (next === getTasks()) return;
+        setTasks(next);
+        // render() re-attaches the panel from the latest task data via the
+        // openTaskPanelId guard, so the new comment renders without a manual
+        // redraw here.
+        render();
+    };
+    submitBtn.addEventListener('click', submit);
+    textEl.addEventListener('keydown', (e) => {
+        // Ctrl/Cmd+Enter posts, plain Enter inserts a newline.
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            submit();
+        }
+    });
+
+    function redrawComments() {
+        const fresh = findTask(getTasks(), task.id) || task;
+        const comments = Array.isArray(fresh.comments) ? fresh.comments : [];
+        if (comments.length === 0) {
+            list.innerHTML = '<li class="task-panel-comment-empty">No comments yet.</li>';
+            return;
+        }
+        list.innerHTML = '';
+        comments.forEach(c => {
+            const li = document.createElement('li');
+            li.className = 'task-panel-comment';
+            li.innerHTML = `
+                <div class="task-panel-comment-meta">
+                    <span class="task-panel-comment-author">${escapeHtml(c.author || 'anonymous')}</span>
+                    <span class="task-panel-comment-time" title="${escapeAttr(formatDateTime(c.createdAt))}">${escapeHtml(formatRelativeTime(c.createdAt))}</span>
+                </div>
+                <div class="task-panel-comment-text">${escapeHtml(c.text)}</div>
+            `;
+            list.appendChild(li);
+        });
+    }
+}
+
+/** Best-effort author identity. Empty when no Firebase user (data layer falls back to 'anonymous'). */
+function currentUserEmail() {
+    return (currentUser && currentUser.email) || '';
+}
+
+/** "5 min ago" style. Falls back to absolute date for older items. */
+function formatRelativeTime(iso) {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    if (isNaN(t)) return iso;
+    const sec = Math.round((Date.now() - t) / 1000);
+    if (sec < 5) return 'just now';
+    if (sec < 60) return `${sec} sec ago`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min} min ago`;
+    const hr = Math.round(min / 60);
+    if (hr < 24) return `${hr} hr ago`;
+    const day = Math.round(hr / 24);
+    if (day < 7) return `${day} day${day === 1 ? '' : 's'} ago`;
+    return formatDateTime(iso);
 }
 
 function onTaskPanelSave(orig) {
