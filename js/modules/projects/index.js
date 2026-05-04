@@ -79,7 +79,7 @@ const TASK_PRIORITY_LABELS = { low: 'Low', normal: 'Normal', high: 'High' };
 const PARTICIPANT_LABELS = { brad: 'Brad', diana: 'Diana' };
 
 let host = null;
-let mode = { view: 'list', editingId: null, detailProjectId: null };
+let mode = { view: 'list', editingId: null, detailProjectId: null, taskFilters: {} };
 let mounted = false;
 let openTaskPanelId = null;
 
@@ -323,6 +323,11 @@ function renderDetail() {
             <div class="tasks-header">
                 <h3 class="tasks-title">Tasks</h3>
                 <span class="tasks-count">${totalCount === 0 ? 'No tasks yet' : `${openCount} open · ${totalCount} total`}</span>
+                <label class="tasks-filter-toggle">
+                    <input type="checkbox" id="tasks-filter-milestones"${mode.taskFilters && mode.taskFilters.milestonesOnly ? ' checked' : ''} />
+                    <span class="task-row-milestone-glyph" aria-hidden="true">◆</span>
+                    <span>Milestones only</span>
+                </label>
             </div>
             <div class="tasks-add-row" id="tasks-add-row"></div>
             <div class="tasks-list" id="tasks-list"></div>
@@ -331,9 +336,32 @@ function renderDetail() {
 
     host.querySelector('#projects-back-btn').addEventListener('click', goList);
     host.querySelector('#projects-edit-btn').addEventListener('click', () => goEdit(p.id));
+    host.querySelector('#tasks-filter-milestones').addEventListener('change', (e) => {
+        mode.taskFilters = { ...(mode.taskFilters || {}), milestonesOnly: e.target.checked };
+        render();
+    });
 
     renderAddTaskRow(host.querySelector('#tasks-add-row'), p);
-    renderTasksList(host.querySelector('#tasks-list'), p, allTasks);
+    renderTasksList(host.querySelector('#tasks-list'), p, applyTaskFilters(allTasks));
+}
+
+/**
+ * Apply the current `mode.taskFilters` to a list of tasks.
+ *
+ * `milestonesOnly` keeps milestone tasks AND any non-milestone parent of a
+ * milestone subtask, so the parent isn't orphaned in the indented-list
+ * render. (Subtask rows assume their parent is rendered immediately above.)
+ */
+function applyTaskFilters(tasks) {
+    const filters = mode.taskFilters || {};
+    if (!filters.milestonesOnly) return tasks;
+    const milestoneIds = new Set(tasks.filter(t => t.isMilestone).map(t => t.id));
+    const parentsOfMilestones = new Set(
+        tasks
+            .filter(t => t.isMilestone && t.parentTaskId)
+            .map(t => t.parentTaskId)
+    );
+    return tasks.filter(t => milestoneIds.has(t.id) || parentsOfMilestones.has(t.id));
 }
 
 function renderAddTaskRow(root, project) {
@@ -409,7 +437,8 @@ function renderTaskRow(t, project, isSubtask) {
     const row = document.createElement('div');
     row.className = 'task-row'
         + (t.status === 'done' ? ' task-row-done' : '')
-        + (isSubtask ? ' task-row-subtask' : '');
+        + (isSubtask ? ' task-row-subtask' : '')
+        + (t.isMilestone ? ' task-row-milestone' : '');
     row.dataset.taskId = t.id;
 
     const assigneeHtml = t.assignee
@@ -425,8 +454,12 @@ function renderTaskRow(t, project, isSubtask) {
         ? `<span class="task-row-blocked" title="Blocked by ${blockedCount} unmet ${blockedCount === 1 ? 'dependency' : 'dependencies'}">⛔ Blocked by ${blockedCount}</span>`
         : '';
 
+    const milestoneGlyph = t.isMilestone
+        ? '<span class="task-row-milestone-glyph" title="Milestone" aria-label="Milestone">◆</span>'
+        : '';
+
     row.innerHTML = `
-        <button type="button" class="task-row-name" aria-label="Open task">${escapeHtml(t.name)}${blockedBadge}</button>
+        <button type="button" class="task-row-name" aria-label="Open task">${milestoneGlyph}${escapeHtml(t.name)}${blockedBadge}</button>
         <select class="task-row-status status-${t.status}" aria-label="Status">
             ${TASK_STATUSES.map(s =>
                 `<option value="${s}"${s === t.status ? ' selected' : ''}>${TASK_STATUS_LABELS[s]}</option>`
@@ -630,20 +663,28 @@ function onDelete(p) {
 // ── View transitions ──
 
 function goList() {
-    mode = { view: 'list', editingId: null, detailProjectId: null };
+    mode = { view: 'list', editingId: null, detailProjectId: null, taskFilters: {} };
     closeTaskPanel();
     render();
 }
 function goCreate() {
-    mode = { view: 'form', editingId: null, detailProjectId: mode.detailProjectId };
+    mode = { view: 'form', editingId: null, detailProjectId: mode.detailProjectId, taskFilters: mode.taskFilters || {} };
     render();
 }
 function goEdit(id) {
-    mode = { view: 'form', editingId: id, detailProjectId: mode.detailProjectId };
+    mode = { view: 'form', editingId: id, detailProjectId: mode.detailProjectId, taskFilters: mode.taskFilters || {} };
     render();
 }
 function goDetail(id) {
-    mode = { view: 'detail', editingId: null, detailProjectId: id };
+    // Reset filters when entering a different project so milestone-only state
+    // doesn't leak across navigation. Same project keeps its filter on rerender.
+    const sameProject = mode.detailProjectId === id;
+    mode = {
+        view: 'detail',
+        editingId: null,
+        detailProjectId: id,
+        taskFilters: sameProject ? (mode.taskFilters || {}) : {},
+    };
     render();
 }
 
@@ -752,6 +793,13 @@ function renderTaskPanel(t) {
             <div class="form-row">
                 <label for="tp-desc">Description</label>
                 <textarea id="tp-desc" rows="6" maxlength="4000">${escapeHtml(t.description)}</textarea>
+            </div>
+            <div class="form-row">
+                <label class="task-panel-milestone-toggle">
+                    <input type="checkbox" id="tp-milestone"${t.isMilestone ? ' checked' : ''} />
+                    <span class="task-panel-milestone-glyph" aria-hidden="true">◆</span>
+                    <span>Mark as milestone</span>
+                </label>
             </div>
             <div class="form-error" id="tp-error" role="alert" aria-live="polite"></div>
             <div class="task-panel-deps" id="tp-deps-section">
@@ -1350,6 +1398,7 @@ function onTaskPanelSave(orig) {
         startDate: panel.querySelector('#tp-start').value || null,
         dueDate: panel.querySelector('#tp-due').value || null,
         description: panel.querySelector('#tp-desc').value,
+        isMilestone: panel.querySelector('#tp-milestone').checked,
     };
     const merged = { ...orig, ...patch };
     const err = validateTask(merged);

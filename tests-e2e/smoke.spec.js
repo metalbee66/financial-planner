@@ -26,6 +26,8 @@
  *   Phase 3.4 — file attachments: file picker accepts ≤500 KB, oversize
  *               rejected, URL refs accepted, chips render with download/
  *               open links, remove + audit-event integration, persistence.
+ *   Phase 3.5 — milestones: panel toggle, row diamond glyph, "milestones
+ *               only" filter, persistence.
  *
  * Plus a `tests.html` driver that runs the in-browser data-layer unit suite
  * and asserts 0 failures — keeps unit + e2e in one CI command.
@@ -876,6 +878,98 @@ test.describe('Phase 3.4 — File attachments', () => {
         await page.locator('.project-card', { hasText: 'Persist atts' }).click();
         await page.locator('.task-row', { hasText: 'Saved' }).locator('.task-row-name').click();
         await expect(page.locator('.task-panel-attachment', { hasText: 'note.txt' })).toBeVisible();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 3.5 — Milestones', () => {
+
+    async function openTaskPanel(page, taskName) {
+        await page.locator('.task-row', { hasText: taskName })
+            .locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+    }
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    test('panel toggle is unchecked by default; checking it adds a diamond glyph to the row', async ({ page }) => {
+        await createProject(page, { name: 'Milestone toggle' });
+        await addTask(page, 'Launch');
+        await openTaskPanel(page, 'Launch');
+
+        const toggle = page.locator('#tp-milestone');
+        await expect(toggle).not.toBeChecked();
+
+        await toggle.check();
+        await page.locator('#tp-save').click();
+
+        const row = page.locator('.task-row', { hasText: 'Launch' });
+        await expect(row).toHaveClass(/task-row-milestone/);
+        await expect(row.locator('.task-row-milestone-glyph')).toHaveText('◆');
+    });
+
+    test('un-checking the toggle removes the diamond on the next save', async ({ page }) => {
+        await createProject(page, { name: 'Unset milestone' });
+        await addTask(page, 'Phase');
+        await openTaskPanel(page, 'Phase');
+        await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+        await expect(
+            page.locator('.task-row', { hasText: 'Phase' }).locator('.task-row-milestone-glyph')
+        ).toBeVisible();
+
+        await openTaskPanel(page, 'Phase');
+        await page.locator('#tp-milestone').uncheck();
+        await page.locator('#tp-save').click();
+
+        await expect(
+            page.locator('.task-row', { hasText: 'Phase' }).locator('.task-row-milestone-glyph')
+        ).toHaveCount(0);
+    });
+
+    test('Milestones only filter hides non-milestone tasks', async ({ page }) => {
+        await createProject(page, { name: 'Filter test' });
+        await addTask(page, 'Regular A');
+        await addTask(page, 'Regular B');
+        await addTask(page, 'Big launch');
+
+        // Mark only "Big launch" as milestone
+        await openTaskPanel(page, 'Big launch');
+        await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+
+        // All three rows visible by default
+        await expect(page.locator('.task-row')).toHaveCount(3);
+
+        // Apply filter — only the milestone row remains
+        await page.locator('#tasks-filter-milestones').check();
+        await expect(page.locator('.task-row')).toHaveCount(1);
+        await expect(page.locator('.task-row-name')).toHaveText('◆Big launch');
+
+        // Toggle back off — all visible again
+        await page.locator('#tasks-filter-milestones').uncheck();
+        await expect(page.locator('.task-row')).toHaveCount(3);
+    });
+
+    test('milestone state persists across reload', async ({ page }) => {
+        await createProject(page, { name: 'Persist milestone' });
+        await addTask(page, 'Anchor');
+        await openTaskPanel(page, 'Anchor');
+        await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+        await expect(
+            page.locator('.task-row', { hasText: 'Anchor' }).locator('.task-row-milestone-glyph')
+        ).toBeVisible();
+
+        await page.reload();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Persist milestone' }).click();
+        await expect(
+            page.locator('.task-row', { hasText: 'Anchor' }).locator('.task-row-milestone-glyph')
+        ).toBeVisible();
     });
 });
 

@@ -872,6 +872,47 @@ test('sanitiseTask preserves attachments array', () => {
     eq(out.attachments[0].url, 'https://x');
 });
 
+// ── milestone flag (Task 3.5) ──
+
+test('createTask defaults isMilestone to false', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    eq(t.isMilestone, false);
+});
+
+test('createTask accepts isMilestone=true', () => {
+    const t = createTask({ name: 'Launch', projectId: 'p', isMilestone: true });
+    eq(t.isMilestone, true);
+});
+
+test('createTask coerces non-boolean isMilestone to false', () => {
+    eq(createTask({ name: 'A', projectId: 'p', isMilestone: 'yes' }).isMilestone, false);
+    eq(createTask({ name: 'A', projectId: 'p', isMilestone: 1 }).isMilestone, false);
+    eq(createTask({ name: 'A', projectId: 'p', isMilestone: null }).isMilestone, false);
+});
+
+test('updateTaskInList toggles isMilestone', () => {
+    const t = createTask({ name: 'A', projectId: 'p' });
+    const next = updateTaskInList([t], t.id, { isMilestone: true });
+    eq(next[0].isMilestone, true);
+    const back = updateTaskInList(next, t.id, { isMilestone: false });
+    eq(back[0].isMilestone, false);
+});
+
+test('sanitiseTask preserves isMilestone=true', () => {
+    const t = createTask({ name: 'A', projectId: 'p', isMilestone: true });
+    eq(sanitiseTask(t).isMilestone, true);
+});
+
+test('sanitiseTask backfills missing isMilestone to false', () => {
+    const legacy = { id: 't_legacy', name: 'Old', projectId: 'p' };
+    eq(sanitiseTask(legacy).isMilestone, false);
+});
+
+test('validateTask accepts both isMilestone values', () => {
+    falsy(validateTask(createTask({ name: 'A', projectId: 'p', isMilestone: true })));
+    falsy(validateTask(createTask({ name: 'A', projectId: 'p', isMilestone: false })));
+});
+
 // ── runner ──
 
 export async function runProjectsDataTests() {
