@@ -214,9 +214,9 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 ## Where to pick up
 
 - **Active branch:** `master`. Phase-3 commits + handover are pushed to `origin/master` (deployed earlier today, manual smoke passed). The Phase-4.1 commit lands fresh on top.
-- **Last commit:** Phase 4.1 — List view sort/group/filter (this session)
-- **Phase 4 commits on master (newest first):**
-  - `<this session>` — List view sort/group/filter (Task 4.1)
+- **Last commit:** `f558f41` — List view sort/group/filter (Task 4.1)
+- **Phase 4 commits on master (newest first; `*` = local-only, not on origin yet):**
+  - `f558f41`* — List view sort/group/filter (Task 4.1) + dev-server threading fix
 - **Phase 3 commits on master (newest first):**
   - `b8fd221` — Handover: Phase 3 complete (3.2–3.5) + harness now 51 tests
   - `7c47901` — Milestone flag on tasks (Task 3.5)
