@@ -857,6 +857,117 @@ export function bucketCalendarTasks(tasks) {
     return byDate;
 }
 
+// ── Cross-project Overview helpers (Task 5.1) ──
+
+/** Sort dimensions surfaced in the Overview toolbar; first entry is the default. */
+export const OVERVIEW_SORT_OPTIONS = ['updated', 'status', 'dueDate', 'percent'];
+
+const PROJECT_STATUS_ORDER = Object.fromEntries(
+    PROJECT_STATUSES.map((s, i) => [s, i])
+);
+
+/**
+ * Done-vs-total task counts for one project. Subtasks count toward both — the
+ * Overview card shows a single % across the full task tree. Empty projects
+ * report `percent: 0` so the UI can render "0%" rather than NaN.
+ */
+export function computeProjectProgress(projectId, tasks) {
+    if (!projectId || !Array.isArray(tasks) || tasks.length === 0) {
+        return { done: 0, total: 0, percent: 0 };
+    }
+    let total = 0;
+    let done = 0;
+    for (const t of tasks) {
+        if (t.projectId !== projectId) continue;
+        total++;
+        if (t.status === 'done') done++;
+    }
+    if (total === 0) return { done: 0, total: 0, percent: 0 };
+    return { done, total, percent: Math.round((done / total) * 100) };
+}
+
+/** Tasks with `dueDate < todayIso` and `status !== 'done'`, scoped to project. */
+export function countOverdueTasks(projectId, tasks, todayIso) {
+    if (!projectId || !Array.isArray(tasks) || !todayIso) return 0;
+    let n = 0;
+    for (const t of tasks) {
+        if (t.projectId !== projectId) continue;
+        if (t.status === 'done') continue;
+        if (!t.dueDate) continue;
+        if (t.dueDate < todayIso) n++;
+    }
+    return n;
+}
+
+/**
+ * Earliest non-done milestone with a `dueDate` for this project. Prefers the
+ * next upcoming milestone (dueDate >= today); falls back to the earliest past
+ * milestone if every milestone is overdue. Milestones without a dueDate are
+ * skipped — there's nothing meaningful to show without a date. Returns null
+ * when no eligible milestone exists.
+ */
+export function findNextMilestone(projectId, tasks, todayIso) {
+    if (!projectId || !Array.isArray(tasks)) return null;
+    const eligible = tasks.filter(t =>
+        t.projectId === projectId &&
+        t.isMilestone === true &&
+        t.status !== 'done' &&
+        t.dueDate
+    );
+    if (eligible.length === 0) return null;
+    const upcoming = eligible
+        .filter(t => !todayIso || t.dueDate >= todayIso)
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    if (upcoming.length > 0) return upcoming[0];
+    return eligible.slice().sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+}
+
+/**
+ * Sort projects for the Overview grid. Returns a new array; never mutates.
+ *
+ *   - `updated` (default): newest `updatedAt` first.
+ *   - `status`: canonical PROJECT_STATUSES order (planning → … → cancelled).
+ *   - `dueDate`: project `endDate` ascending; missing endDate sorts to end.
+ *   - `percent`: completion % descending; empty projects (no tasks) sort to
+ *      end so they don't masquerade as "0% done".
+ *
+ * `name` is the universal tiebreaker so equal sort-keys still produce a
+ * stable, deterministic order.
+ */
+export function sortProjectsForOverview(projects, tasks, opts) {
+    if (!Array.isArray(projects) || projects.length === 0) return [];
+    const by = opts && OVERVIEW_SORT_OPTIONS.includes(opts.by) ? opts.by : 'updated';
+    const tiebreak = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+
+    const cmp = (a, b) => {
+        let primary = 0;
+        if (by === 'status') {
+            const ao = Object.prototype.hasOwnProperty.call(PROJECT_STATUS_ORDER, a.status) ? PROJECT_STATUS_ORDER[a.status] : PROJECT_STATUSES.length;
+            const bo = Object.prototype.hasOwnProperty.call(PROJECT_STATUS_ORDER, b.status) ? PROJECT_STATUS_ORDER[b.status] : PROJECT_STATUSES.length;
+            primary = ao - bo;
+        } else if (by === 'dueDate') {
+            const aMissing = !a.endDate;
+            const bMissing = !b.endDate;
+            if (aMissing && !bMissing) return 1;
+            if (!aMissing && bMissing) return -1;
+            if (!aMissing && !bMissing) primary = a.endDate.localeCompare(b.endDate);
+        } else if (by === 'percent') {
+            const ap = computeProjectProgress(a.id, tasks || []);
+            const bp = computeProjectProgress(b.id, tasks || []);
+            // Empty projects (total == 0) sort to end regardless of direction.
+            if (ap.total === 0 && bp.total > 0) return 1;
+            if (bp.total === 0 && ap.total > 0) return -1;
+            if (ap.total === 0 && bp.total === 0) primary = 0;
+            else primary = bp.percent - ap.percent; // desc
+        } else {
+            // updated, desc
+            primary = (b.updatedAt || '').localeCompare(a.updatedAt || '');
+        }
+        return primary !== 0 ? primary : tiebreak(a, b);
+    };
+    return projects.slice().sort(cmp);
+}
+
 // ── Persistence ──
 
 export function loadProjects() {

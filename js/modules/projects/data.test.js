@@ -58,6 +58,11 @@ import {
     computeTaskBars,
     getMonthGridCells,
     bucketCalendarTasks,
+    computeProjectProgress,
+    countOverdueTasks,
+    findNextMilestone,
+    sortProjectsForOverview,
+    OVERVIEW_SORT_OPTIONS,
 } from './data.js';
 
 const tests = [];
@@ -1354,6 +1359,175 @@ test('bucketCalendarTasks task with no dates is excluded entirely', () => {
     const t = mkTask({ name: 'Untimed' });
     const m = bucketCalendarTasks([t]);
     eq(m.size, 0);
+});
+
+// ── Overview cross-project helpers (Task 5.1) ──
+
+function mkProject(overrides) {
+    return { ...createProject({ name: 'P' }), ...overrides };
+}
+
+test('computeProjectProgress empty task list returns 0/0/0', () => {
+    eq(computeProjectProgress('p1', []), { done: 0, total: 0, percent: 0 });
+});
+
+test('computeProjectProgress only counts tasks for the given project', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', status: 'done' }),
+        mkTask({ projectId: 'p1', status: 'in-progress' }),
+        mkTask({ projectId: 'p2', status: 'done' }),
+    ];
+    eq(computeProjectProgress('p1', tasks), { done: 1, total: 2, percent: 50 });
+});
+
+test('computeProjectProgress 100% when all tasks done', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', status: 'done' }),
+        mkTask({ projectId: 'p1', status: 'done' }),
+    ];
+    eq(computeProjectProgress('p1', tasks), { done: 2, total: 2, percent: 100 });
+});
+
+test('computeProjectProgress rounds half cases to nearest whole percent', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', status: 'done' }),
+        mkTask({ projectId: 'p1', status: 'in-progress' }),
+        mkTask({ projectId: 'p1', status: 'in-progress' }),
+    ];
+    // 1/3 = 33.33% → 33
+    eq(computeProjectProgress('p1', tasks).percent, 33);
+});
+
+test('computeProjectProgress includes subtasks in counts', () => {
+    const parent = mkTask({ projectId: 'p1', status: 'in-progress' });
+    const child = mkTask({ projectId: 'p1', status: 'done', parentTaskId: parent.id });
+    eq(computeProjectProgress('p1', [parent, child]), { done: 1, total: 2, percent: 50 });
+});
+
+test('countOverdueTasks counts only tasks for the project, with dueDate < today and not done', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', dueDate: '2026-04-01', status: 'in-progress' }), // overdue
+        mkTask({ projectId: 'p1', dueDate: '2026-04-01', status: 'done' }),         // ignored — done
+        mkTask({ projectId: 'p1', dueDate: '2026-06-10', status: 'in-progress' }), // ignored — future
+        mkTask({ projectId: 'p2', dueDate: '2026-04-01', status: 'in-progress' }), // wrong project
+        mkTask({ projectId: 'p1', dueDate: null, status: 'in-progress' }),          // no due date
+    ];
+    eq(countOverdueTasks('p1', tasks, '2026-05-07'), 1);
+});
+
+test('countOverdueTasks dueDate equal to today is NOT overdue', () => {
+    const tasks = [mkTask({ projectId: 'p1', dueDate: '2026-05-07', status: 'in-progress' })];
+    eq(countOverdueTasks('p1', tasks, '2026-05-07'), 0);
+});
+
+test('findNextMilestone returns earliest future-or-today milestone with a dueDate', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', name: 'Past', isMilestone: true, dueDate: '2026-04-01', status: 'in-progress' }),
+        mkTask({ projectId: 'p1', name: 'Soon', isMilestone: true, dueDate: '2026-06-15', status: 'in-progress' }),
+        mkTask({ projectId: 'p1', name: 'Later', isMilestone: true, dueDate: '2026-09-01', status: 'in-progress' }),
+        mkTask({ projectId: 'p1', name: 'NotMS', isMilestone: false, dueDate: '2026-05-20', status: 'in-progress' }),
+    ];
+    const m = findNextMilestone('p1', tasks, '2026-05-07');
+    truthy(m);
+    eq(m.name, 'Soon');
+    eq(m.dueDate, '2026-06-15');
+});
+
+test('findNextMilestone falls back to earliest past milestone when none upcoming', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', name: 'Old', isMilestone: true, dueDate: '2026-03-01', status: 'in-progress' }),
+        mkTask({ projectId: 'p1', name: 'Older', isMilestone: true, dueDate: '2026-01-01', status: 'in-progress' }),
+    ];
+    const m = findNextMilestone('p1', tasks, '2026-05-07');
+    truthy(m);
+    eq(m.name, 'Older');
+});
+
+test('findNextMilestone skips done milestones', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', isMilestone: true, dueDate: '2026-06-01', status: 'done' }),
+        mkTask({ projectId: 'p1', name: 'Live', isMilestone: true, dueDate: '2026-08-01', status: 'in-progress' }),
+    ];
+    const m = findNextMilestone('p1', tasks, '2026-05-07');
+    truthy(m);
+    eq(m.name, 'Live');
+});
+
+test('findNextMilestone returns null when no milestones exist', () => {
+    const tasks = [mkTask({ projectId: 'p1', dueDate: '2026-06-01' })];
+    eq(findNextMilestone('p1', tasks, '2026-05-07'), null);
+});
+
+test('findNextMilestone ignores milestones without a dueDate', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', isMilestone: true, dueDate: null, status: 'in-progress' }),
+    ];
+    eq(findNextMilestone('p1', tasks, '2026-05-07'), null);
+});
+
+test('findNextMilestone scopes by projectId', () => {
+    const tasks = [
+        mkTask({ projectId: 'other', isMilestone: true, dueDate: '2026-06-01', status: 'in-progress' }),
+    ];
+    eq(findNextMilestone('p1', tasks, '2026-05-07'), null);
+});
+
+test('OVERVIEW_SORT_OPTIONS exposes the supported sort dimensions', () => {
+    eq(OVERVIEW_SORT_OPTIONS, ['updated', 'status', 'dueDate', 'percent']);
+});
+
+test('sortProjectsForOverview default (updated) puts most recently updated first', () => {
+    const a = mkProject({ id: 'a', name: 'A', updatedAt: '2026-04-01T00:00:00.000Z' });
+    const b = mkProject({ id: 'b', name: 'B', updatedAt: '2026-05-01T00:00:00.000Z' });
+    const c = mkProject({ id: 'c', name: 'C', updatedAt: '2026-04-15T00:00:00.000Z' });
+    const sorted = sortProjectsForOverview([a, b, c], [], { by: 'updated' });
+    eq(sorted.map(p => p.id), ['b', 'c', 'a']);
+});
+
+test('sortProjectsForOverview by status follows canonical PROJECT_STATUSES order', () => {
+    const planning = mkProject({ id: 'plan', status: 'planning' });
+    const active = mkProject({ id: 'act', status: 'active' });
+    const completed = mkProject({ id: 'done', status: 'completed' });
+    const cancelled = mkProject({ id: 'cancel', status: 'cancelled' });
+    const sorted = sortProjectsForOverview([completed, cancelled, active, planning], [], { by: 'status' });
+    eq(sorted.map(p => p.id), ['plan', 'act', 'done', 'cancel']);
+});
+
+test('sortProjectsForOverview by dueDate puts earliest endDate first, missing endDate last', () => {
+    const a = mkProject({ id: 'a', endDate: '2026-08-01' });
+    const b = mkProject({ id: 'b', endDate: '2026-06-01' });
+    const c = mkProject({ id: 'c', endDate: null });
+    const d = mkProject({ id: 'd', endDate: '2026-07-01' });
+    const sorted = sortProjectsForOverview([a, b, c, d], [], { by: 'dueDate' });
+    eq(sorted.map(p => p.id), ['b', 'd', 'a', 'c']);
+});
+
+test('sortProjectsForOverview by percent puts highest completion first; empty (0/0) projects sort to end', () => {
+    const a = mkProject({ id: 'a' });
+    const b = mkProject({ id: 'b' });
+    const c = mkProject({ id: 'c' });
+    const tasks = [
+        mkTask({ projectId: 'a', status: 'done' }),
+        mkTask({ projectId: 'a', status: 'in-progress' }),
+        mkTask({ projectId: 'b', status: 'done' }),
+        mkTask({ projectId: 'b', status: 'done' }),
+        // c has no tasks → empty
+    ];
+    const sorted = sortProjectsForOverview([a, b, c], tasks, { by: 'percent' });
+    // b=100%, a=50%, c=empty → b, a, c
+    eq(sorted.map(p => p.id), ['b', 'a', 'c']);
+});
+
+test('sortProjectsForOverview does not mutate the input list', () => {
+    const list = [mkProject({ id: 'a', updatedAt: '2026-04-01T00:00:00.000Z' }),
+                  mkProject({ id: 'b', updatedAt: '2026-05-01T00:00:00.000Z' })];
+    const before = list.map(p => p.id);
+    sortProjectsForOverview(list, [], { by: 'updated' });
+    eq(list.map(p => p.id), before);
+});
+
+test('sortProjectsForOverview empty list returns empty', () => {
+    eq(sortProjectsForOverview([], [], { by: 'status' }), []);
 });
 
 // ── runner ──

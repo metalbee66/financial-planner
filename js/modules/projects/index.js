@@ -64,6 +64,11 @@ import {
     computeTaskBars,
     getMonthGridCells,
     bucketCalendarTasks,
+    computeProjectProgress,
+    countOverdueTasks,
+    findNextMilestone,
+    sortProjectsForOverview,
+    OVERVIEW_SORT_OPTIONS,
     saveProjects,
 } from './data.js';
 
@@ -87,6 +92,13 @@ const TASK_PRIORITY_LABELS = { low: 'Low', normal: 'Normal', high: 'High' };
 
 const TASK_SORT_LABELS = { dueDate: 'Due date', name: 'Name', priority: 'Priority' };
 const TASK_GROUP_LABELS = { none: 'None', status: 'Status', assignee: 'Assignee' };
+const OVERVIEW_SORT_LABELS = {
+    updated: 'Updated',
+    status: 'Status',
+    dueDate: 'Due date',
+    percent: '% complete',
+};
+const DEFAULT_OVERVIEW_SORT = 'updated';
 const DEFAULT_TASK_SORT = { by: 'dueDate', dir: 'asc' };
 const DEFAULT_TASK_GROUP = 'none';
 const DEFAULT_DETAIL_VIEW = 'list';
@@ -277,23 +289,39 @@ function renderList() {
         return;
     }
 
+    const sortBy = mode.overviewSort && OVERVIEW_SORT_OPTIONS.includes(mode.overviewSort)
+        ? mode.overviewSort
+        : DEFAULT_OVERVIEW_SORT;
+
     host.innerHTML = `
         <div class="projects-toolbar">
             <h2 class="projects-title">Projects</h2>
+            <label class="overview-sort-field">
+                <span class="overview-sort-label">Sort</span>
+                <select id="overview-sort-by" aria-label="Sort projects by">
+                    ${OVERVIEW_SORT_OPTIONS.map(opt =>
+                        `<option value="${opt}"${opt === sortBy ? ' selected' : ''}>${escapeHtml(OVERVIEW_SORT_LABELS[opt] || opt)}</option>`
+                    ).join('')}
+                </select>
+            </label>
             <button class="projects-new-btn" id="projects-new-btn">+ New Project</button>
         </div>
         <div class="projects-grid" id="projects-grid"></div>
     `;
     host.querySelector('#projects-new-btn').addEventListener('click', goCreate);
+    host.querySelector('#overview-sort-by').addEventListener('change', (e) => {
+        mode.overviewSort = e.target.value;
+        render();
+    });
 
     const grid = host.querySelector('#projects-grid');
-    items
-        .slice()
-        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-        .forEach(p => grid.appendChild(renderCard(p)));
+    const allTasks = getTasks();
+    const today = todayIso();
+    sortProjectsForOverview(items, allTasks, { by: sortBy })
+        .forEach(p => grid.appendChild(renderCard(p, allTasks, today)));
 }
 
-function renderCard(p) {
+function renderCard(p, allTasks, today) {
     const card = document.createElement('article');
     card.className = 'project-card';
     card.tabIndex = 0;
@@ -302,12 +330,25 @@ function renderCard(p) {
 
     const dateRange = formatDateRange(p.startDate, p.endDate);
     const participants = renderChipsHtml(p.participants);
-    const projectTasks = findTasksByProject(getTasks(), p.id);
-    const openCount = projectTasks.filter(t => t.status !== 'done').length;
-    const totalCount = projectTasks.length;
-    const taskStats = totalCount > 0
-        ? `<span class="project-card-stats">${openCount}/${totalCount} open</span>`
-        : '<span class="project-card-stats project-card-stats-empty">No tasks yet</span>';
+    const tasks = allTasks || getTasks();
+    const todayStr = today || todayIso();
+    const progress = computeProjectProgress(p.id, tasks);
+    const overdue = countOverdueTasks(p.id, tasks, todayStr);
+    const nextMilestone = findNextMilestone(p.id, tasks, todayStr);
+
+    const progressBar = progress.total > 0
+        ? `<div class="project-card-progress" aria-label="${progress.percent}% complete">
+                <div class="project-card-progress-bar"><div class="project-card-progress-fill" style="width:${progress.percent}%"></div></div>
+                <span class="project-card-progress-label">${progress.percent}% · ${progress.done}/${progress.total} done</span>
+            </div>`
+        : '<div class="project-card-progress project-card-progress-empty">No tasks yet</div>';
+
+    const milestoneStr = nextMilestone
+        ? `<span class="project-card-milestone" title="Next milestone: ${escapeAttr(nextMilestone.name)}">◆ ${escapeHtml(formatDateOnly(nextMilestone.dueDate))}</span>`
+        : '';
+    const overdueStr = overdue > 0
+        ? `<span class="project-card-overdue" aria-label="${overdue} overdue tasks">⚠ ${overdue} overdue</span>`
+        : '';
 
     card.innerHTML = `
         <div class="project-card-head">
@@ -316,9 +357,10 @@ function renderCard(p) {
         </div>
         ${dateRange ? `<div class="project-card-dates">${escapeHtml(dateRange)}</div>` : ''}
         ${p.description ? `<p class="project-card-desc">${escapeHtml(p.description)}</p>` : ''}
+        ${progressBar}
+        ${(milestoneStr || overdueStr) ? `<div class="project-card-flags">${milestoneStr}${overdueStr}</div>` : ''}
         <div class="project-card-foot">
             <div class="project-card-chips">${participants}</div>
-            ${taskStats}
         </div>
     `;
     card.addEventListener('click', () => goDetail(p.id));
@@ -1092,6 +1134,7 @@ function freshListMode() {
         editingId: null,
         detailProjectId: null,
         detailView: DEFAULT_DETAIL_VIEW,
+        overviewSort: DEFAULT_OVERVIEW_SORT,
         taskFilters: {},
         taskSort: { ...DEFAULT_TASK_SORT },
         taskGroup: DEFAULT_TASK_GROUP,
@@ -1102,7 +1145,11 @@ function freshListMode() {
 }
 
 function goList() {
+    // Preserve the overview sort across navigation back to the list so the
+    // user's chosen ordering survives clicking into a project and back.
+    const prevSort = mode && mode.overviewSort;
     mode = freshListMode();
+    if (prevSort) mode.overviewSort = prevSort;
     closeTaskPanel();
     render();
 }
@@ -2011,14 +2058,15 @@ function initialOf(name) {
 
 function formatDateRange(startDate, endDate) {
     if (!startDate && !endDate) return '';
-    const fmt = (iso) => {
-        if (!iso) return '';
-        const [y, m, d] = iso.split('-');
-        return `${d}/${m}/${y}`;
-    };
-    if (startDate && endDate) return `${fmt(startDate)} → ${fmt(endDate)}`;
-    if (startDate) return `from ${fmt(startDate)}`;
-    return `until ${fmt(endDate)}`;
+    if (startDate && endDate) return `${formatDateOnly(startDate)} → ${formatDateOnly(endDate)}`;
+    if (startDate) return `from ${formatDateOnly(startDate)}`;
+    return `until ${formatDateOnly(endDate)}`;
+}
+
+function formatDateOnly(iso) {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
 }
 
 function escapeHtml(s) {

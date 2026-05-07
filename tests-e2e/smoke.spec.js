@@ -288,8 +288,11 @@ test.describe('Phase 2.1 — Tasks within a project', () => {
         await page.locator('.task-row', { hasText: 'Task A' }).locator('.task-row-status').selectOption('done');
 
         await backToList(page);
-        const stats = page.locator('.project-card', { hasText: 'Count check' }).locator('.project-card-stats');
-        await expect(stats).toHaveText('2/3 open');
+        // Overview cards render progress as "{percent}% · {done}/{total} done".
+        // 1 done out of 3 = 33%.
+        const progress = page.locator('.project-card', { hasText: 'Count check' })
+            .locator('.project-card-progress-label');
+        await expect(progress).toHaveText('33% · 1/3 done');
     });
 });
 
@@ -1444,6 +1447,101 @@ test.describe('Phase 4.3 — Calendar view (month grid)', () => {
 
         await page.locator('.cal-nav-next').click();
         await expect(page.locator('.cal-pill', { hasText: 'M3 task' })).toHaveCount(1);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 5.1 — Overview tab (cross-project cards)', () => {
+
+    async function addTaskWithStatus(page, name, status) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+        if (status && status !== 'not-started') {
+            await page.locator('.task-row', { hasText: name }).locator('.task-row-status').selectOption(status);
+        }
+    }
+
+    test('card shows progress bar with percent + done/total', async ({ page }) => {
+        await createProject(page, { name: 'Progress check' });
+        await addTaskWithStatus(page, 'TA', 'done');
+        await addTaskWithStatus(page, 'TB', 'in-progress');
+        await addTaskWithStatus(page, 'TC', 'in-progress');
+        await addTaskWithStatus(page, 'TD', 'done');
+        await backToList(page);
+
+        const card = page.locator('.project-card', { hasText: 'Progress check' });
+        await expect(card.locator('.project-card-progress-label')).toHaveText('50% · 2/4 done');
+        await expect(card.locator('.project-card-progress-fill')).toHaveAttribute('style', /width:\s*50%/);
+    });
+
+    test('card with no tasks shows the empty-state hint', async ({ page }) => {
+        await createProject(page, { name: 'Untouched' });
+        await backToList(page);
+        const card = page.locator('.project-card', { hasText: 'Untouched' });
+        await expect(card.locator('.project-card-progress-empty')).toContainText('No tasks yet');
+    });
+
+    test('overdue badge counts tasks with dueDate < today and not done', async ({ page }) => {
+        await createProject(page, { name: 'Overdue check' });
+        // Past due, not done → overdue
+        await page.locator('#task-add-name').fill('Late');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row-name', { hasText: 'Late' }).click();
+        await page.locator('#tp-due').fill('2024-01-01');
+        await page.locator('#tp-save').click();
+        // Past due, but done → ignored
+        await page.locator('#task-add-name').fill('LateDone');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row-name', { hasText: 'LateDone' }).click();
+        await page.locator('#tp-due').fill('2024-01-01');
+        await page.locator('#tp-status').selectOption('done');
+        await page.locator('#tp-save').click();
+
+        await backToList(page);
+        const card = page.locator('.project-card', { hasText: 'Overdue check' });
+        await expect(card.locator('.project-card-overdue')).toHaveText('⚠ 1 overdue');
+    });
+
+    test('next milestone date renders in the flags row', async ({ page }) => {
+        await createProject(page, { name: 'MS check' });
+        await page.locator('#task-add-name').fill('Launch');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row-name', { hasText: 'Launch' }).click();
+        await page.locator('#tp-due').fill('2099-06-15');
+        await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+
+        await backToList(page);
+        const card = page.locator('.project-card', { hasText: 'MS check' });
+        await expect(card.locator('.project-card-milestone')).toContainText('15/06/2099');
+    });
+
+    test('sort selector reorders cards by % complete', async ({ page }) => {
+        // Project A: 0 done / 2 = 0%
+        await createProject(page, { name: 'Aproj' });
+        await addTaskWithStatus(page, 'a1', 'in-progress');
+        await addTaskWithStatus(page, 'a2', 'in-progress');
+        await backToList(page);
+        // Project B: 2 done / 2 = 100%
+        await createProject(page, { name: 'Bproj' });
+        await addTaskWithStatus(page, 'b1', 'done');
+        await addTaskWithStatus(page, 'b2', 'done');
+        await backToList(page);
+
+        await page.locator('#overview-sort-by').selectOption('percent');
+
+        // First card is Bproj (100%), second is Aproj (0%)
+        const cardNames = page.locator('.project-card .project-card-name');
+        await expect(cardNames.nth(0)).toHaveText('Bproj');
+        await expect(cardNames.nth(1)).toHaveText('Aproj');
+    });
+
+    test('clicking an Overview card navigates to project detail', async ({ page }) => {
+        await createProject(page, { name: 'Click target' });
+        await backToList(page);
+        await page.locator('.project-card', { hasText: 'Click target' }).click();
+        await expect(page.locator('.tasks-add-row')).toBeVisible();
+        await expect(page.locator('.projects-title')).toHaveText('Click target');
     });
 });
 

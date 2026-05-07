@@ -1287,6 +1287,58 @@ select.editable { width: 100px; cursor: pointer; }
 }
 .project-card-stats-empty { font-style: italic; opacity: 0.7; }
 
+/* ── Overview tab (Phase 5.1) ── */
+
+.overview-sort-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+}
+.overview-sort-label { text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; }
+.overview-sort-field select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.82rem;
+}
+.overview-sort-field select:focus { border-color: var(--accent); outline: none; }
+
+.project-card-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.76rem;
+    color: var(--text-dim);
+    font-family: var(--mono);
+}
+.project-card-progress-empty { font-style: italic; opacity: 0.7; }
+.project-card-progress-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.project-card-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.2s ease;
+}
+.project-card-progress-label { font-size: 0.74rem; }
+
+.project-card-flags {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 0.76rem;
+    font-family: var(--mono);
+}
+.project-card-milestone { color: var(--accent); }
+.project-card-overdue { color: #d97706; }
+
 .project-detail-meta {
     display: flex;
     flex-direction: column;
