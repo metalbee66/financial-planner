@@ -787,6 +787,76 @@ export function computeTaskBars(tasks, range) {
     return out;
 }
 
+// ── Calendar grid + per-date task buckets (Task 4.3) ──
+
+/**
+ * Build a 7-column month grid with Monday-first weeks. Returns a flat array
+ * of cells (multiple of 7) covering the requested month plus leading/trailing
+ * pad days from the surrounding months so every row is full.
+ *
+ * Each cell: { date: 'YYYY-MM-DD', day, inMonth, isToday, weekday (0=Mon..6=Sun) }.
+ */
+export function getMonthGridCells(year, month, todayIso = null) {
+    const firstMs = Date.UTC(year, month - 1, 1);
+    // getUTCDay() returns 0=Sun..6=Sat; convert so Mon=0..Sun=6.
+    const firstWeekdayMon = (new Date(firstMs).getUTCDay() + 6) % 7;
+    const lastDayOfMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+    const startMs = firstMs - firstWeekdayMon * ONE_DAY_MS;
+    const totalDaysIncLead = firstWeekdayMon + lastDayOfMonth;
+    const trailingPad = (7 - (totalDaysIncLead % 7)) % 7;
+    const cellCount = totalDaysIncLead + trailingPad;
+
+    const cells = [];
+    for (let i = 0; i < cellCount; i++) {
+        const d = new Date(startMs + i * ONE_DAY_MS);
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const dateIso = `${yyyy}-${mm}-${dd}`;
+        cells.push({
+            date: dateIso,
+            day: d.getUTCDate(),
+            inMonth: d.getUTCMonth() + 1 === month && d.getUTCFullYear() === year,
+            isToday: todayIso ? dateIso === todayIso : false,
+            weekday: i % 7,
+        });
+    }
+    return cells;
+}
+
+/**
+ * Group tasks onto calendar dates for the month-grid view.
+ *
+ * - Multi-day task (`startDate < dueDate`): emits a `due` pill on `dueDate`
+ *   and a `start` (dimmer) pill on `startDate`.
+ * - Single-day task (start == due, OR only one date set): emits a single
+ *   `due` pill on whichever date is present.
+ * - Tasks with no dates are excluded.
+ *
+ * Returns Map<dateIso, Array<{ task, kind }>>. Insertion-order iteration
+ * matches input task order so callers can render predictably.
+ */
+export function bucketCalendarTasks(tasks) {
+    const byDate = new Map();
+    if (!Array.isArray(tasks)) return byDate;
+    const push = (date, entry) => {
+        if (!byDate.has(date)) byDate.set(date, []);
+        byDate.get(date).push(entry);
+    };
+    for (const t of tasks) {
+        const s = t && t.startDate;
+        const d = t && t.dueDate;
+        if (d) {
+            push(d, { task: t, kind: 'due' });
+            if (s && s !== d) push(s, { task: t, kind: 'start' });
+        } else if (s) {
+            push(s, { task: t, kind: 'due' });
+        }
+    }
+    return byDate;
+}
+
 // ── Persistence ──
 
 export function loadProjects() {

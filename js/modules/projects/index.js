@@ -62,6 +62,8 @@ import {
     TASK_GROUP_OPTIONS,
     computeTimelineRange,
     computeTaskBars,
+    getMonthGridCells,
+    bucketCalendarTasks,
     saveProjects,
 } from './data.js';
 
@@ -91,7 +93,25 @@ const DEFAULT_DETAIL_VIEW = 'list';
 const DETAIL_VIEW_OPTIONS = [
     { value: 'list', label: 'List' },
     { value: 'timeline', label: 'Timeline' },
+    { value: 'calendar', label: 'Calendar' },
 ];
+
+const CAL_WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const CAL_MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'];
+
+function todayIso() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function todayYearMonth() {
+    const d = new Date();
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
 
 const PARTICIPANT_LABELS = { brad: 'Brad', diana: 'Diana' };
 
@@ -360,6 +380,8 @@ function renderDetail() {
     const body = host.querySelector('#project-detail-tasks');
     if (activeView === 'timeline') {
         renderTimelineBody(body, p, allTasks);
+    } else if (activeView === 'calendar') {
+        renderCalendarBody(body, p, allTasks);
     } else {
         renderListBody(body, p, allTasks);
     }
@@ -573,6 +595,156 @@ function renderTimelineBody(root, p, allTasks) {
             if (tid) openTaskPanel(tid);
         });
     });
+}
+
+/**
+ * Calendar (month grid) view: 7-col × 5–6 row grid for `mode.calendarMonth` /
+ * `mode.calendarYear`, with a navigation header (prev / month label / next /
+ * "Today" reset). Tasks render as pills inside their day cell — full pill on
+ * `dueDate`, dimmer pill on `startDate` for multi-day tasks. Clicking a pill
+ * opens the task detail panel; clicking a day cell opens a day-detail
+ * popover listing every task on that date.
+ */
+function renderCalendarBody(root, p, allTasks) {
+    const year = mode.calendarYear;
+    const month = mode.calendarMonth;
+    const cells = getMonthGridCells(year, month, todayIso());
+    const buckets = bucketCalendarTasks(allTasks);
+    const selectedDate = mode.calendarSelectedDate;
+
+    const monthLabel = `${CAL_MONTH_LABELS[month - 1]} ${year}`;
+
+    const renderPill = (entry) => {
+        const t = entry.task;
+        const cls = entry.kind === 'start' ? 'cal-pill cal-pill-start' : 'cal-pill cal-pill-due';
+        const ms = t.isMilestone ? '◆ ' : '';
+        return `<button type="button" class="${cls} status-${t.status}"
+            data-task-id="${escapeAttr(t.id)}" title="${escapeAttr(t.name)}">
+            ${escapeHtml(ms + (t.name || '(untitled)'))}
+        </button>`;
+    };
+
+    const renderCell = (cell) => {
+        const entries = buckets.get(cell.date) || [];
+        const classes = ['cal-day'];
+        if (!cell.inMonth) classes.push('is-outside');
+        if (cell.isToday) classes.push('is-today');
+        if (cell.date === selectedDate) classes.push('is-selected');
+        return `
+            <div class="${classes.join(' ')}" data-date="${cell.date}">
+                <div class="cal-day-number">${cell.day}</div>
+                <div class="cal-pills">
+                    ${entries.map(renderPill).join('')}
+                </div>
+            </div>`;
+    };
+
+    let popoverHtml = '';
+    if (selectedDate) {
+        const entries = buckets.get(selectedDate) || [];
+        popoverHtml = `
+            <div class="cal-day-popover" data-date="${selectedDate}">
+                <div class="cal-day-popover-header">
+                    <span class="cal-day-popover-date">${escapeHtml(formatPopoverDate(selectedDate))}</span>
+                    <button type="button" class="cal-day-popover-close" aria-label="Close">×</button>
+                </div>
+                ${entries.length === 0
+                    ? `<div class="cal-day-popover-empty">No tasks scheduled.</div>`
+                    : `<ul class="cal-day-popover-list">${entries.map(e => `
+                        <li><button type="button" class="cal-day-popover-task status-${e.task.status}"
+                            data-task-id="${escapeAttr(e.task.id)}">
+                            <span class="cal-day-popover-kind">${e.kind === 'start' ? 'Start' : 'Due'}</span>
+                            <span class="cal-day-popover-name">${escapeHtml(e.task.name || '(untitled)')}</span>
+                        </button></li>`).join('')}</ul>`}
+            </div>`;
+    }
+
+    root.innerHTML = `
+        <div class="cal-container">
+            <div class="cal-month-header">
+                <button type="button" class="cal-nav-prev" aria-label="Previous month" title="Previous month">‹</button>
+                <span class="cal-month-header-label" role="heading" aria-level="3">${escapeHtml(monthLabel)}</span>
+                <button type="button" class="cal-nav-next" aria-label="Next month" title="Next month">›</button>
+                <button type="button" class="cal-nav-today btn-secondary">Today</button>
+            </div>
+            <div class="cal-weekday-header" aria-hidden="true">
+                ${CAL_WEEKDAY_LABELS.map(w => `<div class="cal-weekday">${w}</div>`).join('')}
+            </div>
+            <div class="cal-grid">
+                ${cells.map(renderCell).join('')}
+            </div>
+            ${popoverHtml}
+        </div>
+    `;
+
+    root.querySelector('.cal-nav-prev').addEventListener('click', () => {
+        const m = mode.calendarMonth - 1;
+        if (m < 1) {
+            mode.calendarMonth = 12;
+            mode.calendarYear -= 1;
+        } else {
+            mode.calendarMonth = m;
+        }
+        mode.calendarSelectedDate = null;
+        render();
+    });
+    root.querySelector('.cal-nav-next').addEventListener('click', () => {
+        const m = mode.calendarMonth + 1;
+        if (m > 12) {
+            mode.calendarMonth = 1;
+            mode.calendarYear += 1;
+        } else {
+            mode.calendarMonth = m;
+        }
+        mode.calendarSelectedDate = null;
+        render();
+    });
+    root.querySelector('.cal-nav-today').addEventListener('click', () => {
+        const ym = todayYearMonth();
+        mode.calendarYear = ym.year;
+        mode.calendarMonth = ym.month;
+        mode.calendarSelectedDate = null;
+        render();
+    });
+
+    // Pill click → open task panel (event delegated to bypass day-cell handler)
+    root.querySelectorAll('.cal-pill').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tid = btn.dataset.taskId;
+            if (tid) openTaskPanel(tid);
+        });
+    });
+    // Day cell click → toggle popover
+    root.querySelectorAll('.cal-day').forEach(cell => {
+        cell.addEventListener('click', () => {
+            const date = cell.dataset.date;
+            mode.calendarSelectedDate = (mode.calendarSelectedDate === date) ? null : date;
+            render();
+        });
+    });
+    // Popover close + popover task click
+    const closeBtn = root.querySelector('.cal-day-popover-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            mode.calendarSelectedDate = null;
+            render();
+        });
+    }
+    root.querySelectorAll('.cal-day-popover-task').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tid = btn.dataset.taskId;
+            if (tid) openTaskPanel(tid);
+        });
+    });
+}
+
+function formatPopoverDate(iso) {
+    // 'YYYY-MM-DD' → 'Mon 15 Jun 2026'
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!m) return iso;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.toLocaleString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
 /** Build the assignee filter options: project participants + any extra assignee values currently in use. */
@@ -914,6 +1086,7 @@ function onDelete(p) {
 // ── View transitions ──
 
 function freshListMode() {
+    const ym = todayYearMonth();
     return {
         view: 'list',
         editingId: null,
@@ -922,6 +1095,9 @@ function freshListMode() {
         taskFilters: {},
         taskSort: { ...DEFAULT_TASK_SORT },
         taskGroup: DEFAULT_TASK_GROUP,
+        calendarYear: ym.year,
+        calendarMonth: ym.month,
+        calendarSelectedDate: null,
     };
 }
 
@@ -943,6 +1119,7 @@ function goDetail(id) {
     // project so state from one project's view doesn't leak into another.
     // Same-project re-entry preserves toolbar + active view across renders.
     const sameProject = mode.detailProjectId === id;
+    const ym = todayYearMonth();
     mode = {
         view: 'detail',
         editingId: null,
@@ -951,6 +1128,9 @@ function goDetail(id) {
         taskFilters: sameProject ? (mode.taskFilters || {}) : {},
         taskSort: sameProject && mode.taskSort ? mode.taskSort : { ...DEFAULT_TASK_SORT },
         taskGroup: sameProject && mode.taskGroup ? mode.taskGroup : DEFAULT_TASK_GROUP,
+        calendarYear: sameProject && mode.calendarYear ? mode.calendarYear : ym.year,
+        calendarMonth: sameProject && mode.calendarMonth ? mode.calendarMonth : ym.month,
+        calendarSelectedDate: sameProject ? mode.calendarSelectedDate : null,
     };
     render();
 }

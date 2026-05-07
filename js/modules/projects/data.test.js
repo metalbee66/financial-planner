@@ -56,6 +56,8 @@ import {
     TASK_GROUP_OPTIONS,
     computeTimelineRange,
     computeTaskBars,
+    getMonthGridCells,
+    bucketCalendarTasks,
 } from './data.js';
 
 const tests = [];
@@ -1255,6 +1257,103 @@ test('computeTaskBars carries id, name, status, isMilestone, and original task r
 
 test('computeTaskBars returns empty array when range is null', () => {
     eq(computeTaskBars([mkTask({ name: 'x' })], null), []);
+});
+
+// ── Calendar grid + per-date task buckets (Task 4.3) ──
+
+test('getMonthGridCells returns a multiple-of-7 cell count', () => {
+    const cells = getMonthGridCells(2026, 6);
+    truthy(cells.length % 7 === 0, 'cells aligned to 7-col weeks');
+});
+
+test('getMonthGridCells starts on Monday (weekday=0) and ends on Sunday (weekday=6)', () => {
+    const cells = getMonthGridCells(2026, 6);
+    eq(cells[0].weekday, 0);
+    eq(cells[cells.length - 1].weekday, 6);
+});
+
+test('getMonthGridCells for a month starting on Monday has zero leading-pad', () => {
+    // 2026-06-01 is a Monday — first cell should be 2026-06-01 itself.
+    const cells = getMonthGridCells(2026, 6);
+    eq(cells[0].date, '2026-06-01');
+    eq(cells[0].inMonth, true);
+    eq(cells[0].day, 1);
+});
+
+test('getMonthGridCells for a month starting mid-week has correct leading-pad cells', () => {
+    // 2026-04-01 is a Wednesday → 2 leading-pad days from Mar 30 (Mon) and Mar 31 (Tue).
+    const cells = getMonthGridCells(2026, 4);
+    eq(cells[0].date, '2026-03-30');
+    eq(cells[0].inMonth, false);
+    eq(cells[1].date, '2026-03-31');
+    eq(cells[1].inMonth, false);
+    eq(cells[2].date, '2026-04-01');
+    eq(cells[2].inMonth, true);
+});
+
+test('getMonthGridCells inMonth flag is true only for cells in the requested month', () => {
+    const cells = getMonthGridCells(2026, 6);
+    const monthDays = cells.filter(c => c.inMonth);
+    eq(monthDays.length, 30); // June has 30 days
+    truthy(monthDays.every(c => c.date.startsWith('2026-06-')), 'all in-month cells dated within June');
+});
+
+test('getMonthGridCells isToday is true only for the cell whose date matches todayIso', () => {
+    const cells = getMonthGridCells(2026, 6, '2026-06-15');
+    const today = cells.filter(c => c.isToday);
+    eq(today.length, 1);
+    eq(today[0].date, '2026-06-15');
+});
+
+test('getMonthGridCells with no todayIso has no isToday cells', () => {
+    const cells = getMonthGridCells(2026, 6);
+    eq(cells.filter(c => c.isToday).length, 0);
+});
+
+test('bucketCalendarTasks empty input returns an empty Map', () => {
+    const m = bucketCalendarTasks([]);
+    eq(m.size, 0);
+});
+
+test('bucketCalendarTasks task with only dueDate emits one due-pill entry', () => {
+    const t = mkTask({ name: 'Pay bill', dueDate: '2026-06-15' });
+    const m = bucketCalendarTasks([t]);
+    eq(m.size, 1);
+    const entries = m.get('2026-06-15');
+    eq(entries.length, 1);
+    eq(entries[0].kind, 'due');
+    eq(entries[0].task.id, t.id);
+});
+
+test('bucketCalendarTasks task with only startDate emits one due-pill (sole date is the work-day)', () => {
+    const t = mkTask({ name: 'Workshop', startDate: '2026-06-15' });
+    const m = bucketCalendarTasks([t]);
+    const entries = m.get('2026-06-15');
+    eq(entries.length, 1);
+    eq(entries[0].kind, 'due');
+});
+
+test('bucketCalendarTasks multi-day task emits two pills: due on dueDate, start on startDate', () => {
+    const t = mkTask({ name: 'Reno', startDate: '2026-06-10', dueDate: '2026-06-15' });
+    const m = bucketCalendarTasks([t]);
+    eq(m.get('2026-06-10').length, 1);
+    eq(m.get('2026-06-10')[0].kind, 'start');
+    eq(m.get('2026-06-15').length, 1);
+    eq(m.get('2026-06-15')[0].kind, 'due');
+});
+
+test('bucketCalendarTasks single-day task (start === due) emits one due-pill, not two', () => {
+    const t = mkTask({ name: 'Inspection', startDate: '2026-06-15', dueDate: '2026-06-15' });
+    const m = bucketCalendarTasks([t]);
+    eq(m.size, 1);
+    eq(m.get('2026-06-15').length, 1);
+    eq(m.get('2026-06-15')[0].kind, 'due');
+});
+
+test('bucketCalendarTasks task with no dates is excluded entirely', () => {
+    const t = mkTask({ name: 'Untimed' });
+    const m = bucketCalendarTasks([t]);
+    eq(m.size, 0);
 });
 
 // ── runner ──

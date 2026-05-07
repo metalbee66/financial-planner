@@ -3,6 +3,10 @@
 Uses ThreadingHTTPServer so concurrent requests (e.g. Playwright loading many
 ES-module assets in parallel) don't queue behind one another and surface as
 ERR_CONNECTION_REFUSED / ERR_ABORTED on the browser side.
+
+Set FAMILY_PLANNER_NO_BROWSER=1 to suppress the auto-open browser tab. Used by
+the Playwright config so test runs don't spawn a new tab every time the dev
+server is started.
 """
 import http.server
 import os
@@ -17,7 +21,8 @@ Handler = http.server.SimpleHTTPRequestHandler
 
 with http.server.ThreadingHTTPServer(("", PORT), Handler) as httpd:
     print(f"Family Planner running at http://localhost:{PORT}")
-    webbrowser.open(f"http://localhost:{PORT}")
+    if not os.environ.get("FAMILY_PLANNER_NO_BROWSER"):
+        webbrowser.open(f"http://localhost:{PORT}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

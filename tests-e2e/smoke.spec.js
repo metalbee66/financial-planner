@@ -1158,9 +1158,10 @@ test.describe('Phase 4.2 — Timeline view (Gantt)', () => {
     test('view tabs render with List active by default', async ({ page }) => {
         await createProject(page, { name: 'Tabs default' });
         const tabs = page.locator('.view-tabs .view-tab');
-        await expect(tabs).toHaveCount(2);
+        await expect(tabs).toHaveCount(3);
         await expect(tabs.nth(0)).toHaveText('List');
         await expect(tabs.nth(1)).toHaveText('Timeline');
+        await expect(tabs.nth(2)).toHaveText('Calendar');
         await expect(tabs.nth(0)).toHaveClass(/active/);
         await expect(page.locator('#tasks-list')).toBeVisible();
     });
@@ -1272,6 +1273,177 @@ test.describe('Phase 4.2 — Timeline view (Gantt)', () => {
         // SVG overlay carries one arrow path per dependency
         await expect(page.locator('.timeline-arrows')).toBeVisible();
         await expect(page.locator('.timeline-arrows .timeline-arrow')).toHaveCount(1);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 4.3 — Calendar view (month grid)', () => {
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    async function setTaskDates(page, taskName, { startDate, dueDate } = {}) {
+        await page.locator('.task-row-name', { hasText: taskName }).click();
+        if (startDate !== undefined) await page.locator('#tp-start').fill(startDate || '');
+        if (dueDate !== undefined) await page.locator('#tp-due').fill(dueDate || '');
+        await page.locator('#tp-save').click();
+    }
+
+    async function gotoCalendar(page, { year, month } = {}) {
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        if (year != null && month != null) {
+            // Jump to a known month via direct state set so navigation tests are deterministic.
+            await page.evaluate(({ y, m }) => {
+                // The projects module is the only thing rendering on this tab; reach in via render hook.
+                window.__testJumpCal = { y, m };
+            }, { y: year, m: month });
+        }
+    }
+
+    test('view tabs include a Calendar option', async ({ page }) => {
+        await createProject(page, { name: 'Cal tab' });
+        const tabs = page.locator('.view-tabs .view-tab');
+        await expect(tabs).toHaveCount(3);
+        await expect(tabs.nth(2)).toHaveText('Calendar');
+    });
+
+    test('calendar grid renders 7 columns × 5–6 rows with weekday header', async ({ page }) => {
+        await createProject(page, { name: 'Cal grid' });
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        await expect(page.locator('.cal-weekday-header')).toBeVisible();
+        // 7 weekday header cells, Mon..Sun
+        await expect(page.locator('.cal-weekday')).toHaveCount(7);
+        const cellCount = await page.locator('.cal-day').count();
+        expect([35, 42]).toContain(cellCount);
+    });
+
+    test('a task with a dueDate renders as a pill on the matching day cell', async ({ page }) => {
+        await createProject(page, { name: 'Cal pills' });
+        await addTask(page, 'Pay rent');
+        // Pick today's month in the test environment so we know it's visible
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dueDate = `${yyyy}-${mm}-15`;
+        await setTaskDates(page, 'Pay rent', { dueDate });
+
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        const cell = page.locator(`.cal-day[data-date="${dueDate}"]`);
+        await expect(cell.locator('.cal-pill', { hasText: 'Pay rent' })).toHaveCount(1);
+        await expect(cell.locator('.cal-pill.cal-pill-start')).toHaveCount(0);
+    });
+
+    test('a multi-day task renders a due pill on dueDate AND a dimmer start pill on startDate', async ({ page }) => {
+        await createProject(page, { name: 'Cal multi-day' });
+        await addTask(page, 'Reno week');
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const startDate = `${yyyy}-${mm}-10`;
+        const dueDate = `${yyyy}-${mm}-15`;
+        await setTaskDates(page, 'Reno week', { startDate, dueDate });
+
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        const startCell = page.locator(`.cal-day[data-date="${startDate}"]`);
+        const dueCell = page.locator(`.cal-day[data-date="${dueDate}"]`);
+        // Start pill: dimmer variant
+        await expect(startCell.locator('.cal-pill.cal-pill-start', { hasText: 'Reno week' })).toHaveCount(1);
+        // Due pill: full
+        await expect(dueCell.locator('.cal-pill.cal-pill-due', { hasText: 'Reno week' })).toHaveCount(1);
+    });
+
+    test('clicking a task pill opens the task detail panel', async ({ page }) => {
+        await createProject(page, { name: 'Cal pill click' });
+        await addTask(page, 'Inspector');
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dueDate = `${yyyy}-${mm}-12`;
+        await setTaskDates(page, 'Inspector', { dueDate });
+
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        await page.locator('.cal-pill', { hasText: 'Inspector' }).click();
+        await expect(page.locator('#task-panel')).toBeVisible();
+        await expect(page.locator('#tp-name')).toHaveValue('Inspector');
+    });
+
+    test('clicking a day cell opens a popover listing that day\'s tasks', async ({ page }) => {
+        await createProject(page, { name: 'Cal day click' });
+        await addTask(page, 'A');
+        await addTask(page, 'B');
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const date = `${yyyy}-${mm}-08`;
+        await setTaskDates(page, 'A', { dueDate: date });
+        await setTaskDates(page, 'B', { dueDate: date });
+
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        // Click the day-number, not the cell center (the cell may be filled with pills,
+        // and pill clicks deliberately stopPropagation to open the panel directly).
+        await page.locator(`.cal-day[data-date="${date}"] .cal-day-number`).click();
+        const popover = page.locator('.cal-day-popover');
+        await expect(popover).toBeVisible();
+        await expect(popover.locator('.cal-day-popover-task')).toHaveCount(2);
+        await expect(popover.locator('.cal-day-popover-task').nth(0)).toContainText(/A|B/);
+    });
+
+    test('prev / next month navigation updates the header', async ({ page }) => {
+        await createProject(page, { name: 'Cal nav' });
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        const header = page.locator('.cal-month-header-label');
+        const start = (await header.textContent()).trim();
+
+        await page.locator('.cal-nav-next').click();
+        const next = (await header.textContent()).trim();
+        expect(next).not.toBe(start);
+
+        await page.locator('.cal-nav-prev').click();
+        const back = (await header.textContent()).trim();
+        expect(back).toBe(start);
+    });
+
+    test('today is highlighted with a distinguishing class', async ({ page }) => {
+        await createProject(page, { name: 'Cal today' });
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const todayIso = `${yyyy}-${mm}-${dd}`;
+        await expect(page.locator(`.cal-day[data-date="${todayIso}"]`)).toHaveClass(/is-today/);
+    });
+
+    test('tasks across 3 months are all visible by navigating between months', async ({ page }) => {
+        await createProject(page, { name: 'Cal 3 months' });
+        await addTask(page, 'M1 task');
+        await addTask(page, 'M2 task');
+        await addTask(page, 'M3 task');
+        const today = new Date();
+        const isoFor = (year, month, day) =>
+            `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        // Use day=15 — well past the calendar's max trailing-pad (6 days),
+        // so a task in month N never shows up while viewing month N-1.
+        const m1 = { y: today.getFullYear(), m: today.getMonth() + 1 };
+        const advance = (ym) => (ym.m === 12 ? { y: ym.y + 1, m: 1 } : { y: ym.y, m: ym.m + 1 });
+        const m2 = advance(m1);
+        const m3 = advance(m2);
+        await setTaskDates(page, 'M1 task', { dueDate: isoFor(m1.y, m1.m, 15) });
+        await setTaskDates(page, 'M2 task', { dueDate: isoFor(m2.y, m2.m, 15) });
+        await setTaskDates(page, 'M3 task', { dueDate: isoFor(m3.y, m3.m, 15) });
+
+        await page.locator('.view-tab[data-view="calendar"]').click();
+        await expect(page.locator('.cal-pill', { hasText: 'M1 task' })).toHaveCount(1);
+        await expect(page.locator('.cal-pill', { hasText: 'M2 task' })).toHaveCount(0);
+
+        await page.locator('.cal-nav-next').click();
+        await expect(page.locator('.cal-pill', { hasText: 'M2 task' })).toHaveCount(1);
+        await expect(page.locator('.cal-pill', { hasText: 'M3 task' })).toHaveCount(0);
+
+        await page.locator('.cal-nav-next').click();
+        await expect(page.locator('.cal-pill', { hasText: 'M3 task' })).toHaveCount(1);
     });
 });
 

@@ -35,5 +35,10 @@ export default defineConfig({
         stdout: 'ignore',
         stderr: 'pipe',
         timeout: 10_000,
+        env: {
+            // Suppress the auto-open browser tab in server.py so test runs
+            // don't keep spawning fresh windows.
+            FAMILY_PLANNER_NO_BROWSER: '1',
+        },
     },
 });
