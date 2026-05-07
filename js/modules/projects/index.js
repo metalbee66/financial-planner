@@ -55,6 +55,11 @@ import {
     formatBytes,
     MAX_INLINE_ATTACHMENT_SIZE,
     TASK_ATTACHMENT_WARN_SIZE,
+    sortTasks,
+    filterTasks,
+    groupTopLevelTasks,
+    TASK_SORT_FIELDS,
+    TASK_GROUP_OPTIONS,
     saveProjects,
 } from './data.js';
 
@@ -76,10 +81,15 @@ const TASK_STATUS_LABELS = {
 
 const TASK_PRIORITY_LABELS = { low: 'Low', normal: 'Normal', high: 'High' };
 
+const TASK_SORT_LABELS = { dueDate: 'Due date', name: 'Name', priority: 'Priority' };
+const TASK_GROUP_LABELS = { none: 'None', status: 'Status', assignee: 'Assignee' };
+const DEFAULT_TASK_SORT = { by: 'dueDate', dir: 'asc' };
+const DEFAULT_TASK_GROUP = 'none';
+
 const PARTICIPANT_LABELS = { brad: 'Brad', diana: 'Diana' };
 
 let host = null;
-let mode = { view: 'list', editingId: null, detailProjectId: null, taskFilters: {} };
+let mode = freshListMode();
 let mounted = false;
 let openTaskPanelId = null;
 
@@ -307,6 +317,11 @@ function renderDetail() {
     const openCount = allTasks.filter(t => t.status !== 'done').length;
     const totalCount = allTasks.length;
 
+    const filters = mode.taskFilters || {};
+    const sort = mode.taskSort || DEFAULT_TASK_SORT;
+    const group = mode.taskGroup || DEFAULT_TASK_GROUP;
+    const assigneeOptions = collectAssigneeOptions(p, allTasks);
+
     host.innerHTML = `
         <div class="projects-toolbar">
             <button class="projects-back-btn" id="projects-back-btn" aria-label="Back to projects">← Back</button>
@@ -324,9 +339,46 @@ function renderDetail() {
                 <h3 class="tasks-title">Tasks</h3>
                 <span class="tasks-count">${totalCount === 0 ? 'No tasks yet' : `${openCount} open · ${totalCount} total`}</span>
                 <label class="tasks-filter-toggle">
-                    <input type="checkbox" id="tasks-filter-milestones"${mode.taskFilters && mode.taskFilters.milestonesOnly ? ' checked' : ''} />
+                    <input type="checkbox" id="tasks-filter-milestones"${filters.milestonesOnly ? ' checked' : ''} />
                     <span class="task-row-milestone-glyph" aria-hidden="true">◆</span>
                     <span>Milestones only</span>
+                </label>
+            </div>
+            <div class="tasks-toolbar" role="toolbar" aria-label="Task list controls">
+                <label class="tasks-toolbar-field">
+                    <span class="tasks-toolbar-label">Sort</span>
+                    <select id="tasks-sort-by" aria-label="Sort tasks by">
+                        ${TASK_SORT_FIELDS.map(f =>
+                            `<option value="${f}"${f === sort.by ? ' selected' : ''}>${escapeHtml(TASK_SORT_LABELS[f] || f)}</option>`
+                        ).join('')}
+                    </select>
+                    <button type="button" class="tasks-toolbar-dir" id="tasks-sort-dir" aria-label="Toggle sort direction" title="Toggle sort direction">${sort.dir === 'desc' ? '↓' : '↑'}</button>
+                </label>
+                <label class="tasks-toolbar-field">
+                    <span class="tasks-toolbar-label">Group</span>
+                    <select id="tasks-group-by" aria-label="Group tasks by">
+                        ${TASK_GROUP_OPTIONS.map(g =>
+                            `<option value="${g}"${g === group ? ' selected' : ''}>${escapeHtml(TASK_GROUP_LABELS[g] || g)}</option>`
+                        ).join('')}
+                    </select>
+                </label>
+                <label class="tasks-toolbar-field">
+                    <span class="tasks-toolbar-label">Assignee</span>
+                    <select id="tasks-filter-assignee" aria-label="Filter by assignee">
+                        <option value="">All</option>
+                        ${assigneeOptions.map(a =>
+                            `<option value="${escapeAttr(a.value)}"${a.value === (filters.assignee || '') ? ' selected' : ''}>${escapeHtml(a.label)}</option>`
+                        ).join('')}
+                    </select>
+                </label>
+                <label class="tasks-toolbar-field">
+                    <span class="tasks-toolbar-label">Status</span>
+                    <select id="tasks-filter-status" aria-label="Filter by status">
+                        <option value="">All</option>
+                        ${TASK_STATUSES.map(s =>
+                            `<option value="${s}"${s === (filters.status || '') ? ' selected' : ''}>${escapeHtml(TASK_STATUS_LABELS[s] || s)}</option>`
+                        ).join('')}
+                    </select>
                 </label>
             </div>
             <div class="tasks-add-row" id="tasks-add-row"></div>
@@ -340,28 +392,49 @@ function renderDetail() {
         mode.taskFilters = { ...(mode.taskFilters || {}), milestonesOnly: e.target.checked };
         render();
     });
+    host.querySelector('#tasks-sort-by').addEventListener('change', (e) => {
+        mode.taskSort = { ...(mode.taskSort || DEFAULT_TASK_SORT), by: e.target.value };
+        render();
+    });
+    host.querySelector('#tasks-sort-dir').addEventListener('click', () => {
+        const cur = mode.taskSort || DEFAULT_TASK_SORT;
+        mode.taskSort = { ...cur, dir: cur.dir === 'desc' ? 'asc' : 'desc' };
+        render();
+    });
+    host.querySelector('#tasks-group-by').addEventListener('change', (e) => {
+        mode.taskGroup = e.target.value || DEFAULT_TASK_GROUP;
+        render();
+    });
+    host.querySelector('#tasks-filter-assignee').addEventListener('change', (e) => {
+        const v = e.target.value;
+        mode.taskFilters = { ...(mode.taskFilters || {}), assignee: v ? v : null };
+        render();
+    });
+    host.querySelector('#tasks-filter-status').addEventListener('change', (e) => {
+        const v = e.target.value;
+        mode.taskFilters = { ...(mode.taskFilters || {}), status: v ? v : null };
+        render();
+    });
 
     renderAddTaskRow(host.querySelector('#tasks-add-row'), p);
-    renderTasksList(host.querySelector('#tasks-list'), p, applyTaskFilters(allTasks));
+    const filteredTasks = filterTasks(allTasks, filters);
+    renderTasksList(host.querySelector('#tasks-list'), p, filteredTasks, allTasks.length);
 }
 
-/**
- * Apply the current `mode.taskFilters` to a list of tasks.
- *
- * `milestonesOnly` keeps milestone tasks AND any non-milestone parent of a
- * milestone subtask, so the parent isn't orphaned in the indented-list
- * render. (Subtask rows assume their parent is rendered immediately above.)
- */
-function applyTaskFilters(tasks) {
-    const filters = mode.taskFilters || {};
-    if (!filters.milestonesOnly) return tasks;
-    const milestoneIds = new Set(tasks.filter(t => t.isMilestone).map(t => t.id));
-    const parentsOfMilestones = new Set(
-        tasks
-            .filter(t => t.isMilestone && t.parentTaskId)
-            .map(t => t.parentTaskId)
-    );
-    return tasks.filter(t => milestoneIds.has(t.id) || parentsOfMilestones.has(t.id));
+/** Build the assignee filter options: project participants + any extra assignee values currently in use. */
+function collectAssigneeOptions(project, tasks) {
+    const seen = new Set();
+    const out = [];
+    const add = (value, label) => {
+        if (seen.has(value)) return;
+        seen.add(value);
+        out.push({ value, label });
+    };
+    (project.participants || []).forEach(p => add(p, participantLabel(p)));
+    tasks.forEach(t => {
+        if (t.assignee) add(t.assignee, participantLabel(t.assignee));
+    });
+    return out;
 }
 
 function renderAddTaskRow(root, project) {
@@ -404,33 +477,57 @@ function renderAddTaskRow(root, project) {
     });
 }
 
-function renderTasksList(root, project, tasks) {
+function renderTasksList(root, project, tasks, totalTasksInProject) {
     if (tasks.length === 0) {
-        root.innerHTML = '<div class="tasks-empty">No tasks. Add one above.</div>';
+        const msg = totalTasksInProject > 0
+            ? 'No tasks match these filters.'
+            : 'No tasks. Add one above.';
+        root.innerHTML = `<div class="tasks-empty">${msg}</div>`;
         return;
     }
     root.innerHTML = '';
-    // Top-level: open first (due asc, nulls last), then done (completedAt desc).
-    // Subtasks render indented under their parent regardless of their own state,
-    // so siblings stay grouped (sorted by createdAt asc — order added).
+
+    // Render order rules:
+    //   - Top-level open tasks sort by user choice (mode.taskSort).
+    //   - Top-level done tasks always pin to bottom of their bucket, sorted by
+    //     completedAt desc (newest done first).
+    //   - Subtasks always render indented under their parent in createdAt asc.
+    //     Subtasks are NOT sorted/grouped independently — they travel with their
+    //     parent's slot.
+    const sortOpts = mode.taskSort || DEFAULT_TASK_SORT;
+    const groupBy = mode.taskGroup || DEFAULT_TASK_GROUP;
+
     const tops = tasks.filter(t => !t.parentTaskId);
-    const openTops = tops.filter(t => t.status !== 'done').sort(taskSortComparator);
-    const doneTops = tops.filter(t => t.status === 'done')
-        .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
-    openTops.concat(doneTops).forEach(t => {
-        root.appendChild(renderTaskRow(t, project, false));
-        const subs = findSubtasks(tasks, t.id)
-            .slice()
-            .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
-        subs.forEach(s => root.appendChild(renderTaskRow(s, project, true)));
+    const buckets = groupTopLevelTasks(tops, groupBy);
+
+    buckets.forEach(bucket => {
+        if (groupBy !== 'none') {
+            const header = document.createElement('div');
+            header.className = 'tasks-group-header';
+            header.dataset.groupKey = bucket.key;
+            header.textContent = `${groupLabelFor(bucket.key, groupBy)} · ${bucket.tasks.length}`;
+            root.appendChild(header);
+        }
+        const open = bucket.tasks.filter(t => t.status !== 'done');
+        const done = bucket.tasks.filter(t => t.status === 'done');
+        const sortedOpen = sortTasks(open, sortOpts);
+        const sortedDone = done.slice().sort(
+            (a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')
+        );
+        sortedOpen.concat(sortedDone).forEach(t => {
+            root.appendChild(renderTaskRow(t, project, false));
+            const subs = findSubtasks(tasks, t.id)
+                .slice()
+                .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+            subs.forEach(s => root.appendChild(renderTaskRow(s, project, true)));
+        });
     });
 }
 
-function taskSortComparator(a, b) {
-    const ad = a.dueDate || '9999-99-99';
-    const bd = b.dueDate || '9999-99-99';
-    if (ad !== bd) return ad.localeCompare(bd);
-    return (a.createdAt || '').localeCompare(b.createdAt || '');
+function groupLabelFor(key, groupBy) {
+    if (groupBy === 'status') return TASK_STATUS_LABELS[key] || key;
+    if (groupBy === 'assignee') return key === '' ? 'Unassigned' : participantLabel(key);
+    return 'Tasks';
 }
 
 function renderTaskRow(t, project, isSubtask) {
@@ -662,28 +759,42 @@ function onDelete(p) {
 
 // ── View transitions ──
 
+function freshListMode() {
+    return {
+        view: 'list',
+        editingId: null,
+        detailProjectId: null,
+        taskFilters: {},
+        taskSort: { ...DEFAULT_TASK_SORT },
+        taskGroup: DEFAULT_TASK_GROUP,
+    };
+}
+
 function goList() {
-    mode = { view: 'list', editingId: null, detailProjectId: null, taskFilters: {} };
+    mode = freshListMode();
     closeTaskPanel();
     render();
 }
 function goCreate() {
-    mode = { view: 'form', editingId: null, detailProjectId: mode.detailProjectId, taskFilters: mode.taskFilters || {} };
+    mode = { ...mode, view: 'form', editingId: null };
     render();
 }
 function goEdit(id) {
-    mode = { view: 'form', editingId: id, detailProjectId: mode.detailProjectId, taskFilters: mode.taskFilters || {} };
+    mode = { ...mode, view: 'form', editingId: id };
     render();
 }
 function goDetail(id) {
-    // Reset filters when entering a different project so milestone-only state
-    // doesn't leak across navigation. Same project keeps its filter on rerender.
+    // Sort, grouping and filters reset when switching to a different project so
+    // state from one project's list view doesn't leak into another. Same-project
+    // re-entry preserves the user's current toolbar settings across renders.
     const sameProject = mode.detailProjectId === id;
     mode = {
         view: 'detail',
         editingId: null,
         detailProjectId: id,
         taskFilters: sameProject ? (mode.taskFilters || {}) : {},
+        taskSort: sameProject && mode.taskSort ? mode.taskSort : { ...DEFAULT_TASK_SORT },
+        taskGroup: sameProject && mode.taskGroup ? mode.taskGroup : DEFAULT_TASK_GROUP,
     };
     render();
 }

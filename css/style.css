@@ -2010,3 +2010,64 @@ select.editable { width: 100px; cursor: pointer; }
     height: 14px;
     accent-color: var(--accent);
 }
+
+/* Phase 4.1 — list view toolbar (sort / group / filter) */
+.tasks-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+    margin-bottom: 4px;
+}
+.tasks-toolbar-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+}
+.tasks-toolbar-label {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+}
+.tasks-toolbar select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.tasks-toolbar-dir {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+}
+.tasks-toolbar-dir:hover { background: var(--surface); }
+.tasks-group-header {
+    margin-top: 8px;
+    padding: 4px 8px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    border-radius: 2px;
+}
+.tasks-group-header:first-child { margin-top: 0; }
+@media (max-width: 600px) {
+    .tasks-toolbar { gap: 8px; }
+    .tasks-toolbar-field { width: 100%; justify-content: space-between; }
+}

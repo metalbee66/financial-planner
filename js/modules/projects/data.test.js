@@ -49,6 +49,11 @@ import {
     taskAttachmentSize,
     formatBytes,
     MAX_INLINE_ATTACHMENT_SIZE,
+    sortTasks,
+    filterTasks,
+    groupTopLevelTasks,
+    TASK_SORT_FIELDS,
+    TASK_GROUP_OPTIONS,
 } from './data.js';
 
 const tests = [];
@@ -911,6 +916,222 @@ test('sanitiseTask backfills missing isMilestone to false', () => {
 test('validateTask accepts both isMilestone values', () => {
     falsy(validateTask(createTask({ name: 'A', projectId: 'p', isMilestone: true })));
     falsy(validateTask(createTask({ name: 'A', projectId: 'p', isMilestone: false })));
+});
+
+// ── sortTasks (Task 4.1) ──
+
+function mkTask(overrides) {
+    return { ...createTask({ name: 'X', projectId: 'p' }), ...overrides };
+}
+
+test('TASK_SORT_FIELDS exposes the supported sort dimensions', () => {
+    eq(TASK_SORT_FIELDS, ['dueDate', 'name', 'priority']);
+});
+
+test('sortTasks does not mutate input', () => {
+    const list = [mkTask({ name: 'B' }), mkTask({ name: 'A' })];
+    const before = list.slice();
+    sortTasks(list, { by: 'name', dir: 'asc' });
+    eq(list.map(t => t.name), before.map(t => t.name));
+});
+
+test('sortTasks empty list returns empty', () => {
+    eq(sortTasks([], { by: 'name', dir: 'asc' }), []);
+});
+
+test('sortTasks by dueDate asc puts earliest first, missing dueDate last', () => {
+    const a = mkTask({ name: 'a', dueDate: '2026-06-10' });
+    const b = mkTask({ name: 'b', dueDate: '2026-06-01' });
+    const c = mkTask({ name: 'c', dueDate: null });
+    const d = mkTask({ name: 'd', dueDate: '2026-05-30' });
+    const sorted = sortTasks([a, b, c, d], { by: 'dueDate', dir: 'asc' });
+    eq(sorted.map(t => t.name), ['d', 'b', 'a', 'c']);
+});
+
+test('sortTasks by dueDate desc reverses present dates but keeps missing last', () => {
+    const a = mkTask({ name: 'a', dueDate: '2026-06-10' });
+    const b = mkTask({ name: 'b', dueDate: '2026-06-01' });
+    const c = mkTask({ name: 'c', dueDate: null });
+    const sorted = sortTasks([a, b, c], { by: 'dueDate', dir: 'desc' });
+    eq(sorted.map(t => t.name), ['a', 'b', 'c']);
+});
+
+test('sortTasks by name asc is alphabetical (case-insensitive)', () => {
+    const tasks = [
+        mkTask({ name: 'banana' }),
+        mkTask({ name: 'Apple' }),
+        mkTask({ name: 'cherry' }),
+    ];
+    const sorted = sortTasks(tasks, { by: 'name', dir: 'asc' });
+    eq(sorted.map(t => t.name), ['Apple', 'banana', 'cherry']);
+});
+
+test('sortTasks by name desc reverses', () => {
+    const tasks = [
+        mkTask({ name: 'a' }),
+        mkTask({ name: 'b' }),
+        mkTask({ name: 'c' }),
+    ];
+    const sorted = sortTasks(tasks, { by: 'name', dir: 'desc' });
+    eq(sorted.map(t => t.name), ['c', 'b', 'a']);
+});
+
+test('sortTasks by priority asc orders high → normal → low', () => {
+    const tasks = [
+        mkTask({ name: 'lo', priority: 'low' }),
+        mkTask({ name: 'hi', priority: 'high' }),
+        mkTask({ name: 'no', priority: 'normal' }),
+    ];
+    const sorted = sortTasks(tasks, { by: 'priority', dir: 'asc' });
+    eq(sorted.map(t => t.name), ['hi', 'no', 'lo']);
+});
+
+test('sortTasks by priority desc orders low → normal → high', () => {
+    const tasks = [
+        mkTask({ name: 'hi', priority: 'high' }),
+        mkTask({ name: 'lo', priority: 'low' }),
+        mkTask({ name: 'no', priority: 'normal' }),
+    ];
+    const sorted = sortTasks(tasks, { by: 'priority', dir: 'desc' });
+    eq(sorted.map(t => t.name), ['lo', 'no', 'hi']);
+});
+
+test('sortTasks uses createdAt as a tiebreaker on equal sort field', () => {
+    const a = { ...mkTask({ name: 'A', dueDate: '2026-06-01' }), createdAt: '2026-01-01T00:00:00.000Z' };
+    const b = { ...mkTask({ name: 'B', dueDate: '2026-06-01' }), createdAt: '2026-01-02T00:00:00.000Z' };
+    const sorted = sortTasks([b, a], { by: 'dueDate', dir: 'asc' });
+    eq(sorted.map(t => t.name), ['A', 'B']);
+});
+
+test('sortTasks falls back to dueDate asc on unknown field', () => {
+    const a = mkTask({ name: 'a', dueDate: '2026-06-10' });
+    const b = mkTask({ name: 'b', dueDate: '2026-06-01' });
+    const sorted = sortTasks([a, b], { by: 'mystery', dir: 'asc' });
+    eq(sorted.map(t => t.name), ['b', 'a']);
+});
+
+// ── filterTasks (Task 4.1) ──
+
+test('filterTasks with empty filters returns the same list contents', () => {
+    const list = [mkTask({ name: 'A' }), mkTask({ name: 'B' })];
+    eq(filterTasks(list, {}).map(t => t.name), ['A', 'B']);
+});
+
+test('filterTasks by assignee includes only matching tasks', () => {
+    const list = [
+        mkTask({ name: 'brads', assignee: 'brad' }),
+        mkTask({ name: 'dianas', assignee: 'diana' }),
+        mkTask({ name: 'unassigned', assignee: null }),
+    ];
+    eq(
+        filterTasks(list, { assignee: 'brad' }).map(t => t.name),
+        ['brads']
+    );
+});
+
+test('filterTasks by status only keeps matching tasks', () => {
+    const list = [
+        mkTask({ name: 'open', status: 'in-progress' }),
+        mkTask({ name: 'closed', status: 'done' }),
+    ];
+    eq(
+        filterTasks(list, { status: 'done' }).map(t => t.name),
+        ['closed']
+    );
+});
+
+test('filterTasks milestonesOnly preserves the legacy parent-of-milestone scaffolding rule', () => {
+    const parent = mkTask({ name: 'parent' });
+    const child = mkTask({ name: 'child', parentTaskId: parent.id, isMilestone: true });
+    const sibling = mkTask({ name: 'sibling' });
+    const filtered = filterTasks([parent, child, sibling], { milestonesOnly: true });
+    eq(filtered.map(t => t.name).sort(), ['child', 'parent']);
+});
+
+test('filterTasks composes assignee + status with AND semantics', () => {
+    const list = [
+        mkTask({ name: 'match', assignee: 'brad', status: 'in-progress' }),
+        mkTask({ name: 'wrongStatus', assignee: 'brad', status: 'done' }),
+        mkTask({ name: 'wrongAssignee', assignee: 'diana', status: 'in-progress' }),
+    ];
+    eq(
+        filterTasks(list, { assignee: 'brad', status: 'in-progress' }).map(t => t.name),
+        ['match']
+    );
+});
+
+test('filterTasks keeps a non-matching parent when one of its subtasks matches the filter', () => {
+    const parent = mkTask({ name: 'parent', assignee: 'diana' });
+    const child = mkTask({ name: 'child', parentTaskId: parent.id, assignee: 'brad' });
+    const filtered = filterTasks([parent, child], { assignee: 'brad' });
+    eq(filtered.map(t => t.name).sort(), ['child', 'parent']);
+});
+
+test('filterTasks does NOT auto-include subtasks of a passing parent (subtasks judged independently)', () => {
+    const parent = mkTask({ name: 'parent', assignee: 'brad' });
+    const child = mkTask({ name: 'child', parentTaskId: parent.id, assignee: 'diana' });
+    const filtered = filterTasks([parent, child], { assignee: 'brad' });
+    eq(filtered.map(t => t.name), ['parent']);
+});
+
+test('filterTasks treats null filter values as "no filter on that dimension"', () => {
+    const list = [
+        mkTask({ name: 'a', assignee: 'brad' }),
+        mkTask({ name: 'b', assignee: 'diana' }),
+    ];
+    eq(
+        filterTasks(list, { assignee: null, status: null, milestonesOnly: false }).map(t => t.name),
+        ['a', 'b']
+    );
+});
+
+// ── groupTopLevelTasks (Task 4.1) ──
+
+test('TASK_GROUP_OPTIONS exposes the supported group-by values', () => {
+    eq(TASK_GROUP_OPTIONS, ['none', 'status', 'assignee']);
+});
+
+test('groupTopLevelTasks none returns a single bucket with all tasks', () => {
+    const list = [mkTask({ name: 'A' }), mkTask({ name: 'B' })];
+    const groups = groupTopLevelTasks(list, 'none');
+    eq(groups.length, 1);
+    eq(groups[0].tasks.map(t => t.name), ['A', 'B']);
+});
+
+test('groupTopLevelTasks empty input returns empty array regardless of group-by', () => {
+    eq(groupTopLevelTasks([], 'none'), []);
+    eq(groupTopLevelTasks([], 'status'), []);
+    eq(groupTopLevelTasks([], 'assignee'), []);
+});
+
+test('groupTopLevelTasks status keeps the canonical TASK_STATUSES order and skips empty buckets', () => {
+    const list = [
+        mkTask({ name: 'reviewed', status: 'review' }),
+        mkTask({ name: 'fresh', status: 'not-started' }),
+    ];
+    const groups = groupTopLevelTasks(list, 'status');
+    eq(groups.map(g => g.key), ['not-started', 'review']);
+    eq(groups[0].tasks.map(t => t.name), ['fresh']);
+    eq(groups[1].tasks.map(t => t.name), ['reviewed']);
+});
+
+test('groupTopLevelTasks assignee orders brad → diana → others alphabetically → unassigned last', () => {
+    const list = [
+        mkTask({ name: 'u', assignee: null }),
+        mkTask({ name: 'd', assignee: 'diana' }),
+        mkTask({ name: 'guest', assignee: 'guest' }),
+        mkTask({ name: 'b', assignee: 'brad' }),
+        mkTask({ name: 'alex', assignee: 'alex' }),
+    ];
+    const groups = groupTopLevelTasks(list, 'assignee');
+    eq(groups.map(g => g.key), ['brad', 'diana', 'alex', 'guest', '']);
+});
+
+test('groupTopLevelTasks unknown group-by falls back to a single all-bucket', () => {
+    const list = [mkTask({ name: 'X' })];
+    const groups = groupTopLevelTasks(list, 'mystery');
+    eq(groups.length, 1);
+    eq(groups[0].tasks.map(t => t.name), ['X']);
 });
 
 // ── runner ──

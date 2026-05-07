@@ -541,6 +541,128 @@ export function taskAttachmentSize(task) {
     return total;
 }
 
+// ── Sort / filter / group (Task 4.1) ──
+
+/**
+ * Fields the list view supports sorting by. Order matters — first entry is
+ * the default. The UI renders these in the same order in its dropdown.
+ */
+export const TASK_SORT_FIELDS = ['dueDate', 'name', 'priority'];
+
+/** Group-by options surfaced in the list view. */
+export const TASK_GROUP_OPTIONS = ['none', 'status', 'assignee'];
+
+const PRIORITY_ORDER = { high: 0, normal: 1, low: 2 };
+
+/**
+ * Pure sort: returns a new array. Tasks with no `dueDate` always sort to the
+ * end regardless of direction (predictable display rather than flipping when
+ * the user clicks desc). `createdAt` is the universal tiebreaker so equal
+ * sort-keys still produce a stable, deterministic order.
+ */
+export function sortTasks(tasks, opts) {
+    if (!Array.isArray(tasks) || tasks.length === 0) return [];
+    const by = opts && TASK_SORT_FIELDS.includes(opts.by) ? opts.by : 'dueDate';
+    const sign = opts && opts.dir === 'desc' ? -1 : 1;
+    const tiebreak = (a, b) => (a.createdAt || '').localeCompare(b.createdAt || '');
+
+    const cmp = (a, b) => {
+        let primary = 0;
+        if (by === 'name') {
+            primary = sign * (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+        } else if (by === 'priority') {
+            const ao = Object.prototype.hasOwnProperty.call(PRIORITY_ORDER, a.priority) ? PRIORITY_ORDER[a.priority] : 1;
+            const bo = Object.prototype.hasOwnProperty.call(PRIORITY_ORDER, b.priority) ? PRIORITY_ORDER[b.priority] : 1;
+            primary = sign * (ao - bo);
+        } else {
+            const aMissing = !a.dueDate;
+            const bMissing = !b.dueDate;
+            if (aMissing && !bMissing) return 1;
+            if (!aMissing && bMissing) return -1;
+            if (!aMissing && !bMissing) primary = sign * a.dueDate.localeCompare(b.dueDate);
+        }
+        return primary !== 0 ? primary : tiebreak(a, b);
+    };
+    return tasks.slice().sort(cmp);
+}
+
+/**
+ * Apply assignee / status / milestonesOnly filters with AND semantics. A task
+ * passes if it directly matches every active filter. A non-matching parent is
+ * still included when one of its subtasks matches, so the indented list-view
+ * render isn't left with an orphaned subtask. Subtasks of a parent that's
+ * only present as scaffolding are NOT auto-included — each task is judged on
+ * its own merits.
+ *
+ * `null` / `undefined` filter values mean "no filter on that dimension".
+ */
+export function filterTasks(list, filters) {
+    if (!Array.isArray(list)) return [];
+    const f = filters || {};
+    const hasAssignee = f.assignee != null;
+    const hasStatus = f.status != null;
+    const hasMilestone = !!f.milestonesOnly;
+    if (!hasAssignee && !hasStatus && !hasMilestone) return list.slice();
+
+    const passes = (t) => {
+        if (hasAssignee && t.assignee !== f.assignee) return false;
+        if (hasStatus && t.status !== f.status) return false;
+        if (hasMilestone && !t.isMilestone) return false;
+        return true;
+    };
+
+    const matched = new Set();
+    for (const t of list) if (passes(t)) matched.add(t.id);
+
+    const scaffolded = new Set();
+    for (const t of list) {
+        if (matched.has(t.id) && t.parentTaskId) scaffolded.add(t.parentTaskId);
+    }
+    return list.filter(t => matched.has(t.id) || scaffolded.has(t.id));
+}
+
+/**
+ * Bucket top-level tasks for the list-view group-by toggle.
+ *
+ * - `none`: single bucket containing every task in input order.
+ * - `status`: buckets in canonical TASK_STATUSES order; empty buckets dropped.
+ * - `assignee`: brad → diana → other participants alphabetically → unassigned
+ *   (key = ''). Empty input always yields an empty array.
+ *
+ * Caller is expected to pass the already-filtered top-level slice. Subtasks
+ * are not bucketed here — the render layer interleaves them under their
+ * parent within whatever group their parent landed in.
+ */
+export function groupTopLevelTasks(list, by) {
+    if (!Array.isArray(list) || list.length === 0) return [];
+    if (by === 'status') {
+        const buckets = new Map(TASK_STATUSES.map(s => [s, []]));
+        for (const t of list) {
+            if (buckets.has(t.status)) buckets.get(t.status).push(t);
+        }
+        return TASK_STATUSES
+            .filter(s => buckets.get(s).length > 0)
+            .map(s => ({ key: s, tasks: buckets.get(s) }));
+    }
+    if (by === 'assignee') {
+        const buckets = new Map();
+        for (const t of list) {
+            const k = t.assignee || '';
+            if (!buckets.has(k)) buckets.set(k, []);
+            buckets.get(k).push(t);
+        }
+        const order = [];
+        for (const k of DEFAULT_PARTICIPANTS) if (buckets.has(k)) order.push(k);
+        const others = Array.from(buckets.keys())
+            .filter(k => k && !DEFAULT_PARTICIPANTS.includes(k))
+            .sort();
+        order.push(...others);
+        if (buckets.has('')) order.push('');
+        return order.map(k => ({ key: k, tasks: buckets.get(k) }));
+    }
+    return [{ key: 'all', tasks: list.slice() }];
+}
+
 // ── Persistence ──
 
 export function loadProjects() {

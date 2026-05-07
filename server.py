@@ -1,6 +1,10 @@
-"""Simple HTTP server for the Budget Planner app."""
+"""Simple HTTP server for the Family Planner app.
+
+Uses ThreadingHTTPServer so concurrent requests (e.g. Playwright loading many
+ES-module assets in parallel) don't queue behind one another and surface as
+ERR_CONNECTION_REFUSED / ERR_ABORTED on the browser side.
+"""
 import http.server
-import socketserver
 import os
 import webbrowser
 
@@ -11,8 +15,8 @@ os.chdir(DIRECTORY)
 
 Handler = http.server.SimpleHTTPRequestHandler
 
-with socketserver.TCPServer(("", PORT), Handler) as httpd:
-    print(f"Budget Planner running at http://localhost:{PORT}")
+with http.server.ThreadingHTTPServer(("", PORT), Handler) as httpd:
+    print(f"Family Planner running at http://localhost:{PORT}")
     webbrowser.open(f"http://localhost:{PORT}")
     try:
         httpd.serve_forever()

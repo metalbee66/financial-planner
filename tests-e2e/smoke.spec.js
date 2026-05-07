@@ -974,6 +974,172 @@ test.describe('Phase 3.5 — Milestones', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 4.1 — List view (sort, group, filter)', () => {
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    async function setTaskFields(page, taskName, fields) {
+        await page.locator('.task-row-name', { hasText: taskName }).click();
+        if (fields.priority) await page.locator('#tp-priority').selectOption(fields.priority);
+        if (fields.assignee !== undefined) {
+            await page.locator('#tp-assignee').selectOption(fields.assignee || '');
+        }
+        if (fields.status) await page.locator('#tp-status').selectOption(fields.status);
+        await page.locator('#tp-save').click();
+    }
+
+    async function rowNames(page) {
+        return page.locator('.task-row .task-row-name').allTextContents();
+    }
+
+    test('default sort is due-date asc; toolbar selectors reflect defaults', async ({ page }) => {
+        await createProject(page, { name: 'Sort defaults' });
+        await expect(page.locator('#tasks-sort-by')).toHaveValue('dueDate');
+        await expect(page.locator('#tasks-sort-dir')).toHaveText('↑');
+        await expect(page.locator('#tasks-group-by')).toHaveValue('none');
+        await expect(page.locator('#tasks-filter-assignee')).toHaveValue('');
+        await expect(page.locator('#tasks-filter-status')).toHaveValue('');
+    });
+
+    test('sort by name asc puts tasks alphabetical; flipping direction reverses', async ({ page }) => {
+        await createProject(page, { name: 'Name sort' });
+        for (const n of ['Charlie', 'Alpha', 'Bravo']) await addTask(page, n);
+        await page.locator('#tasks-sort-by').selectOption('name');
+        await expect(page.locator('.task-row .task-row-name')).toHaveText(['Alpha', 'Bravo', 'Charlie']);
+        await page.locator('#tasks-sort-dir').click();
+        await expect(page.locator('#tasks-sort-dir')).toHaveText('↓');
+        await expect(page.locator('.task-row .task-row-name')).toHaveText(['Charlie', 'Bravo', 'Alpha']);
+    });
+
+    test('sort by priority orders high → normal → low among open tasks', async ({ page }) => {
+        await createProject(page, { name: 'Priority sort' });
+        for (const n of ['Lo', 'Hi', 'No']) await addTask(page, n);
+        await setTaskFields(page, 'Lo', { priority: 'low' });
+        await setTaskFields(page, 'Hi', { priority: 'high' });
+        // 'No' stays at default normal
+        await page.locator('#tasks-sort-by').selectOption('priority');
+        await expect(page.locator('.task-row .task-row-name')).toHaveText(['Hi', 'No', 'Lo']);
+    });
+
+    test('done tasks always pin to bottom regardless of sort field', async ({ page }) => {
+        await createProject(page, { name: 'Done pinning' });
+        for (const n of ['Aaa', 'Bbb', 'Ccc']) await addTask(page, n);
+        // Mark Aaa done — it should drop to bottom even though name-sort would put it first
+        await page.locator('.task-row', { hasText: 'Aaa' })
+            .locator('.task-row-status').selectOption('done');
+        await page.locator('#tasks-sort-by').selectOption('name');
+        const names = await rowNames(page);
+        expect(names[names.length - 1]).toBe('Aaa');
+    });
+
+    test('group by status renders section headers in canonical order', async ({ page }) => {
+        await createProject(page, { name: 'Group by status' });
+        for (const n of ['Plan it', 'Doing now', 'Backlog']) await addTask(page, n);
+        await setTaskFields(page, 'Doing now', { status: 'in-progress' });
+        await setTaskFields(page, 'Plan it', { status: 'review' });
+
+        await page.locator('#tasks-group-by').selectOption('status');
+        const headers = page.locator('.tasks-group-header');
+        await expect(headers).toHaveCount(3);
+        // Canonical order in TASK_STATUSES: not-started → in-progress → review → done → blocked
+        await expect(headers.nth(0)).toContainText('Not started');
+        await expect(headers.nth(1)).toContainText('In progress');
+        await expect(headers.nth(2)).toContainText('Review');
+    });
+
+    test('group by assignee orders brad → diana → unassigned, with bucket counts', async ({ page }) => {
+        await createProject(page, { name: 'Group by assignee' });
+        for (const n of ['Diana task', 'Brad task', 'Loose task']) await addTask(page, n);
+        await setTaskFields(page, 'Brad task', { assignee: 'brad' });
+        await setTaskFields(page, 'Diana task', { assignee: 'diana' });
+
+        await page.locator('#tasks-group-by').selectOption('assignee');
+        const headers = page.locator('.tasks-group-header');
+        await expect(headers.nth(0)).toContainText('Brad · 1');
+        await expect(headers.nth(1)).toContainText('Diana · 1');
+        await expect(headers.nth(2)).toContainText('Unassigned · 1');
+    });
+
+    test('filtering by assignee narrows the visible rows', async ({ page }) => {
+        await createProject(page, { name: 'Filter assignee' });
+        for (const n of ['Brad only', 'Diana only', 'Loose']) await addTask(page, n);
+        await setTaskFields(page, 'Brad only', { assignee: 'brad' });
+        await setTaskFields(page, 'Diana only', { assignee: 'diana' });
+
+        await page.locator('#tasks-filter-assignee').selectOption('brad');
+        await expect(page.locator('.task-row .task-row-name')).toHaveText(['Brad only']);
+    });
+
+    test('filtering by status narrows the visible rows', async ({ page }) => {
+        await createProject(page, { name: 'Filter status' });
+        for (const n of ['Open A', 'Open B', 'Reviewed']) await addTask(page, n);
+        await setTaskFields(page, 'Reviewed', { status: 'review' });
+
+        await page.locator('#tasks-filter-status').selectOption('review');
+        await expect(page.locator('.task-row .task-row-name')).toHaveText(['Reviewed']);
+    });
+
+    test('filters compose with AND semantics (assignee + status + milestonesOnly)', async ({ page }) => {
+        await createProject(page, { name: 'Compose filters' });
+        for (const n of ['target', 'wrongAssignee', 'wrongStatus', 'notMilestone']) {
+            await addTask(page, n);
+        }
+        await setTaskFields(page, 'target', { assignee: 'brad', status: 'in-progress' });
+        await setTaskFields(page, 'wrongAssignee', { assignee: 'diana', status: 'in-progress' });
+        await setTaskFields(page, 'wrongStatus', { assignee: 'brad', status: 'review' });
+        await setTaskFields(page, 'notMilestone', { assignee: 'brad', status: 'in-progress' });
+
+        // Only 'target' is also a milestone
+        await page.locator('.task-row-name', { hasText: 'target' }).click();
+        await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+
+        await page.locator('#tasks-filter-assignee').selectOption('brad');
+        await page.locator('#tasks-filter-status').selectOption('in-progress');
+        await page.locator('#tasks-filter-milestones').check();
+
+        await expect(page.locator('.task-row .task-row-name')).toHaveText(['◆target']);
+    });
+
+    test('empty state distinguishes "no tasks at all" from "no tasks match filters"', async ({ page }) => {
+        await createProject(page, { name: 'Empty states' });
+        await expect(page.locator('.tasks-empty')).toContainText('No tasks. Add one above.');
+
+        for (const n of ['Brad work']) await addTask(page, n);
+        await setTaskFields(page, 'Brad work', { assignee: 'brad' });
+
+        await page.locator('#tasks-filter-assignee').selectOption('diana');
+        await expect(page.locator('.tasks-empty')).toContainText('No tasks match these filters.');
+        await expect(page.locator('.task-row')).toHaveCount(0);
+    });
+
+    test('sort/group/filter reset when switching to a different project', async ({ page }) => {
+        // First project — set non-default toolbar state
+        await createProject(page, { name: 'Project A' });
+        await addTask(page, 'A1');
+        await page.locator('#tasks-sort-by').selectOption('name');
+        await page.locator('#tasks-group-by').selectOption('status');
+        await page.locator('#tasks-filter-status').selectOption('done');
+
+        // Navigate to a different project
+        await backToList(page);
+        await page.locator('#projects-new-btn').click();
+        await page.locator('#pf-name').fill('Project B');
+        await page.locator('#pf-status').selectOption('active');
+        await page.locator('#pf-save').click();
+
+        // Toolbar reset to defaults
+        await expect(page.locator('#tasks-sort-by')).toHaveValue('dueDate');
+        await expect(page.locator('#tasks-group-by')).toHaveValue('none');
+        await expect(page.locator('#tasks-filter-status')).toHaveValue('');
+        await expect(page.locator('#tasks-filter-assignee')).toHaveValue('');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {
