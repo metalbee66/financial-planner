@@ -215,10 +215,11 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `master`. Phase-3 + Phase-4.1 + Phase-4.2 commits + handover are pushed to `origin/master` (4.2 deployed at the start of this session). The Phase-4.3 commit lands fresh on top.
-- **Last commit:** `c0c0f47` — Calendar (month grid) view (Task 4.3)
-- **Phase 4 commits on master (newest first; `*` = local-only, not on origin yet):**
-  - `c0c0f47`* — Calendar (month grid) view (Task 4.3) + suppress dev-server browser auto-open during tests
+- **Active branch:** `master`. All Phase-4 commits + handover are on `origin/master` — 4.3 was pushed at the end of this session, so the live site at https://metalbee66.github.io/financial-planner/ has all three views (List + Timeline + Calendar). Manual smoke for 4.1 / 4.2 / 4.3 still pending.
+- **Last commit:** `00a5e63` — Handover: record Phase 4.3 commit hash (worktree clean, master == origin/master)
+- **Phase 4 commits on master (newest first):**
+  - `00a5e63` — Handover: record Phase 4.3 commit hash
+  - `c0c0f47` — Calendar (month grid) view (Task 4.3) + suppress dev-server browser auto-open during tests
   - `4c169c8` — Handover: record Phase 4.2 commit hash
   - `5c90cfd` — Timeline (Gantt) view (Task 4.2)
   - `686bc0b` — Handover: record Phase 4.1 commit hash
@@ -247,7 +248,7 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ### Manual smoke on the deployed site (Checkpoint E — Phase 4 complete)
 
-> **Push first.** The Phase-4.3 commit is local-only. `git push` to master, then wait ~30 sec for GitHub Pages to rebuild, then run the manual checks below.
+> **Already deployed.** Phase 4.3 was pushed at the end of this session. Hard-refresh https://metalbee66.github.io/financial-planner/ (Ctrl+Shift+R) and run the manual checks below. The harness covered the functional acceptance criteria automatically — these checks cover what the harness can't (real Firebase, two-user, visual layout).
 
 The Playwright suite (`npm run test:e2e`, 81 tests, ~6 min) covers the **functional** acceptance criteria for Phase 1.1, 1.2, 2.1, 2.2, 3.1–3.5, **4.1**, **4.2**, and **4.3** plus a Phase 0 module-shell regression check, plus a `tests.html` driver that runs all 144 data-layer unit cases. Firebase is blocked at the network layer in tests so they run hermetically against localStorage.
 
@@ -266,7 +267,7 @@ What the harness **doesn't** cover (verify manually on https://metalbee66.github
 11. **Calendar view (Phase 4.3).** Same project. Switch to `Calendar` → month grid for the current month, weekday header Mon..Sun, today's cell highlighted. **Pills**: a single-day task shows one full pill on its `dueDate`; a multi-day task shows a faded italic pill on `startDate` and a full pill on `dueDate`. **Click pill** → task panel opens. **Click a day cell (avoid pills)** → a popover appears top-right of the grid listing every task that day with `Due` / `Start` chips; click a task there → panel opens. **Prev / Next** arrows navigate months and update the header label; **Today** snaps back. Add tasks across this month, next month, and 2 months ahead → all three appear when navigated to. Switch to a different project → view resets to `List` and calendar month resets to today. Console clean.
 12. **Console check.** Zero red errors on either browser after the above. (Browser-extension `asynchronous response… message channel closed` chatter is not an app issue — ignore it.)
 
-If Phase 4.3 regresses, rollback is `git revert <Phase-4.3-hash>` — single self-contained commit on top of `4c169c8`. Earlier-phase rollbacks unchanged: 4.2 → `5c90cfd`, 4.1 → `f558f41`, 3.5 → `7c47901`, 3.4 → `618310d`, 3.3 → `67cf64f`, 3.2 → `7ea9693`.
+If Phase 4.3 regresses, rollback is `git revert c0c0f47` — single self-contained commit. Earlier-phase rollbacks unchanged: 4.2 → `5c90cfd`, 4.1 → `f558f41`, 3.5 → `7c47901`, 3.4 → `618310d`, 3.3 → `67cf64f`, 3.2 → `7ea9693`.
 
 ### Branch cleanup
 
