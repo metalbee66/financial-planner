@@ -2071,3 +2071,172 @@ select.editable { width: 100px; cursor: pointer; }
     .tasks-toolbar { gap: 8px; }
     .tasks-toolbar-field { width: 100%; justify-content: space-between; }
 }
+
+/* View tabs (Task 4.2) */
+.view-tabs {
+    display: flex;
+    gap: 4px;
+    margin: 16px 0 8px;
+    border-bottom: 1px solid var(--border);
+}
+.view-tab {
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.9rem;
+    transform: translateY(1px);
+}
+.view-tab:hover { background: var(--surface); color: var(--text); }
+.view-tab.active {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--accent);
+    border-bottom-color: var(--surface);
+}
+
+/* Timeline (Gantt) view (Task 4.2) */
+.timeline-container {
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+}
+.timeline-empty {
+    padding: 24px 16px;
+    color: var(--text-dim);
+    text-align: center;
+    font-size: 0.9rem;
+}
+.timeline-axis {
+    position: relative;
+    height: 32px;
+    margin-left: 200px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+}
+.timeline-axis-month {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-left: 1px solid var(--border);
+    padding: 8px 6px 0;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    box-sizing: border-box;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.timeline-axis-month:first-child { border-left: none; }
+.timeline-rows {
+    padding: 4px 0;
+}
+.timeline-row {
+    display: flex;
+    align-items: center;
+    height: 32px;
+}
+.timeline-row-label {
+    width: 200px;
+    flex-shrink: 0;
+    padding: 0 12px;
+    color: var(--text);
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    box-sizing: border-box;
+}
+.timeline-row-track {
+    position: relative;
+    flex: 1;
+    height: 100%;
+    border-left: 1px solid var(--border);
+}
+.timeline-bar {
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    min-width: 4px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: rgba(0,176,240,0.18);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8rem;
+    text-align: left;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: filter 0.1s;
+}
+.timeline-bar:hover { filter: brightness(1.15); }
+.timeline-bar.status-not-started { background: rgba(136,146,160,0.18); border-color: rgba(136,146,160,0.4); color: var(--text); }
+.timeline-bar.status-in-progress { background: rgba(0,176,240,0.22); border-color: rgba(0,176,240,0.5); color: var(--accent); }
+.timeline-bar.status-review      { background: rgba(112,48,160,0.22); border-color: rgba(112,48,160,0.5); color: #b48bd9; }
+.timeline-bar.status-done        { background: rgba(0,200,83,0.22); border-color: rgba(0,200,83,0.5); color: var(--green); }
+.timeline-bar.status-blocked     { background: rgba(255,82,82,0.22); border-color: rgba(255,82,82,0.5); color: var(--red); }
+.timeline-bar-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.timeline-unscheduled {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+}
+
+/* Milestones render as a diamond at the date instead of a span */
+.timeline-milestone {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.timeline-milestone-glyph {
+    color: #f5b301;
+    font-size: 1.1rem;
+    line-height: 1;
+    text-shadow: 0 0 4px rgba(245,179,1,0.4);
+}
+.timeline-milestone:hover .timeline-milestone-glyph { filter: brightness(1.2); }
+.timeline-milestone-name {
+    color: var(--text-dim);
+}
+.timeline-milestone.status-done .timeline-milestone-glyph { color: var(--green); text-shadow: 0 0 4px rgba(0,200,83,0.4); }
+.timeline-milestone.status-blocked .timeline-milestone-glyph { color: var(--red); text-shadow: 0 0 4px rgba(255,82,82,0.4); }
+
+/* Dependency arrows overlay */
+.timeline-arrows {
+    color: var(--text-dim);
+    overflow: visible;
+}
+.timeline-arrow {
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+    stroke-dasharray: 4 3;
+    opacity: 0.7;
+}

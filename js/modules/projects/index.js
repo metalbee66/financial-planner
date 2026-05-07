@@ -60,6 +60,8 @@ import {
     groupTopLevelTasks,
     TASK_SORT_FIELDS,
     TASK_GROUP_OPTIONS,
+    computeTimelineRange,
+    computeTaskBars,
     saveProjects,
 } from './data.js';
 
@@ -85,6 +87,11 @@ const TASK_SORT_LABELS = { dueDate: 'Due date', name: 'Name', priority: 'Priorit
 const TASK_GROUP_LABELS = { none: 'None', status: 'Status', assignee: 'Assignee' };
 const DEFAULT_TASK_SORT = { by: 'dueDate', dir: 'asc' };
 const DEFAULT_TASK_GROUP = 'none';
+const DEFAULT_DETAIL_VIEW = 'list';
+const DETAIL_VIEW_OPTIONS = [
+    { value: 'list', label: 'List' },
+    { value: 'timeline', label: 'Timeline' },
+];
 
 const PARTICIPANT_LABELS = { brad: 'Brad', diana: 'Diana' };
 
@@ -314,13 +321,7 @@ function renderDetail() {
     const dateRange = formatDateRange(p.startDate, p.endDate);
     const participants = renderChipsHtml(p.participants);
     const allTasks = findTasksByProject(getTasks(), p.id);
-    const openCount = allTasks.filter(t => t.status !== 'done').length;
-    const totalCount = allTasks.length;
-
-    const filters = mode.taskFilters || {};
-    const sort = mode.taskSort || DEFAULT_TASK_SORT;
-    const group = mode.taskGroup || DEFAULT_TASK_GROUP;
-    const assigneeOptions = collectAssigneeOptions(p, allTasks);
+    const activeView = mode.detailView || DEFAULT_DETAIL_VIEW;
 
     host.innerHTML = `
         <div class="projects-toolbar">
@@ -334,91 +335,244 @@ function renderDetail() {
             <div class="project-detail-chips">${participants}</div>
             ${p.description ? `<p class="project-detail-desc">${escapeHtml(p.description)}</p>` : ''}
         </div>
-        <div class="project-detail-tasks">
-            <div class="tasks-header">
-                <h3 class="tasks-title">Tasks</h3>
-                <span class="tasks-count">${totalCount === 0 ? 'No tasks yet' : `${openCount} open · ${totalCount} total`}</span>
-                <label class="tasks-filter-toggle">
-                    <input type="checkbox" id="tasks-filter-milestones"${filters.milestonesOnly ? ' checked' : ''} />
-                    <span class="task-row-milestone-glyph" aria-hidden="true">◆</span>
-                    <span>Milestones only</span>
-                </label>
-            </div>
-            <div class="tasks-toolbar" role="toolbar" aria-label="Task list controls">
-                <label class="tasks-toolbar-field">
-                    <span class="tasks-toolbar-label">Sort</span>
-                    <select id="tasks-sort-by" aria-label="Sort tasks by">
-                        ${TASK_SORT_FIELDS.map(f =>
-                            `<option value="${f}"${f === sort.by ? ' selected' : ''}>${escapeHtml(TASK_SORT_LABELS[f] || f)}</option>`
-                        ).join('')}
-                    </select>
-                    <button type="button" class="tasks-toolbar-dir" id="tasks-sort-dir" aria-label="Toggle sort direction" title="Toggle sort direction">${sort.dir === 'desc' ? '↓' : '↑'}</button>
-                </label>
-                <label class="tasks-toolbar-field">
-                    <span class="tasks-toolbar-label">Group</span>
-                    <select id="tasks-group-by" aria-label="Group tasks by">
-                        ${TASK_GROUP_OPTIONS.map(g =>
-                            `<option value="${g}"${g === group ? ' selected' : ''}>${escapeHtml(TASK_GROUP_LABELS[g] || g)}</option>`
-                        ).join('')}
-                    </select>
-                </label>
-                <label class="tasks-toolbar-field">
-                    <span class="tasks-toolbar-label">Assignee</span>
-                    <select id="tasks-filter-assignee" aria-label="Filter by assignee">
-                        <option value="">All</option>
-                        ${assigneeOptions.map(a =>
-                            `<option value="${escapeAttr(a.value)}"${a.value === (filters.assignee || '') ? ' selected' : ''}>${escapeHtml(a.label)}</option>`
-                        ).join('')}
-                    </select>
-                </label>
-                <label class="tasks-toolbar-field">
-                    <span class="tasks-toolbar-label">Status</span>
-                    <select id="tasks-filter-status" aria-label="Filter by status">
-                        <option value="">All</option>
-                        ${TASK_STATUSES.map(s =>
-                            `<option value="${s}"${s === (filters.status || '') ? ' selected' : ''}>${escapeHtml(TASK_STATUS_LABELS[s] || s)}</option>`
-                        ).join('')}
-                    </select>
-                </label>
-            </div>
-            <div class="tasks-add-row" id="tasks-add-row"></div>
-            <div class="tasks-list" id="tasks-list"></div>
+        <div class="view-tabs" role="tablist" aria-label="Task views">
+            ${DETAIL_VIEW_OPTIONS.map(opt => `
+                <button type="button" class="view-tab${opt.value === activeView ? ' active' : ''}"
+                    role="tab" aria-selected="${opt.value === activeView}"
+                    data-view="${opt.value}">${escapeHtml(opt.label)}</button>
+            `).join('')}
         </div>
+        <div class="project-detail-tasks" id="project-detail-tasks"></div>
     `;
 
     host.querySelector('#projects-back-btn').addEventListener('click', goList);
     host.querySelector('#projects-edit-btn').addEventListener('click', () => goEdit(p.id));
-    host.querySelector('#tasks-filter-milestones').addEventListener('change', (e) => {
+    host.querySelectorAll('.view-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const v = btn.dataset.view;
+            if (v && v !== mode.detailView) {
+                mode.detailView = v;
+                render();
+            }
+        });
+    });
+
+    const body = host.querySelector('#project-detail-tasks');
+    if (activeView === 'timeline') {
+        renderTimelineBody(body, p, allTasks);
+    } else {
+        renderListBody(body, p, allTasks);
+    }
+}
+
+function renderListBody(root, p, allTasks) {
+    const filters = mode.taskFilters || {};
+    const sort = mode.taskSort || DEFAULT_TASK_SORT;
+    const group = mode.taskGroup || DEFAULT_TASK_GROUP;
+    const assigneeOptions = collectAssigneeOptions(p, allTasks);
+    const openCount = allTasks.filter(t => t.status !== 'done').length;
+    const totalCount = allTasks.length;
+
+    root.innerHTML = `
+        <div class="tasks-header">
+            <h3 class="tasks-title">Tasks</h3>
+            <span class="tasks-count">${totalCount === 0 ? 'No tasks yet' : `${openCount} open · ${totalCount} total`}</span>
+            <label class="tasks-filter-toggle">
+                <input type="checkbox" id="tasks-filter-milestones"${filters.milestonesOnly ? ' checked' : ''} />
+                <span class="task-row-milestone-glyph" aria-hidden="true">◆</span>
+                <span>Milestones only</span>
+            </label>
+        </div>
+        <div class="tasks-toolbar" role="toolbar" aria-label="Task list controls">
+            <label class="tasks-toolbar-field">
+                <span class="tasks-toolbar-label">Sort</span>
+                <select id="tasks-sort-by" aria-label="Sort tasks by">
+                    ${TASK_SORT_FIELDS.map(f =>
+                        `<option value="${f}"${f === sort.by ? ' selected' : ''}>${escapeHtml(TASK_SORT_LABELS[f] || f)}</option>`
+                    ).join('')}
+                </select>
+                <button type="button" class="tasks-toolbar-dir" id="tasks-sort-dir" aria-label="Toggle sort direction" title="Toggle sort direction">${sort.dir === 'desc' ? '↓' : '↑'}</button>
+            </label>
+            <label class="tasks-toolbar-field">
+                <span class="tasks-toolbar-label">Group</span>
+                <select id="tasks-group-by" aria-label="Group tasks by">
+                    ${TASK_GROUP_OPTIONS.map(g =>
+                        `<option value="${g}"${g === group ? ' selected' : ''}>${escapeHtml(TASK_GROUP_LABELS[g] || g)}</option>`
+                    ).join('')}
+                </select>
+            </label>
+            <label class="tasks-toolbar-field">
+                <span class="tasks-toolbar-label">Assignee</span>
+                <select id="tasks-filter-assignee" aria-label="Filter by assignee">
+                    <option value="">All</option>
+                    ${assigneeOptions.map(a =>
+                        `<option value="${escapeAttr(a.value)}"${a.value === (filters.assignee || '') ? ' selected' : ''}>${escapeHtml(a.label)}</option>`
+                    ).join('')}
+                </select>
+            </label>
+            <label class="tasks-toolbar-field">
+                <span class="tasks-toolbar-label">Status</span>
+                <select id="tasks-filter-status" aria-label="Filter by status">
+                    <option value="">All</option>
+                    ${TASK_STATUSES.map(s =>
+                        `<option value="${s}"${s === (filters.status || '') ? ' selected' : ''}>${escapeHtml(TASK_STATUS_LABELS[s] || s)}</option>`
+                    ).join('')}
+                </select>
+            </label>
+        </div>
+        <div class="tasks-add-row" id="tasks-add-row"></div>
+        <div class="tasks-list" id="tasks-list"></div>
+    `;
+
+    root.querySelector('#tasks-filter-milestones').addEventListener('change', (e) => {
         mode.taskFilters = { ...(mode.taskFilters || {}), milestonesOnly: e.target.checked };
         render();
     });
-    host.querySelector('#tasks-sort-by').addEventListener('change', (e) => {
+    root.querySelector('#tasks-sort-by').addEventListener('change', (e) => {
         mode.taskSort = { ...(mode.taskSort || DEFAULT_TASK_SORT), by: e.target.value };
         render();
     });
-    host.querySelector('#tasks-sort-dir').addEventListener('click', () => {
+    root.querySelector('#tasks-sort-dir').addEventListener('click', () => {
         const cur = mode.taskSort || DEFAULT_TASK_SORT;
         mode.taskSort = { ...cur, dir: cur.dir === 'desc' ? 'asc' : 'desc' };
         render();
     });
-    host.querySelector('#tasks-group-by').addEventListener('change', (e) => {
+    root.querySelector('#tasks-group-by').addEventListener('change', (e) => {
         mode.taskGroup = e.target.value || DEFAULT_TASK_GROUP;
         render();
     });
-    host.querySelector('#tasks-filter-assignee').addEventListener('change', (e) => {
+    root.querySelector('#tasks-filter-assignee').addEventListener('change', (e) => {
         const v = e.target.value;
         mode.taskFilters = { ...(mode.taskFilters || {}), assignee: v ? v : null };
         render();
     });
-    host.querySelector('#tasks-filter-status').addEventListener('change', (e) => {
+    root.querySelector('#tasks-filter-status').addEventListener('change', (e) => {
         const v = e.target.value;
         mode.taskFilters = { ...(mode.taskFilters || {}), status: v ? v : null };
         render();
     });
 
-    renderAddTaskRow(host.querySelector('#tasks-add-row'), p);
+    renderAddTaskRow(root.querySelector('#tasks-add-row'), p);
     const filteredTasks = filterTasks(allTasks, filters);
-    renderTasksList(host.querySelector('#tasks-list'), p, filteredTasks, allTasks.length);
+    renderTasksList(root.querySelector('#tasks-list'), p, filteredTasks, allTasks.length);
+}
+
+/**
+ * Timeline (Gantt) view: month axis + per-task bars positioned by date.
+ * Tasks without any date are surfaced as an "N unscheduled" count below the
+ * chart rather than dropped silently. Empty-state when no task has dates.
+ */
+function renderTimelineBody(root, p, allTasks) {
+    // Top-level only: subtasks roll up under their parent's row visually
+    // (kept as flat rows for now — fancier nesting can come later).
+    const range = computeTimelineRange(allTasks);
+    const bars = computeTaskBars(allTasks, range);
+    const unscheduled = allTasks.length - bars.length;
+
+    if (!range) {
+        root.innerHTML = `
+            <div class="timeline-empty">No scheduled tasks yet. Add a start or due date to a task to see it on the timeline.</div>
+        `;
+        return;
+    }
+
+    // Sort bars left-to-right so deps usually point forward and crossings stay rare
+    const ordered = bars.slice().sort((a, b) => {
+        if (a.leftPct !== b.leftPct) return a.leftPct - b.leftPct;
+        return (a.task.createdAt || '').localeCompare(b.task.createdAt || '');
+    });
+
+    // Build a row-index map so dep arrows can locate source/target rows in the
+    // visible order. Tasks not on the timeline (no dates) are skipped — their
+    // deps simply don't render.
+    const idxById = new Map();
+    ordered.forEach((b, i) => idxById.set(b.id, i));
+    const arrows = [];
+    for (const b of ordered) {
+        const deps = Array.isArray(b.task.dependsOn) ? b.task.dependsOn : [];
+        for (const depId of deps) {
+            if (!idxById.has(depId)) continue;
+            const fromIdx = idxById.get(depId);
+            const toIdx = idxById.get(b.id);
+            const fromBar = ordered[fromIdx];
+            arrows.push({
+                fromIdx,
+                toIdx,
+                fromX: fromBar.leftPct + fromBar.widthPct,
+                toX: b.leftPct,
+            });
+        }
+    }
+
+    const ROW_H = 32;
+    const rowCenter = (i) => i * ROW_H + ROW_H / 2;
+
+    const renderItem = (b) => {
+        const dataId = escapeAttr(b.id);
+        const tooltip = `${escapeAttr(b.name)} · ${escapeAttr(b.startDate)} → ${escapeAttr(b.dueDate)}`;
+        if (b.isMilestone) {
+            return `
+                <div class="timeline-row" data-task-id="${dataId}">
+                    <div class="timeline-row-label" title="${escapeAttr(b.name)}">${escapeHtml(b.name || '(untitled)')}</div>
+                    <div class="timeline-row-track">
+                        <button type="button" class="timeline-milestone status-${b.status}"
+                            style="left:${b.leftPct}%"
+                            data-task-id="${dataId}"
+                            title="${tooltip}">
+                            <span class="timeline-milestone-glyph" aria-hidden="true">◆</span>
+                            <span class="timeline-milestone-name">${escapeHtml(b.name || '(untitled)')}</span>
+                        </button>
+                    </div>
+                </div>`;
+        }
+        return `
+            <div class="timeline-row" data-task-id="${dataId}">
+                <div class="timeline-row-label" title="${escapeAttr(b.name)}">${escapeHtml(b.name || '(untitled)')}</div>
+                <div class="timeline-row-track">
+                    <button type="button" class="timeline-bar status-${b.status}"
+                        style="left:${b.leftPct}%; width:${b.widthPct}%"
+                        data-task-id="${dataId}"
+                        title="${tooltip}">
+                        <span class="timeline-bar-name">${escapeHtml(b.name || '(untitled)')}</span>
+                    </button>
+                </div>
+            </div>`;
+    };
+
+    root.innerHTML = `
+        <div class="timeline-container">
+            <div class="timeline-axis" aria-hidden="true">
+                ${range.months.map(m => `
+                    <div class="timeline-axis-month" style="left:${m.leftPct}%; width:${m.widthPct}%">
+                        ${escapeHtml(m.label)}
+                    </div>
+                `).join('')}
+            </div>
+            <div class="timeline-rows" style="position:relative;">
+                ${ordered.map(renderItem).join('')}
+                ${arrows.length ? `
+                    <svg class="timeline-arrows" aria-hidden="true"
+                        style="position:absolute; left:200px; right:0; top:0; height:${ordered.length * ROW_H}px; pointer-events:none;">
+                        ${arrows.map(a => `
+                            <line class="timeline-arrow"
+                                x1="${a.fromX}%" y1="${rowCenter(a.fromIdx)}"
+                                x2="${a.toX}%" y2="${rowCenter(a.toIdx)}" />
+                        `).join('')}
+                    </svg>
+                ` : ''}
+            </div>
+            ${unscheduled > 0
+                ? `<div class="timeline-unscheduled">${unscheduled} unscheduled task${unscheduled === 1 ? '' : 's'} (no start or due date)</div>`
+                : ''}
+        </div>
+    `;
+
+    root.querySelectorAll('.timeline-bar, .timeline-milestone').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tid = btn.dataset.taskId;
+            if (tid) openTaskPanel(tid);
+        });
+    });
 }
 
 /** Build the assignee filter options: project participants + any extra assignee values currently in use. */
@@ -764,6 +918,7 @@ function freshListMode() {
         view: 'list',
         editingId: null,
         detailProjectId: null,
+        detailView: DEFAULT_DETAIL_VIEW,
         taskFilters: {},
         taskSort: { ...DEFAULT_TASK_SORT },
         taskGroup: DEFAULT_TASK_GROUP,
@@ -784,14 +939,15 @@ function goEdit(id) {
     render();
 }
 function goDetail(id) {
-    // Sort, grouping and filters reset when switching to a different project so
-    // state from one project's list view doesn't leak into another. Same-project
-    // re-entry preserves the user's current toolbar settings across renders.
+    // Sort, grouping, filters and detailView reset when switching to a different
+    // project so state from one project's view doesn't leak into another.
+    // Same-project re-entry preserves toolbar + active view across renders.
     const sameProject = mode.detailProjectId === id;
     mode = {
         view: 'detail',
         editingId: null,
         detailProjectId: id,
+        detailView: sameProject && mode.detailView ? mode.detailView : DEFAULT_DETAIL_VIEW,
         taskFilters: sameProject ? (mode.taskFilters || {}) : {},
         taskSort: sameProject && mode.taskSort ? mode.taskSort : { ...DEFAULT_TASK_SORT },
         taskGroup: sameProject && mode.taskGroup ? mode.taskGroup : DEFAULT_TASK_GROUP,

@@ -54,6 +54,8 @@ import {
     groupTopLevelTasks,
     TASK_SORT_FIELDS,
     TASK_GROUP_OPTIONS,
+    computeTimelineRange,
+    computeTaskBars,
 } from './data.js';
 
 const tests = [];
@@ -1132,6 +1134,127 @@ test('groupTopLevelTasks unknown group-by falls back to a single all-bucket', ()
     const groups = groupTopLevelTasks(list, 'mystery');
     eq(groups.length, 1);
     eq(groups[0].tasks.map(t => t.name), ['X']);
+});
+
+// ── Timeline range / bars (Task 4.2) ──
+
+test('computeTimelineRange returns null when given an empty task list', () => {
+    eq(computeTimelineRange([]), null);
+});
+
+test('computeTimelineRange returns null when no task has any usable date', () => {
+    const list = [mkTask({ name: 'a' }), mkTask({ name: 'b' })];
+    eq(computeTimelineRange(list), null);
+});
+
+test('computeTimelineRange snaps to month start/end with 14-day padding', () => {
+    // earliest start 2026-06-15, latest due 2026-06-20.
+    // 2026-06-15 - 14d = 2026-06-01 → month start = 2026-06-01.
+    // 2026-06-20 + 14d = 2026-07-04 → month end   = 2026-07-31.
+    const list = [
+        mkTask({ name: 'a', startDate: '2026-06-15', dueDate: '2026-06-20' }),
+    ];
+    const r = computeTimelineRange(list);
+    eq(r.startDate, '2026-06-01');
+    eq(r.endDate, '2026-07-31');
+    eq(r.totalDays, 61); // June 30 + July 31
+});
+
+test('computeTimelineRange honours min(startDate) and max(dueDate) across tasks', () => {
+    const list = [
+        mkTask({ name: 'a', startDate: '2026-07-10', dueDate: '2026-07-12' }),
+        mkTask({ name: 'b', startDate: '2026-06-05', dueDate: '2026-08-25' }),
+    ];
+    const r = computeTimelineRange(list);
+    // 2026-06-05 - 14d = 2026-05-22 → snap to 2026-05-01.
+    // 2026-08-25 + 14d = 2026-09-08 → snap to 2026-09-30.
+    eq(r.startDate, '2026-05-01');
+    eq(r.endDate, '2026-09-30');
+});
+
+test('computeTimelineRange treats a task with only startDate as a 1-day span', () => {
+    // 06-15 ± 14d = 06-01..06-29; both in June → snaps to 2026-06-01..2026-06-30.
+    const list = [mkTask({ name: 'a', startDate: '2026-06-15', dueDate: null })];
+    const r = computeTimelineRange(list);
+    eq(r.startDate, '2026-06-01');
+    eq(r.endDate, '2026-06-30');
+});
+
+test('computeTimelineRange treats a task with only dueDate as a 1-day span', () => {
+    // Same math as the only-startDate case: lo == hi == 2026-06-15.
+    const list = [mkTask({ name: 'a', startDate: null, dueDate: '2026-06-15' })];
+    const r = computeTimelineRange(list);
+    eq(r.startDate, '2026-06-01');
+    eq(r.endDate, '2026-06-30');
+});
+
+test('computeTimelineRange months array covers every month inclusive', () => {
+    const list = [
+        mkTask({ name: 'a', startDate: '2026-06-15', dueDate: '2026-08-20' }),
+    ];
+    const r = computeTimelineRange(list);
+    // Range: 2026-06-01 → 2026-09-30 (June, July, Aug, Sep)
+    eq(r.months.length, 4);
+    eq(r.months[0].year, 2026);
+    eq(r.months[0].month, 6);
+    eq(r.months[3].month, 9);
+});
+
+test('computeTaskBars excludes tasks with neither startDate nor dueDate', () => {
+    const list = [
+        mkTask({ name: 'scheduled', startDate: '2026-06-10', dueDate: '2026-06-12' }),
+        mkTask({ name: 'unscheduled' }),
+    ];
+    const r = computeTimelineRange(list);
+    const bars = computeTaskBars(list, r);
+    eq(bars.length, 1);
+    eq(bars[0].name, 'scheduled');
+});
+
+test('computeTaskBars 7-day bar has width close to 7 / totalDays * 100', () => {
+    const list = [mkTask({ name: 'wk', startDate: '2026-06-10', dueDate: '2026-06-16' })];
+    const r = computeTimelineRange(list);
+    const bars = computeTaskBars(list, r);
+    eq(bars.length, 1);
+    const expected = (7 / r.totalDays) * 100;
+    truthy(Math.abs(bars[0].widthPct - expected) < 0.001, 'widthPct ≈ 7 days');
+});
+
+test('computeTaskBars 1-day bar (only dueDate) has width = 1 day', () => {
+    const list = [mkTask({ name: 'p', startDate: null, dueDate: '2026-06-15' })];
+    const r = computeTimelineRange(list);
+    const bars = computeTaskBars(list, r);
+    eq(bars.length, 1);
+    const expected = (1 / r.totalDays) * 100;
+    truthy(Math.abs(bars[0].widthPct - expected) < 0.001, 'widthPct ≈ 1 day');
+});
+
+test('computeTaskBars leftPct + widthPct stays within 0..100 for in-range tasks', () => {
+    const list = [
+        mkTask({ name: 'a', startDate: '2026-06-10', dueDate: '2026-06-14' }),
+        mkTask({ name: 'b', startDate: '2026-06-20', dueDate: '2026-06-25' }),
+    ];
+    const r = computeTimelineRange(list);
+    const bars = computeTaskBars(list, r);
+    bars.forEach(b => {
+        truthy(b.leftPct >= 0, 'leftPct ≥ 0');
+        truthy(b.leftPct + b.widthPct <= 100.0001, 'right edge ≤ 100');
+    });
+});
+
+test('computeTaskBars carries id, name, status, isMilestone, and original task ref through', () => {
+    const t = mkTask({ name: 'M', startDate: '2026-06-10', dueDate: '2026-06-10', status: 'in-progress', isMilestone: true });
+    const r = computeTimelineRange([t]);
+    const bars = computeTaskBars([t], r);
+    eq(bars.length, 1);
+    eq(bars[0].id, t.id);
+    eq(bars[0].name, 'M');
+    eq(bars[0].status, 'in-progress');
+    eq(bars[0].isMilestone, true);
+});
+
+test('computeTaskBars returns empty array when range is null', () => {
+    eq(computeTaskBars([mkTask({ name: 'x' })], null), []);
 });
 
 // ── runner ──

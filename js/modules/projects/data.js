@@ -663,6 +663,130 @@ export function groupTopLevelTasks(list, by) {
     return [{ key: 'all', tasks: list.slice() }];
 }
 
+// ── Timeline / Gantt geometry (Task 4.2) ──
+
+const ONE_DAY_MS = 86400000;
+
+function parseISODate(s) {
+    if (!s || typeof s !== 'string') return NaN;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return NaN;
+    return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+}
+
+function formatISODate(ms) {
+    const d = new Date(ms);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function taskDateBounds(t) {
+    const sMs = parseISODate(t && t.startDate);
+    const eMs = parseISODate(t && t.dueDate);
+    const lo = !Number.isNaN(sMs) ? sMs : eMs;
+    const hi = !Number.isNaN(eMs) ? eMs : sMs;
+    if (Number.isNaN(lo) || Number.isNaN(hi)) return null;
+    return { lo, hi };
+}
+
+/**
+ * Compute the date axis for the timeline view.
+ *
+ * - Range expands to `min(startDate)` − 14 days … `max(dueDate)` + 14 days,
+ *   then snaps to month start/end so the axis aligns to month gridlines.
+ * - Tasks with only `startDate` or only `dueDate` are treated as a 1-day span.
+ * - Returns `null` when no task has any usable date — caller renders an
+ *   empty-state message.
+ *
+ * `months` is precomputed (one entry per calendar month in the range) with
+ * percentage offsets so the renderer just maps over it.
+ */
+export function computeTimelineRange(tasks) {
+    if (!Array.isArray(tasks) || tasks.length === 0) return null;
+    let minMs = Infinity;
+    let maxMs = -Infinity;
+    for (const t of tasks) {
+        const b = taskDateBounds(t);
+        if (!b) continue;
+        if (b.lo < minMs) minMs = b.lo;
+        if (b.hi > maxMs) maxMs = b.hi;
+    }
+    if (minMs === Infinity || maxMs === -Infinity) return null;
+
+    const lo = new Date(minMs - 14 * ONE_DAY_MS);
+    const startMs = Date.UTC(lo.getUTCFullYear(), lo.getUTCMonth(), 1);
+    const hi = new Date(maxMs + 14 * ONE_DAY_MS);
+    // day 0 of next month = last day of `this` month
+    const endMs = Date.UTC(hi.getUTCFullYear(), hi.getUTCMonth() + 1, 0);
+
+    const totalDays = Math.round((endMs - startMs) / ONE_DAY_MS) + 1;
+
+    const months = [];
+    let cursor = new Date(startMs);
+    while (Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1) <= endMs) {
+        const y = cursor.getUTCFullYear();
+        const m = cursor.getUTCMonth() + 1;
+        const firstOfMonth = Date.UTC(y, m - 1, 1);
+        const lastOfMonth = Date.UTC(y, m, 0);
+        const daysInMonth = Math.round((lastOfMonth - firstOfMonth) / ONE_DAY_MS) + 1;
+        const offsetDays = Math.round((firstOfMonth - startMs) / ONE_DAY_MS);
+        months.push({
+            year: y,
+            month: m,
+            label: new Date(firstOfMonth).toLocaleString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+            daysInMonth,
+            leftPct: (offsetDays / totalDays) * 100,
+            widthPct: (daysInMonth / totalDays) * 100,
+        });
+        cursor = new Date(Date.UTC(y, m, 1));
+    }
+
+    return {
+        startDate: formatISODate(startMs),
+        endDate: formatISODate(endMs),
+        startMs,
+        endMs,
+        totalDays,
+        months,
+    };
+}
+
+/**
+ * Project tasks onto a precomputed range. Tasks with no usable date are
+ * dropped (the timeline view will surface them in a separate "unscheduled"
+ * count). Tasks with only one date become a 1-day bar.
+ *
+ * Returned bars carry a reference to the source task so the click-to-open
+ * handler can dispatch without a second lookup.
+ */
+export function computeTaskBars(tasks, range) {
+    if (!range || !Array.isArray(tasks)) return [];
+    const out = [];
+    for (const t of tasks) {
+        const b = taskDateBounds(t);
+        if (!b) continue;
+        const days = Math.round((b.hi - b.lo) / ONE_DAY_MS) + 1;
+        const offsetDays = Math.round((b.lo - range.startMs) / ONE_DAY_MS);
+        out.push({
+            id: t.id,
+            name: t.name,
+            status: t.status,
+            assignee: t.assignee,
+            isMilestone: t.isMilestone === true,
+            parentTaskId: t.parentTaskId || null,
+            startDate: t.startDate || t.dueDate,
+            dueDate: t.dueDate || t.startDate,
+            days,
+            leftPct: (offsetDays / range.totalDays) * 100,
+            widthPct: (days / range.totalDays) * 100,
+            task: t,
+        });
+    }
+    return out;
+}
+
 // ── Persistence ──
 
 export function loadProjects() {

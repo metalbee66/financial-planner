@@ -1140,6 +1140,142 @@ test.describe('Phase 4.1 — List view (sort, group, filter)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 4.2 — Timeline view (Gantt)', () => {
+
+    async function addTask(page, name) {
+        await page.locator('#task-add-name').fill(name);
+        await page.locator('#task-add-name').press('Enter');
+    }
+
+    async function setTaskDates(page, taskName, { startDate, dueDate, isMilestone } = {}) {
+        await page.locator('.task-row-name', { hasText: taskName }).click();
+        if (startDate !== undefined) await page.locator('#tp-start').fill(startDate || '');
+        if (dueDate !== undefined) await page.locator('#tp-due').fill(dueDate || '');
+        if (isMilestone) await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+    }
+
+    test('view tabs render with List active by default', async ({ page }) => {
+        await createProject(page, { name: 'Tabs default' });
+        const tabs = page.locator('.view-tabs .view-tab');
+        await expect(tabs).toHaveCount(2);
+        await expect(tabs.nth(0)).toHaveText('List');
+        await expect(tabs.nth(1)).toHaveText('Timeline');
+        await expect(tabs.nth(0)).toHaveClass(/active/);
+        await expect(page.locator('#tasks-list')).toBeVisible();
+    });
+
+    test('switching to Timeline reveals the month-axis scaffolding', async ({ page }) => {
+        await createProject(page, { name: 'Switch to timeline' });
+        await addTask(page, 'Pour foundation');
+        // 06-15..06-20: pad → 06-01..07-04 → snap → June + July
+        await setTaskDates(page, 'Pour foundation', { startDate: '2026-06-15', dueDate: '2026-06-20' });
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        await expect(page.locator('.timeline-axis')).toBeVisible();
+        await expect(page.locator('.timeline-axis-month')).toHaveCount(2); // June + July
+    });
+
+    test('a task with both dates renders as a positioned bar', async ({ page }) => {
+        await createProject(page, { name: 'Bar render' });
+        await addTask(page, 'Frame walls');
+        await setTaskDates(page, 'Frame walls', { startDate: '2026-06-10', dueDate: '2026-06-16' });
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        const bar = page.locator('.timeline-bar', { hasText: 'Frame walls' });
+        await expect(bar).toHaveCount(1);
+        const style = await bar.getAttribute('style');
+        expect(style).toMatch(/left:\s*[0-9.]+%/);
+        expect(style).toMatch(/width:\s*[0-9.]+%/);
+    });
+
+    test('a task without any dates does NOT render as a bar (and surfaces in unscheduled count)', async ({ page }) => {
+        await createProject(page, { name: 'Unscheduled' });
+        await addTask(page, 'Pick paint colour');     // no dates
+        await addTask(page, 'Inspector visit');
+        await setTaskDates(page, 'Inspector visit', { startDate: '2026-06-10', dueDate: '2026-06-10' });
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        await expect(page.locator('.timeline-bar', { hasText: 'Pick paint colour' })).toHaveCount(0);
+        await expect(page.locator('.timeline-bar', { hasText: 'Inspector visit' })).toHaveCount(1);
+        await expect(page.locator('.timeline-unscheduled')).toContainText('1 unscheduled');
+    });
+
+    test('clicking a bar opens the task detail panel', async ({ page }) => {
+        await createProject(page, { name: 'Bar click' });
+        await addTask(page, 'Order tiles');
+        await setTaskDates(page, 'Order tiles', { startDate: '2026-06-10', dueDate: '2026-06-15' });
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        await page.locator('.timeline-bar', { hasText: 'Order tiles' }).click();
+        await expect(page.locator('#task-panel')).toBeVisible();
+        await expect(page.locator('#tp-name')).toHaveValue('Order tiles');
+    });
+
+    test('empty timeline shows a helpful message when no task has dates', async ({ page }) => {
+        await createProject(page, { name: 'Empty timeline' });
+        await addTask(page, 'No dates');
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        await expect(page.locator('.timeline-empty')).toContainText(/no scheduled tasks/i);
+    });
+
+    test('switching list → timeline → list preserves toolbar state', async ({ page }) => {
+        await createProject(page, { name: 'Tab toggle preserves' });
+        await addTask(page, 'X');
+        await page.locator('#tasks-sort-by').selectOption('name');
+        await page.locator('#tasks-group-by').selectOption('status');
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        await page.locator('.view-tab[data-view="list"]').click();
+
+        await expect(page.locator('#tasks-sort-by')).toHaveValue('name');
+        await expect(page.locator('#tasks-group-by')).toHaveValue('status');
+    });
+
+    test('milestone tasks render as diamonds, not as bars', async ({ page }) => {
+        await createProject(page, { name: 'Milestone diamond' });
+        await addTask(page, 'Permit approval');
+        await setTaskDates(page, 'Permit approval', { dueDate: '2026-06-15', isMilestone: true });
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        // Milestone shows as a .timeline-milestone marker, NOT as a regular .timeline-bar
+        await expect(page.locator('.timeline-milestone', { hasText: 'Permit approval' })).toHaveCount(1);
+        await expect(page.locator('.timeline-bar', { hasText: 'Permit approval' })).toHaveCount(0);
+    });
+
+    test('clicking a milestone diamond opens the task detail panel', async ({ page }) => {
+        await createProject(page, { name: 'Milestone click' });
+        await addTask(page, 'Final inspection');
+        await setTaskDates(page, 'Final inspection', { dueDate: '2026-06-15', isMilestone: true });
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        await page.locator('.timeline-milestone', { hasText: 'Final inspection' }).click();
+        await expect(page.locator('#task-panel')).toBeVisible();
+        await expect(page.locator('#tp-name')).toHaveValue('Final inspection');
+    });
+
+    test('a task that depends on another renders a dependency arrow between them', async ({ page }) => {
+        await createProject(page, { name: 'Deps arrows' });
+        await addTask(page, 'Pour foundation');
+        await addTask(page, 'Frame walls');
+        await setTaskDates(page, 'Pour foundation', { startDate: '2026-06-01', dueDate: '2026-06-10' });
+        await setTaskDates(page, 'Frame walls', { startDate: '2026-06-12', dueDate: '2026-06-25' });
+
+        // Add dep: Frame walls depends on Pour foundation
+        await page.locator('.task-row-name', { hasText: 'Frame walls' }).click();
+        await page.locator('#tp-deps-picker').selectOption({ label: 'Pour foundation' });
+        await page.locator('#tp-deps-add-btn').click();
+        await page.locator('#tp-save').click();
+
+        await page.locator('.view-tab[data-view="timeline"]').click();
+        // SVG overlay carries one arrow path per dependency
+        await expect(page.locator('.timeline-arrows')).toBeVisible();
+        await expect(page.locator('.timeline-arrows .timeline-arrow')).toHaveCount(1);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {
