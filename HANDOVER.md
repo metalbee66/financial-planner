@@ -218,8 +218,8 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `master`. Phase 5.3 commit is local and not yet pushed at the time of this handover update — push to `origin/master` to deploy. Manual smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 still pending.
-- **Last commit:** `b0564a2` — Dashboard tab: cross-project metrics + weekly completion chart (Task 5.3). Worktree clean. `master` is **1 commit ahead** of `origin/master` until pushed.
+- **Active branch:** `master`. Phase 5.3 was pushed end of session, so the live site at https://metalbee66.github.io/financial-planner/ now has the Dashboard sub-tab (cards + weekly bar chart). Manual smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 still pending.
+- **Last commit:** `9fa80d7` — Handover: Phase 5.3 (Dashboard tab) complete + harness now 105 tests. Worktree clean. `master == origin/master`.
 - **Phase 5 commits on master (newest first):**
   - `b0564a2` — Dashboard tab: cross-project metrics + weekly completion chart (Task 5.3)
   - `9f7d1fa` — Handover: Phase 5.1 + 5.2 complete, harness now 95 tests
@@ -257,7 +257,7 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ### Manual smoke on the deployed site (Checkpoint E — Phase 4 complete; Phase 5 in flight)
 
-> **Local only — push pending.** Phase 5.3 is committed locally but not yet pushed to `origin/master`, so the live site at https://metalbee66.github.io/financial-planner/ does **not** yet show the Dashboard tab. Push `b0564a2` first; GitHub Pages rebuilds in ~30s; then hard-refresh and run the manual checks below. The harness covered the functional acceptance criteria automatically — these checks cover what the harness can't (real Firebase, two-user, visual layout).
+> **Already deployed.** Phase 5.3 was pushed at the end of this session. Hard-refresh https://metalbee66.github.io/financial-planner/ (Ctrl+Shift+R) and run the manual checks below. The harness covered the functional acceptance criteria automatically — these checks cover what the harness can't (real Firebase, two-user, visual layout).
 
 The Playwright suite (`npm run test:e2e`, 105 tests, ~8 min) covers the **functional** acceptance criteria for Phase 1.1, 1.2, 2.1, 2.2, 3.1–3.5, 4.1, 4.2, 4.3, **5.1**, **5.2**, and **5.3** plus a Phase 0 module-shell regression check, plus a `tests.html` driver that runs all 182 data-layer unit cases. Firebase is blocked at the network layer in tests so they run hermetically against localStorage.
 
