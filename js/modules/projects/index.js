@@ -69,6 +69,9 @@ import {
     findNextMilestone,
     sortProjectsForOverview,
     OVERVIEW_SORT_OPTIONS,
+    bucketTasksForUser,
+    defaultMyTasksUser,
+    collectMyTasksUserOptions,
     saveProjects,
 } from './data.js';
 
@@ -271,13 +274,42 @@ function render() {
     }
 }
 
-// ── List view ──
+// ── List view (sub-tabs: Overview / My Tasks) ──
 
 function renderList() {
+    const subtab = mode.listSubtab === 'mytasks' ? 'mytasks' : 'overview';
+    host.innerHTML = `
+        <div class="projects-subtabs" role="tablist" aria-label="Projects views">
+            <button type="button" class="projects-subtab${subtab === 'overview' ? ' active' : ''}"
+                role="tab" aria-selected="${subtab === 'overview'}" data-subtab="overview">Overview</button>
+            <button type="button" class="projects-subtab${subtab === 'mytasks' ? ' active' : ''}"
+                role="tab" aria-selected="${subtab === 'mytasks'}" data-subtab="mytasks">My Tasks</button>
+        </div>
+        <div class="projects-list-body" id="projects-list-body"></div>
+    `;
+    host.querySelectorAll('.projects-subtab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const v = btn.dataset.subtab;
+            if (v && v !== subtab) {
+                mode.listSubtab = v;
+                render();
+            }
+        });
+    });
+
+    const body = host.querySelector('#projects-list-body');
+    if (subtab === 'mytasks') {
+        renderMyTasksBody(body);
+    } else {
+        renderOverviewBody(body);
+    }
+}
+
+function renderOverviewBody(root) {
     const items = getProjects().filter(p => !p.archivedAt);
 
     if (items.length === 0) {
-        host.innerHTML = `
+        root.innerHTML = `
             <div class="projects-empty-state">
                 <div class="projects-empty-icon">📋</div>
                 <h2>No projects yet</h2>
@@ -285,7 +317,7 @@ function renderList() {
                 <button class="projects-new-btn" id="projects-new-btn">+ New Project</button>
             </div>
         `;
-        host.querySelector('#projects-new-btn').addEventListener('click', goCreate);
+        root.querySelector('#projects-new-btn').addEventListener('click', goCreate);
         return;
     }
 
@@ -293,7 +325,7 @@ function renderList() {
         ? mode.overviewSort
         : DEFAULT_OVERVIEW_SORT;
 
-    host.innerHTML = `
+    root.innerHTML = `
         <div class="projects-toolbar">
             <h2 class="projects-title">Projects</h2>
             <label class="overview-sort-field">
@@ -308,17 +340,131 @@ function renderList() {
         </div>
         <div class="projects-grid" id="projects-grid"></div>
     `;
-    host.querySelector('#projects-new-btn').addEventListener('click', goCreate);
-    host.querySelector('#overview-sort-by').addEventListener('change', (e) => {
+    root.querySelector('#projects-new-btn').addEventListener('click', goCreate);
+    root.querySelector('#overview-sort-by').addEventListener('change', (e) => {
         mode.overviewSort = e.target.value;
         render();
     });
 
-    const grid = host.querySelector('#projects-grid');
+    const grid = root.querySelector('#projects-grid');
     const allTasks = getTasks();
     const today = todayIso();
     sortProjectsForOverview(items, allTasks, { by: sortBy })
         .forEach(p => grid.appendChild(renderCard(p, allTasks, today)));
+}
+
+// ── My Tasks (Task 5.2): cross-project per-user summary ──
+
+const MYTASKS_BUCKETS = [
+    { key: 'overdue',   label: 'Overdue' },
+    { key: 'thisWeek',  label: 'Due this week' },
+    { key: 'upcoming',  label: 'Upcoming' },
+    { key: 'completed', label: 'Completed' },
+];
+
+function renderMyTasksBody(root) {
+    const allTasks = getTasks();
+    const allProjects = getProjects();
+    const userOptions = collectMyTasksUserOptions(allTasks);
+    const selectedUser = mode.myTasksUser
+        || defaultMyTasksUser(currentUserEmail());
+    if (!mode.myTasksUser) mode.myTasksUser = selectedUser;
+    const collapsed = mode.myTasksCollapsed || { completed: true };
+
+    const buckets = bucketTasksForUser(allTasks, selectedUser, todayIso());
+    const totalCount = buckets.overdue.length + buckets.thisWeek.length
+        + buckets.upcoming.length + buckets.completed.length;
+
+    root.innerHTML = `
+        <div class="projects-toolbar">
+            <h2 class="projects-title">My Tasks</h2>
+            <label class="mytasks-user-field">
+                <span class="overview-sort-label">User</span>
+                <select id="mytasks-user-select" aria-label="Filter tasks by assignee">
+                    ${userOptions.map(o =>
+                        `<option value="${escapeAttr(o.value)}"${o.value === selectedUser ? ' selected' : ''}>${escapeHtml(participantLabel(o.value))}</option>`
+                    ).join('')}
+                </select>
+            </label>
+        </div>
+        <div class="mytasks-sections" id="mytasks-sections"></div>
+    `;
+
+    root.querySelector('#mytasks-user-select').addEventListener('change', (e) => {
+        mode.myTasksUser = e.target.value;
+        render();
+    });
+
+    const sectionsHost = root.querySelector('#mytasks-sections');
+    if (totalCount === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'mytasks-empty';
+        empty.innerHTML = `<p>No tasks for ${escapeHtml(participantLabel(selectedUser))} yet.</p>`;
+        sectionsHost.appendChild(empty);
+    }
+
+    const projectsById = new Map(allProjects.map(p => [p.id, p]));
+    for (const b of MYTASKS_BUCKETS) {
+        const items = buckets[b.key] || [];
+        const isCollapsed = !!collapsed[b.key];
+        const section = document.createElement('section');
+        section.className = `mytasks-section${isCollapsed ? ' collapsed' : ''}`;
+        section.dataset.bucket = b.key;
+        section.innerHTML = `
+            <button type="button" class="mytasks-section-header" aria-expanded="${!isCollapsed}">
+                <span class="mytasks-section-toggle" aria-hidden="true">${isCollapsed ? '▸' : '▾'}</span>
+                <span class="mytasks-section-label">${escapeHtml(b.label)}</span>
+                <span class="mytasks-section-count">${items.length}</span>
+            </button>
+            <div class="mytasks-section-body"></div>
+        `;
+        const header = section.querySelector('.mytasks-section-header');
+        header.addEventListener('click', () => {
+            const next = { ...(mode.myTasksCollapsed || { completed: true }) };
+            next[b.key] = !isCollapsed;
+            mode.myTasksCollapsed = next;
+            render();
+        });
+        const body = section.querySelector('.mytasks-section-body');
+        if (items.length === 0) {
+            const noneEl = document.createElement('div');
+            noneEl.className = 'mytasks-section-empty';
+            noneEl.textContent = 'Nothing here.';
+            body.appendChild(noneEl);
+        } else {
+            for (const t of items) {
+                body.appendChild(renderMyTasksRow(t, projectsById.get(t.projectId)));
+            }
+        }
+        sectionsHost.appendChild(section);
+    }
+}
+
+function renderMyTasksRow(task, project) {
+    const row = document.createElement('div');
+    row.className = `mytasks-task-row${task.status === 'done' ? ' mytasks-task-row-done' : ''}`;
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', `Open task ${task.name}`);
+    const due = task.dueDate ? formatDate(task.dueDate) : '';
+    const statusLabel = TASK_STATUS_LABELS[task.status] || task.status;
+    const milestone = task.isMilestone
+        ? '<span class="mytasks-task-milestone" aria-label="Milestone">◆</span>'
+        : '';
+    row.innerHTML = `
+        <span class="mytasks-task-project" title="${escapeAttr(project ? project.name : '')}">${escapeHtml(project ? project.name : '—')}</span>
+        <span class="mytasks-task-name">${milestone}${escapeHtml(task.name)}</span>
+        <span class="mytasks-task-due">${escapeHtml(due)}</span>
+        <span class="mytasks-task-status status-badge status-${task.status}">${escapeHtml(statusLabel)}</span>
+    `;
+    row.addEventListener('click', () => openTaskPanel(task.id));
+    row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openTaskPanel(task.id);
+        }
+    });
+    return row;
 }
 
 function renderCard(p, allTasks, today) {
@@ -1135,6 +1281,9 @@ function freshListMode() {
         detailProjectId: null,
         detailView: DEFAULT_DETAIL_VIEW,
         overviewSort: DEFAULT_OVERVIEW_SORT,
+        listSubtab: 'overview',
+        myTasksUser: null,
+        myTasksCollapsed: { completed: true },
         taskFilters: {},
         taskSort: { ...DEFAULT_TASK_SORT },
         taskGroup: DEFAULT_TASK_GROUP,
@@ -1145,11 +1294,14 @@ function freshListMode() {
 }
 
 function goList() {
-    // Preserve the overview sort across navigation back to the list so the
-    // user's chosen ordering survives clicking into a project and back.
-    const prevSort = mode && mode.overviewSort;
+    // Preserve list-level UI state across navigation back from a project so
+    // the user's chosen sort / sub-tab / per-user filter survives a round-trip.
+    const prev = mode || {};
     mode = freshListMode();
-    if (prevSort) mode.overviewSort = prevSort;
+    if (prev.overviewSort) mode.overviewSort = prev.overviewSort;
+    if (prev.listSubtab) mode.listSubtab = prev.listSubtab;
+    if (prev.myTasksUser) mode.myTasksUser = prev.myTasksUser;
+    if (prev.myTasksCollapsed) mode.myTasksCollapsed = prev.myTasksCollapsed;
     closeTaskPanel();
     render();
 }

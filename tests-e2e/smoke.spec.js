@@ -1546,6 +1546,144 @@ test.describe('Phase 5.1 — Overview tab (cross-project cards)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 5.2 — My Tasks (per-user summary tab)', () => {
+
+    /**
+     * Helper: open a task panel from the detail view, set its assignee + due
+     * date, and save. Used to seed the My Tasks view from a fresh project.
+     */
+    async function setTaskAssigneeDue(page, taskName, { assignee, dueDate, status } = {}) {
+        await page.locator('.task-row-name', { hasText: taskName }).click();
+        if (assignee !== undefined) {
+            await page.locator('#tp-assignee').selectOption(assignee || '');
+        }
+        if (dueDate !== undefined) {
+            await page.locator('#tp-due').fill(dueDate || '');
+        }
+        if (status !== undefined) {
+            await page.locator('#tp-status').selectOption(status);
+        }
+        await page.locator('#tp-save').click();
+    }
+
+    async function gotoMyTasks(page) {
+        await page.locator('.projects-subtab[data-subtab="mytasks"]').click();
+        await expect(page.locator('.mytasks-section')).toHaveCount(4);
+    }
+
+    test('My Tasks sub-tab is reachable from the projects list', async ({ page }) => {
+        // No projects yet — sub-tab should still be present
+        await expect(page.locator('.projects-subtab[data-subtab="overview"]')).toBeVisible();
+        await expect(page.locator('.projects-subtab[data-subtab="mytasks"]')).toBeVisible();
+        await page.locator('.projects-subtab[data-subtab="mytasks"]').click();
+        await expect(page.locator('.mytasks-section')).toHaveCount(4);
+    });
+
+    test('defaults to brad when no Firebase user is signed in', async ({ page }) => {
+        await page.locator('.projects-subtab[data-subtab="mytasks"]').click();
+        await expect(page.locator('#mytasks-user-select')).toHaveValue('brad');
+    });
+
+    test('user selector switches the visible task set', async ({ page }) => {
+        await createProject(page, { name: 'Cross-user' });
+        // One task each for brad and diana, both due far in the future
+        await page.locator('#task-add-name').fill('Brad-task');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Brad-task', { assignee: 'brad', dueDate: '2099-01-15' });
+        await page.locator('#task-add-name').fill('Diana-task');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Diana-task', { assignee: 'diana', dueDate: '2099-01-15' });
+        await backToList(page);
+
+        await gotoMyTasks(page);
+        // Brad sees only their task
+        await expect(page.locator('.mytasks-task-row', { hasText: 'Brad-task' })).toHaveCount(1);
+        await expect(page.locator('.mytasks-task-row', { hasText: 'Diana-task' })).toHaveCount(0);
+        // Switch to Diana
+        await page.locator('#mytasks-user-select').selectOption('diana');
+        await expect(page.locator('.mytasks-task-row', { hasText: 'Diana-task' })).toHaveCount(1);
+        await expect(page.locator('.mytasks-task-row', { hasText: 'Brad-task' })).toHaveCount(0);
+    });
+
+    test('sections bucket tasks by date relative to today', async ({ page }) => {
+        await createProject(page, { name: 'Bucketing' });
+        // Past-due → overdue
+        await page.locator('#task-add-name').fill('Late');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Late', { assignee: 'brad', dueDate: '2024-01-01' });
+        // Far-future → upcoming
+        await page.locator('#task-add-name').fill('Future');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Future', { assignee: 'brad', dueDate: '2099-01-15' });
+        // Done → completed
+        await page.locator('#task-add-name').fill('Finished');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Finished', { assignee: 'brad', status: 'done' });
+        await backToList(page);
+
+        await gotoMyTasks(page);
+        const overdue = page.locator('.mytasks-section[data-bucket="overdue"]');
+        const upcoming = page.locator('.mytasks-section[data-bucket="upcoming"]');
+        const completed = page.locator('.mytasks-section[data-bucket="completed"]');
+        await expect(overdue.locator('.mytasks-task-row', { hasText: 'Late' })).toHaveCount(1);
+        await expect(upcoming.locator('.mytasks-task-row', { hasText: 'Future' })).toHaveCount(1);
+        await expect(completed.locator('.mytasks-task-row', { hasText: 'Finished' })).toHaveCount(1);
+    });
+
+    test('completed section is collapsed by default and can be toggled open', async ({ page }) => {
+        await createProject(page, { name: 'Toggle' });
+        await page.locator('#task-add-name').fill('Done-task');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Done-task', { assignee: 'brad', status: 'done' });
+        await backToList(page);
+
+        await gotoMyTasks(page);
+        const completed = page.locator('.mytasks-section[data-bucket="completed"]');
+        // Collapsed: completed task is not visible
+        await expect(completed.locator('.mytasks-task-row', { hasText: 'Done-task' })).not.toBeVisible();
+        // Toggle open
+        await completed.locator('.mytasks-section-header').click();
+        await expect(completed.locator('.mytasks-task-row', { hasText: 'Done-task' })).toBeVisible();
+    });
+
+    test('clicking a My Tasks row opens the task detail panel (cross-project nav)', async ({ page }) => {
+        await createProject(page, { name: 'Source proj' });
+        await page.locator('#task-add-name').fill('Click me');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Click me', { assignee: 'brad', dueDate: '2099-01-15' });
+        await backToList(page);
+
+        await gotoMyTasks(page);
+        await page.locator('.mytasks-task-row', { hasText: 'Click me' }).click();
+        // The shared task panel should open with the task name pre-filled
+        await expect(page.locator('#task-panel')).toBeVisible();
+        await expect(page.locator('#tp-name')).toHaveValue('Click me');
+    });
+
+    test('each row shows the project name so the user knows where the task lives', async ({ page }) => {
+        await createProject(page, { name: 'Origin proj' });
+        await page.locator('#task-add-name').fill('Wandering task');
+        await page.locator('#task-add-name').press('Enter');
+        await setTaskAssigneeDue(page, 'Wandering task', { assignee: 'brad', dueDate: '2099-01-15' });
+        await backToList(page);
+
+        await gotoMyTasks(page);
+        const row = page.locator('.mytasks-task-row', { hasText: 'Wandering task' });
+        await expect(row.locator('.mytasks-task-project')).toHaveText('Origin proj');
+    });
+
+    test('empty state when the selected user has no tasks anywhere', async ({ page }) => {
+        await createProject(page, { name: 'No-assignee proj' });
+        await page.locator('#task-add-name').fill('Unassigned');
+        await page.locator('#task-add-name').press('Enter');
+        await backToList(page);
+
+        await gotoMyTasks(page);
+        await expect(page.locator('.mytasks-empty')).toBeVisible();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

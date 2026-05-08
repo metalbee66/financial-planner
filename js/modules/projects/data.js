@@ -968,6 +968,114 @@ export function sortProjectsForOverview(projects, tasks, opts) {
     return projects.slice().sort(cmp);
 }
 
+// ── My Tasks per-user summary helpers (Task 5.2) ──
+
+/**
+ * Maps a Firebase auth email to the corresponding `assignee` key used in tasks.
+ * Falls back to 'brad' for empty / unknown emails so the My Tasks view always
+ * has a sensible default user even before Google sign-in has resolved.
+ */
+const EMAIL_TO_USER = {
+    'metalbee66@gmail.com': 'brad',
+    'dianaleshcheva@gmail.com': 'diana',
+};
+export function defaultMyTasksUser(email) {
+    if (email && EMAIL_TO_USER[email]) return EMAIL_TO_USER[email];
+    return 'brad';
+}
+
+/**
+ * Selectable users for the My Tasks view: brad and diana always come first
+ * (in canonical order), then any external assignees seen in the task list,
+ * sorted alphabetically and deduped.
+ */
+export function collectMyTasksUserOptions(tasks) {
+    const builtIn = DEFAULT_PARTICIPANTS.slice();
+    const seen = new Set(builtIn);
+    const externals = [];
+    for (const t of (tasks || [])) {
+        const a = t && t.assignee;
+        if (!a) continue;
+        if (seen.has(a)) continue;
+        seen.add(a);
+        externals.push(a);
+    }
+    externals.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    return builtIn.concat(externals).map(v => ({ value: v, label: v }));
+}
+
+/**
+ * Bucket a user's tasks into overdue / thisWeek / upcoming / completed,
+ * relative to `todayIso` (YYYY-MM-DD).
+ *
+ *   - overdue:   not done AND dueDate < today
+ *   - thisWeek:  not done AND today <= dueDate <= today + 6 days
+ *   - upcoming:  not done AND (no dueDate OR dueDate > today + 6 days)
+ *   - completed: status === 'done'
+ *
+ * Sort within bucket: overdue + thisWeek + upcoming all asc by dueDate
+ * (undated tasks last in upcoming); completed by completedAt desc with
+ * updatedAt as a fallback.
+ */
+export function bucketTasksForUser(tasks, userId, todayIso) {
+    const empty = { overdue: [], thisWeek: [], upcoming: [], completed: [] };
+    if (!Array.isArray(tasks) || tasks.length === 0) return empty;
+    const mine = tasks.filter(t => t && t.assignee === userId);
+    if (mine.length === 0) return empty;
+
+    const weekEnd = todayIso ? addDaysIso(todayIso, 6) : null;
+    const overdue = [];
+    const thisWeek = [];
+    const upcoming = [];
+    const completed = [];
+
+    for (const t of mine) {
+        if (t.status === 'done') {
+            completed.push(t);
+        } else if (!t.dueDate) {
+            upcoming.push(t);
+        } else if (todayIso && t.dueDate < todayIso) {
+            overdue.push(t);
+        } else if (todayIso && weekEnd && t.dueDate <= weekEnd) {
+            thisWeek.push(t);
+        } else {
+            upcoming.push(t);
+        }
+    }
+
+    const byDueAsc = (a, b) => (a.dueDate || '').localeCompare(b.dueDate || '');
+    const upcomingCmp = (a, b) => {
+        const aMissing = !a.dueDate, bMissing = !b.dueDate;
+        if (aMissing && !bMissing) return 1;
+        if (!aMissing && bMissing) return -1;
+        return byDueAsc(a, b);
+    };
+    const completedCmp = (a, b) => {
+        const ak = a.completedAt || a.updatedAt || '';
+        const bk = b.completedAt || b.updatedAt || '';
+        return bk.localeCompare(ak);
+    };
+
+    overdue.sort(byDueAsc);
+    thisWeek.sort(byDueAsc);
+    upcoming.sort(upcomingCmp);
+    completed.sort(completedCmp);
+    return { overdue, thisWeek, upcoming, completed };
+}
+
+/** YYYY-MM-DD + n days → YYYY-MM-DD. Tolerates malformed input by returning the original. */
+function addDaysIso(iso, n) {
+    if (!iso || typeof iso !== 'string') return iso;
+    const [y, m, d] = iso.split('-').map(Number);
+    if (!y || !m || !d) return iso;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    const yy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+}
+
 // ── Persistence ──
 
 export function loadProjects() {

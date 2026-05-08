@@ -2479,3 +2479,160 @@ select.editable { width: 100px; cursor: pointer; }
     .cal-pill { font-size: 0.68rem; padding: 1px 4px; }
     .cal-day-popover { right: 8px; left: 8px; width: auto; }
 }
+
+/* ── Projects list sub-tabs + My Tasks (Task 5.2) ── */
+.projects-subtabs {
+    display: flex;
+    gap: 4px;
+    margin: 0 0 12px;
+    border-bottom: 1px solid var(--border);
+}
+.projects-subtab {
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.9rem;
+    transform: translateY(1px);
+}
+.projects-subtab:hover { background: var(--surface); color: var(--text); }
+.projects-subtab.active {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--accent);
+    border-bottom-color: var(--surface);
+}
+
+.mytasks-user-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+}
+.mytasks-user-field select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font: inherit;
+    font-size: 0.85rem;
+}
+.mytasks-user-field select:focus { border-color: var(--accent); outline: none; }
+
+.mytasks-sections { display: flex; flex-direction: column; gap: 10px; }
+.mytasks-empty {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-dim);
+}
+
+.mytasks-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.mytasks-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    padding: 10px 14px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.92rem;
+    text-align: left;
+}
+.mytasks-section-header:hover { color: var(--accent); }
+.mytasks-section-toggle { font-size: 0.75rem; color: var(--text-dim); width: 12px; }
+.mytasks-section-label { flex: 1; font-weight: 500; }
+.mytasks-section-count {
+    background: rgba(0,176,240,0.14);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.74rem;
+}
+.mytasks-section[data-bucket="overdue"] .mytasks-section-count {
+    background: rgba(255,82,82,0.14);
+    color: var(--red);
+}
+.mytasks-section.collapsed .mytasks-section-body { display: none; }
+.mytasks-section-body {
+    border-top: 1px solid var(--border);
+    padding: 4px 0;
+}
+.mytasks-section-empty {
+    color: var(--text-dim);
+    font-style: italic;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+}
+
+.mytasks-task-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.8fr) 2fr auto auto;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+    transition: background 0.1s;
+}
+.mytasks-task-row:hover { background: rgba(0,176,240,0.06); }
+.mytasks-task-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.mytasks-task-row + .mytasks-task-row { border-top-color: var(--border); }
+.mytasks-task-row-done { opacity: 0.6; }
+.mytasks-task-row-done .mytasks-task-name { text-decoration: line-through; }
+.mytasks-task-project {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mytasks-task-name {
+    color: var(--text);
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mytasks-task-milestone {
+    color: var(--accent);
+    margin-right: 4px;
+}
+.mytasks-task-due {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-family: var(--mono);
+}
+.mytasks-task-status { font-size: 0.7rem; }
+
+@media (max-width: 600px) {
+    .mytasks-task-row {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "name status"
+            "project due";
+        row-gap: 4px;
+    }
+    .mytasks-task-name { grid-area: name; }
+    .mytasks-task-status { grid-area: status; }
+    .mytasks-task-project { grid-area: project; }
+    .mytasks-task-due { grid-area: due; text-align: right; }
+}

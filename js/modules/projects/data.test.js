@@ -63,6 +63,9 @@ import {
     findNextMilestone,
     sortProjectsForOverview,
     OVERVIEW_SORT_OPTIONS,
+    bucketTasksForUser,
+    defaultMyTasksUser,
+    collectMyTasksUserOptions,
 } from './data.js';
 
 const tests = [];
@@ -1528,6 +1531,108 @@ test('sortProjectsForOverview does not mutate the input list', () => {
 
 test('sortProjectsForOverview empty list returns empty', () => {
     eq(sortProjectsForOverview([], [], { by: 'status' }), []);
+});
+
+// ── My Tasks per-user summary (Task 5.2) ──
+
+test('bucketTasksForUser only includes tasks assigned to the requested user', () => {
+    const tasks = [
+        mkTask({ id: 't1', assignee: 'brad', dueDate: '2026-05-10', status: 'in-progress' }),
+        mkTask({ id: 't2', assignee: 'diana', dueDate: '2026-05-10', status: 'in-progress' }),
+        mkTask({ id: 't3', assignee: null, dueDate: '2026-05-10', status: 'in-progress' }),
+    ];
+    const out = bucketTasksForUser(tasks, 'brad', '2026-05-08');
+    eq(out.thisWeek.map(t => t.id), ['t1']);
+    eq(out.overdue, []);
+    eq(out.upcoming, []);
+    eq(out.completed, []);
+});
+
+test('bucketTasksForUser overdue = dueDate < today, not done', () => {
+    const tasks = [
+        mkTask({ id: 'a', assignee: 'brad', dueDate: '2026-04-01', status: 'in-progress' }),
+        mkTask({ id: 'b', assignee: 'brad', dueDate: '2026-04-15', status: 'not-started' }),
+        mkTask({ id: 'c', assignee: 'brad', dueDate: '2026-04-15', status: 'done' }),  // done → excluded from overdue
+        mkTask({ id: 'd', assignee: 'brad', dueDate: '2026-05-08', status: 'in-progress' }),  // today → not overdue
+    ];
+    const out = bucketTasksForUser(tasks, 'brad', '2026-05-08');
+    // Overdue sorted by dueDate asc (oldest first)
+    eq(out.overdue.map(t => t.id), ['a', 'b']);
+});
+
+test('bucketTasksForUser thisWeek = dueDate today through today+6, not done', () => {
+    const tasks = [
+        mkTask({ id: 'today', assignee: 'brad', dueDate: '2026-05-08', status: 'in-progress' }),
+        mkTask({ id: 'in3',   assignee: 'brad', dueDate: '2026-05-11', status: 'not-started' }),
+        mkTask({ id: 'edge',  assignee: 'brad', dueDate: '2026-05-14', status: 'in-progress' }), // today+6 → in-window
+        mkTask({ id: 'past6', assignee: 'brad', dueDate: '2026-05-15', status: 'in-progress' }), // today+7 → upcoming
+    ];
+    const out = bucketTasksForUser(tasks, 'brad', '2026-05-08');
+    eq(out.thisWeek.map(t => t.id), ['today', 'in3', 'edge']);
+    eq(out.upcoming.map(t => t.id), ['past6']);
+});
+
+test('bucketTasksForUser upcoming includes tasks with no dueDate', () => {
+    const tasks = [
+        mkTask({ id: 'undated', assignee: 'brad', dueDate: null, status: 'in-progress' }),
+        mkTask({ id: 'far', assignee: 'brad', dueDate: '2026-12-01', status: 'not-started' }),
+    ];
+    const out = bucketTasksForUser(tasks, 'brad', '2026-05-08');
+    // Dated upcoming first by dueDate asc, undated last
+    eq(out.upcoming.map(t => t.id), ['far', 'undated']);
+});
+
+test('bucketTasksForUser completed = status done, sorted by completedAt desc', () => {
+    const tasks = [
+        mkTask({ id: 'c1', assignee: 'brad', status: 'done', completedAt: '2026-05-01T10:00:00.000Z' }),
+        mkTask({ id: 'c2', assignee: 'brad', status: 'done', completedAt: '2026-05-05T10:00:00.000Z' }),
+        mkTask({ id: 'c3', assignee: 'brad', status: 'done', completedAt: null, updatedAt: '2026-05-03T10:00:00.000Z' }),
+    ];
+    const out = bucketTasksForUser(tasks, 'brad', '2026-05-08');
+    eq(out.completed.map(t => t.id), ['c2', 'c3', 'c1']);
+});
+
+test('bucketTasksForUser empty list returns empty buckets', () => {
+    const out = bucketTasksForUser([], 'brad', '2026-05-08');
+    eq(out, { overdue: [], thisWeek: [], upcoming: [], completed: [] });
+});
+
+test('bucketTasksForUser ignores blocked status the same as any non-done', () => {
+    // "blocked" still belongs in overdue/thisWeek/upcoming based on date — only "done" goes to completed.
+    const tasks = [
+        mkTask({ id: 'blk', assignee: 'brad', dueDate: '2026-04-01', status: 'blocked' }),
+    ];
+    const out = bucketTasksForUser(tasks, 'brad', '2026-05-08');
+    eq(out.overdue.map(t => t.id), ['blk']);
+});
+
+test('defaultMyTasksUser maps known emails to brad/diana', () => {
+    eq(defaultMyTasksUser('metalbee66@gmail.com'), 'brad');
+    eq(defaultMyTasksUser('dianaleshcheva@gmail.com'), 'diana');
+});
+
+test('defaultMyTasksUser falls back to brad for unknown / empty emails', () => {
+    eq(defaultMyTasksUser(''), 'brad');
+    eq(defaultMyTasksUser(null), 'brad');
+    eq(defaultMyTasksUser('someone-else@example.com'), 'brad');
+});
+
+test('collectMyTasksUserOptions always includes brad and diana, in canonical order', () => {
+    const opts = collectMyTasksUserOptions([]);
+    eq(opts.map(o => o.value).slice(0, 2), ['brad', 'diana']);
+});
+
+test('collectMyTasksUserOptions adds external assignees alphabetically after brad/diana, dedup, ignoring null', () => {
+    const tasks = [
+        mkTask({ assignee: 'brad' }),
+        mkTask({ assignee: 'zoe' }),
+        mkTask({ assignee: 'alex' }),
+        mkTask({ assignee: 'zoe' }),  // dup
+        mkTask({ assignee: null }),   // skip
+        mkTask({ assignee: '' }),     // skip
+    ];
+    const opts = collectMyTasksUserOptions(tasks);
+    eq(opts.map(o => o.value), ['brad', 'diana', 'alex', 'zoe']);
 });
 
 // ── runner ──
