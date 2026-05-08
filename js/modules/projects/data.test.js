@@ -66,6 +66,9 @@ import {
     bucketTasksForUser,
     defaultMyTasksUser,
     collectMyTasksUserOptions,
+    computeDashboardMetrics,
+    computeWeeklyCompletionBars,
+    DASHBOARD_WEEKS,
 } from './data.js';
 
 const tests = [];
@@ -1633,6 +1636,165 @@ test('collectMyTasksUserOptions adds external assignees alphabetically after bra
     ];
     const opts = collectMyTasksUserOptions(tasks);
     eq(opts.map(o => o.value), ['brad', 'diana', 'alex', 'zoe']);
+});
+
+// ── Dashboard cross-project metrics (Task 5.3) ──
+
+test('computeDashboardMetrics returns zeros for empty inputs', () => {
+    const m = computeDashboardMetrics([], [], '2026-05-08');
+    eq(m.activeProjects, 0);
+    eq(m.openTasks, 0);
+    eq(m.overdueTasks, 0);
+    eq(m.dueThisWeek, 0);
+    eq(m.completedLast30Days, 0);
+    eq(m.upcomingMilestones, 0);
+});
+
+test('computeDashboardMetrics activeProjects counts only status active and not archived', () => {
+    const projects = [
+        mkProject({ id: 'p1', status: 'active' }),
+        mkProject({ id: 'p2', status: 'active', archivedAt: '2026-04-01T00:00:00.000Z' }),  // archived → excluded
+        mkProject({ id: 'p3', status: 'planning' }),    // planning → excluded
+        mkProject({ id: 'p4', status: 'on-hold' }),     // on-hold → excluded
+        mkProject({ id: 'p5', status: 'completed' }),   // completed → excluded
+        mkProject({ id: 'p6', status: 'cancelled' }),   // cancelled → excluded
+        mkProject({ id: 'p7', status: 'active' }),
+    ];
+    const m = computeDashboardMetrics(projects, [], '2026-05-08');
+    eq(m.activeProjects, 2);
+});
+
+test('computeDashboardMetrics openTasks counts non-done tasks across all projects', () => {
+    const tasks = [
+        mkTask({ projectId: 'p1', status: 'in-progress' }),
+        mkTask({ projectId: 'p1', status: 'not-started' }),
+        mkTask({ projectId: 'p1', status: 'done' }),     // excluded
+        mkTask({ projectId: 'p2', status: 'review' }),
+        mkTask({ projectId: 'p2', status: 'blocked' }),
+        mkTask({ projectId: 'p2', status: 'done' }),     // excluded
+    ];
+    const m = computeDashboardMetrics([], tasks, '2026-05-08');
+    eq(m.openTasks, 4);
+});
+
+test('computeDashboardMetrics overdueTasks: dueDate < today, not done, undated excluded, today not overdue', () => {
+    const tasks = [
+        mkTask({ id: 'a', dueDate: '2026-04-01', status: 'in-progress' }),
+        mkTask({ id: 'b', dueDate: '2026-05-07', status: 'not-started' }),
+        mkTask({ id: 'c', dueDate: '2026-05-08', status: 'in-progress' }),  // today → not overdue
+        mkTask({ id: 'd', dueDate: '2026-05-01', status: 'done' }),         // done → excluded
+        mkTask({ id: 'e', dueDate: null, status: 'in-progress' }),          // undated → excluded
+    ];
+    const m = computeDashboardMetrics([], tasks, '2026-05-08');
+    eq(m.overdueTasks, 2);
+});
+
+test('computeDashboardMetrics dueThisWeek: today through today+6 inclusive, not done', () => {
+    const tasks = [
+        mkTask({ id: 'today',  dueDate: '2026-05-08', status: 'in-progress' }),
+        mkTask({ id: 'in6',    dueDate: '2026-05-14', status: 'not-started' }),  // today+6 → in window
+        mkTask({ id: 'in7',    dueDate: '2026-05-15', status: 'in-progress' }),  // today+7 → out
+        mkTask({ id: 'past',   dueDate: '2026-05-01', status: 'in-progress' }),  // past → out
+        mkTask({ id: 'tdone',  dueDate: '2026-05-10', status: 'done' }),         // done → out
+    ];
+    const m = computeDashboardMetrics([], tasks, '2026-05-08');
+    eq(m.dueThisWeek, 2);
+});
+
+test('computeDashboardMetrics completedLast30Days: status done with completedAt within 30 days inclusive', () => {
+    const tasks = [
+        mkTask({ id: 'a', status: 'done', completedAt: '2026-05-08T10:00:00.000Z' }),  // today → in
+        mkTask({ id: 'b', status: 'done', completedAt: '2026-04-08T10:00:00.000Z' }),  // today-30 → in (inclusive)
+        mkTask({ id: 'c', status: 'done', completedAt: '2026-04-07T10:00:00.000Z' }),  // today-31 → out
+        mkTask({ id: 'd', status: 'done', completedAt: null }),                         // null → out
+        mkTask({ id: 'e', status: 'in-progress', completedAt: '2026-05-08T10:00:00.000Z' }),  // not done → out
+    ];
+    const m = computeDashboardMetrics([], tasks, '2026-05-08');
+    eq(m.completedLast30Days, 2);
+});
+
+test('computeDashboardMetrics upcomingMilestones: milestones not done with dueDate today through today+13', () => {
+    const tasks = [
+        mkTask({ id: 'a', isMilestone: true,  status: 'in-progress', dueDate: '2026-05-08' }),  // today → in
+        mkTask({ id: 'b', isMilestone: true,  status: 'not-started', dueDate: '2026-05-21' }),  // today+13 → in
+        mkTask({ id: 'c', isMilestone: true,  status: 'in-progress', dueDate: '2026-05-22' }),  // today+14 → out
+        mkTask({ id: 'd', isMilestone: true,  status: 'in-progress', dueDate: '2026-05-01' }),  // past → out (overdue, not upcoming)
+        mkTask({ id: 'e', isMilestone: true,  status: 'done',        dueDate: '2026-05-10' }),  // done → out
+        mkTask({ id: 'f', isMilestone: false, status: 'in-progress', dueDate: '2026-05-10' }),  // not milestone → out
+        mkTask({ id: 'g', isMilestone: true,  status: 'in-progress', dueDate: null }),          // undated → out
+    ];
+    const m = computeDashboardMetrics([], tasks, '2026-05-08');
+    eq(m.upcomingMilestones, 2);
+});
+
+test('computeDashboardMetrics tolerates null/undefined inputs without throwing', () => {
+    const m = computeDashboardMetrics(null, null, '2026-05-08');
+    eq(m.activeProjects, 0);
+    eq(m.openTasks, 0);
+});
+
+test('DASHBOARD_WEEKS exposes the default chart window', () => {
+    eq(DASHBOARD_WEEKS, 8);
+});
+
+test('computeWeeklyCompletionBars returns 8 buckets in chronological order (oldest first)', () => {
+    const bars = computeWeeklyCompletionBars([], '2026-05-08');
+    eq(bars.length, 8);
+    // oldest bucket first
+    truthy(bars[0].startIso < bars[7].startIso, 'bars sorted oldest → newest');
+    // Newest bucket ends today
+    eq(bars[7].endIso, '2026-05-08');
+    // Newest bucket starts today-6
+    eq(bars[7].startIso, '2026-05-02');
+    // Oldest bucket starts today - 7*8 + 1 = today-55
+    eq(bars[0].startIso, '2026-03-14');
+    eq(bars[0].endIso, '2026-03-20');
+});
+
+test('computeWeeklyCompletionBars empty input gives all-zero bars', () => {
+    const bars = computeWeeklyCompletionBars([], '2026-05-08');
+    eq(bars.every(b => b.completed === 0), true);
+});
+
+test('computeWeeklyCompletionBars counts tasks done with completedAt date in bucket', () => {
+    const tasks = [
+        mkTask({ id: 'today',  status: 'done', completedAt: '2026-05-08T10:00:00.000Z' }),  // newest bucket
+        mkTask({ id: 'd6ago',  status: 'done', completedAt: '2026-05-02T10:00:00.000Z' }),  // newest bucket (today-6)
+        mkTask({ id: 'd7ago',  status: 'done', completedAt: '2026-05-01T10:00:00.000Z' }),  // 2nd-newest bucket
+        mkTask({ id: 'd14ago', status: 'done', completedAt: '2026-04-24T10:00:00.000Z' }),  // 3rd-newest
+        mkTask({ id: 'open',   status: 'in-progress', completedAt: null }),                  // ignored
+        mkTask({ id: 'noDate', status: 'done', completedAt: null }),                          // ignored
+    ];
+    const bars = computeWeeklyCompletionBars(tasks, '2026-05-08');
+    eq(bars[7].completed, 2);  // newest
+    eq(bars[6].completed, 1);  // 2nd-newest
+    eq(bars[5].completed, 1);  // 3rd-newest
+    eq(bars[4].completed, 0);
+    eq(bars[0].completed, 0);
+});
+
+test('computeWeeklyCompletionBars ignores tasks completed before the chart window', () => {
+    const tasks = [
+        mkTask({ id: 'old', status: 'done', completedAt: '2026-01-01T10:00:00.000Z' }),
+    ];
+    const bars = computeWeeklyCompletionBars(tasks, '2026-05-08');
+    eq(bars.every(b => b.completed === 0), true);
+});
+
+test('computeWeeklyCompletionBars supports a custom week count', () => {
+    const bars = computeWeeklyCompletionBars([], '2026-05-08', 4);
+    eq(bars.length, 4);
+    eq(bars[3].endIso, '2026-05-08');
+    // Oldest bucket starts today - (7*4 - 1) = today - 27 days = 2026-04-11
+    eq(bars[0].startIso, '2026-04-11');
+});
+
+test('computeWeeklyCompletionBars boundary: completedAt at start-of-bucket is included', () => {
+    const tasks = [
+        mkTask({ id: 'edge', status: 'done', completedAt: '2026-05-02T00:00:00.000Z' }),
+    ];
+    const bars = computeWeeklyCompletionBars(tasks, '2026-05-08');
+    eq(bars[7].completed, 1);
 });
 
 // ── runner ──

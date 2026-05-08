@@ -1063,6 +1063,125 @@ export function bucketTasksForUser(tasks, userId, todayIso) {
     return { overdue, thisWeek, upcoming, completed };
 }
 
+// ── Dashboard cross-project metrics (Task 5.3) ──
+
+export const DASHBOARD_WEEKS = 8;
+
+/**
+ * Single sweep over projects + tasks producing the six headline numbers shown
+ * on the Dashboard tab. `todayIso` is YYYY-MM-DD; date comparisons stay in
+ * lexicographic ISO so we never cross UTC/local timezone boundaries.
+ *
+ *   - activeProjects:       status === 'active' AND not archived
+ *   - openTasks:            status !== 'done'
+ *   - overdueTasks:         status !== 'done' AND dueDate < today
+ *   - dueThisWeek:          status !== 'done' AND today <= dueDate <= today+6
+ *   - completedLast30Days:  status === 'done' AND completedAt within last 30 days inclusive
+ *   - upcomingMilestones:   isMilestone AND status !== 'done' AND today <= dueDate <= today+13
+ */
+export function computeDashboardMetrics(projects, tasks, todayIso) {
+    const out = {
+        activeProjects: 0,
+        openTasks: 0,
+        overdueTasks: 0,
+        dueThisWeek: 0,
+        completedLast30Days: 0,
+        upcomingMilestones: 0,
+    };
+
+    const projectList = Array.isArray(projects) ? projects : [];
+    for (const p of projectList) {
+        if (p && p.status === 'active' && !p.archivedAt) out.activeProjects++;
+    }
+
+    const taskList = Array.isArray(tasks) ? tasks : [];
+    if (taskList.length === 0) return out;
+
+    const today = todayIso || null;
+    const weekEnd = today ? addDaysIso(today, 6) : null;
+    const milestoneEnd = today ? addDaysIso(today, 13) : null;
+    const thirtyDaysAgo = today ? addDaysIso(today, -30) : null;
+
+    for (const t of taskList) {
+        if (!t) continue;
+        const isDone = t.status === 'done';
+        if (!isDone) {
+            out.openTasks++;
+            if (t.dueDate && today) {
+                if (t.dueDate < today) out.overdueTasks++;
+                else if (t.dueDate <= weekEnd) out.dueThisWeek++;
+            }
+            if (t.isMilestone && t.dueDate && today
+                && t.dueDate >= today && t.dueDate <= milestoneEnd) {
+                out.upcomingMilestones++;
+            }
+        } else if (t.completedAt && today && thirtyDaysAgo) {
+            const completedDate = isoDatePart(t.completedAt);
+            if (completedDate && completedDate >= thirtyDaysAgo && completedDate <= today) {
+                out.completedLast30Days++;
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * Per-week task completion counts for the last `weeks` rolling 7-day windows
+ * ending at `todayIso` (inclusive). Returned oldest → newest so the SVG bar
+ * chart reads left to right chronologically. Each bucket is `[startIso, endIso]`
+ * inclusive of both endpoints.
+ *
+ * A task counts toward exactly one bucket: the one whose range contains its
+ * `completedAt` date portion. Tasks without `completedAt`, not-done tasks, and
+ * tasks completed before the chart window are skipped.
+ */
+export function computeWeeklyCompletionBars(tasks, todayIso, weeks = DASHBOARD_WEEKS) {
+    const n = Number.isInteger(weeks) && weeks > 0 ? weeks : DASHBOARD_WEEKS;
+    const bars = [];
+    if (!todayIso) {
+        for (let i = 0; i < n; i++) bars.push({ startIso: '', endIso: '', completed: 0 });
+        return bars;
+    }
+    // Build oldest → newest. Newest bucket: [today-6, today]. Each older bucket
+    // shifts back 7 days.
+    for (let i = n - 1; i >= 0; i--) {
+        const endIso = addDaysIso(todayIso, -7 * i);
+        const startIso = addDaysIso(endIso, -6);
+        bars.push({ startIso, endIso, completed: 0 });
+    }
+    if (!Array.isArray(tasks) || tasks.length === 0) return bars;
+
+    const windowStart = bars[0].startIso;
+    const windowEnd = bars[bars.length - 1].endIso;
+    for (const t of tasks) {
+        if (!t || t.status !== 'done' || !t.completedAt) continue;
+        const day = isoDatePart(t.completedAt);
+        if (!day || day < windowStart || day > windowEnd) continue;
+        // Bucket index: how many full 7-day strides from today the day sits in.
+        const stride = isoDayDiff(windowEnd, day); // days from windowEnd back to day; non-negative within window
+        const idxFromEnd = Math.floor(stride / 7);
+        const idx = bars.length - 1 - idxFromEnd;
+        if (idx >= 0 && idx < bars.length) bars[idx].completed++;
+    }
+    return bars;
+}
+
+/** Strip an ISO timestamp (or YYYY-MM-DD) to its date portion. Returns null on malformed input. */
+function isoDatePart(value) {
+    if (!value || typeof value !== 'string') return null;
+    if (value.length >= 10 && value[4] === '-' && value[7] === '-') return value.slice(0, 10);
+    return null;
+}
+
+/** Whole-day difference `a - b` for two YYYY-MM-DD strings. */
+function isoDayDiff(aIso, bIso) {
+    const [ay, am, ad] = aIso.split('-').map(Number);
+    const [by, bm, bd] = bIso.split('-').map(Number);
+    const am0 = Date.UTC(ay, am - 1, ad);
+    const bm0 = Date.UTC(by, bm - 1, bd);
+    return Math.round((am0 - bm0) / ONE_DAY_MS);
+}
+
 /** YYYY-MM-DD + n days → YYYY-MM-DD. Tolerates malformed input by returning the original. */
 function addDaysIso(iso, n) {
     if (!iso || typeof iso !== 'string') return iso;

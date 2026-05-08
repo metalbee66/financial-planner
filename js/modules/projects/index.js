@@ -72,6 +72,9 @@ import {
     bucketTasksForUser,
     defaultMyTasksUser,
     collectMyTasksUserOptions,
+    computeDashboardMetrics,
+    computeWeeklyCompletionBars,
+    DASHBOARD_WEEKS,
     saveProjects,
 } from './data.js';
 
@@ -276,14 +279,17 @@ function render() {
 
 // ── List view (sub-tabs: Overview / My Tasks) ──
 
+const LIST_SUBTABS = ['overview', 'mytasks', 'dashboard'];
+const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard' };
+
 function renderList() {
-    const subtab = mode.listSubtab === 'mytasks' ? 'mytasks' : 'overview';
+    const subtab = LIST_SUBTABS.includes(mode.listSubtab) ? mode.listSubtab : 'overview';
     host.innerHTML = `
         <div class="projects-subtabs" role="tablist" aria-label="Projects views">
-            <button type="button" class="projects-subtab${subtab === 'overview' ? ' active' : ''}"
-                role="tab" aria-selected="${subtab === 'overview'}" data-subtab="overview">Overview</button>
-            <button type="button" class="projects-subtab${subtab === 'mytasks' ? ' active' : ''}"
-                role="tab" aria-selected="${subtab === 'mytasks'}" data-subtab="mytasks">My Tasks</button>
+            ${LIST_SUBTABS.map(id => `
+                <button type="button" class="projects-subtab${subtab === id ? ' active' : ''}"
+                    role="tab" aria-selected="${subtab === id}" data-subtab="${id}">${SUBTAB_LABELS[id]}</button>
+            `).join('')}
         </div>
         <div class="projects-list-body" id="projects-list-body"></div>
     `;
@@ -300,6 +306,8 @@ function renderList() {
     const body = host.querySelector('#projects-list-body');
     if (subtab === 'mytasks') {
         renderMyTasksBody(body);
+    } else if (subtab === 'dashboard') {
+        renderDashboardBody(body);
     } else {
         renderOverviewBody(body);
     }
@@ -465,6 +473,97 @@ function renderMyTasksRow(task, project) {
         }
     });
     return row;
+}
+
+// ── Dashboard (Task 5.3): high-level metrics across all projects ──
+
+const DASHBOARD_CARDS = [
+    { key: 'activeProjects',      label: 'Active projects' },
+    { key: 'openTasks',           label: 'Open tasks' },
+    { key: 'overdueTasks',        label: 'Overdue', flag: 'overdue' },
+    { key: 'dueThisWeek',         label: 'Due this week' },
+    { key: 'completedLast30Days', label: 'Completed (last 30d)' },
+    { key: 'upcomingMilestones',  label: 'Upcoming milestones' },
+];
+
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function formatBarLabel(iso) {
+    if (!iso) return '';
+    const [, m, d] = iso.split('-').map(Number);
+    return `${MONTH_ABBR[(m || 1) - 1]} ${d || ''}`.trim();
+}
+
+function renderDashboardBody(root) {
+    const today = todayIso();
+    const allProjects = getProjects();
+    const allTasks = getTasks();
+    const metrics = computeDashboardMetrics(allProjects, allTasks, today);
+    const bars = computeWeeklyCompletionBars(allTasks, today, DASHBOARD_WEEKS);
+
+    const cardsHtml = DASHBOARD_CARDS.map(card => {
+        const value = metrics[card.key] || 0;
+        const flagClass = card.flag === 'overdue' && value > 0 ? ' dashboard-card-flag' : '';
+        return `
+            <div class="dashboard-card${flagClass}" data-metric="${card.key}">
+                <div class="dashboard-card-value">${value}</div>
+                <div class="dashboard-card-label">${escapeHtml(card.label)}</div>
+            </div>
+        `;
+    }).join('');
+
+    root.innerHTML = `
+        <div class="projects-toolbar">
+            <h2 class="projects-title">Dashboard</h2>
+        </div>
+        <div class="dashboard-cards" id="dashboard-cards">${cardsHtml}</div>
+        <div class="dashboard-chart-card">
+            <div class="dashboard-chart-head">
+                <h3 class="dashboard-chart-title">Tasks completed per week</h3>
+                <span class="dashboard-chart-sub">Last ${DASHBOARD_WEEKS} weeks</span>
+            </div>
+            ${renderWeeklyBarChart(bars)}
+        </div>
+    `;
+}
+
+function renderWeeklyBarChart(bars) {
+    if (!Array.isArray(bars) || bars.length === 0) {
+        return `<div class="dashboard-chart-empty">No data yet.</div>`;
+    }
+    const max = bars.reduce((m, b) => Math.max(m, b.completed || 0), 0);
+    // SVG viewBox is unitless — CSS scales it to the container width.
+    const chartW = 400;
+    const chartH = 120;
+    const padTop = 8;
+    const padBottom = 24;
+    const innerH = chartH - padTop - padBottom;
+    const slotW = chartW / bars.length;
+    const barW = Math.max(8, slotW * 0.66);
+    const yScale = (n) => max > 0 ? (n / max) * innerH : 0;
+
+    const barsSvg = bars.map((b, i) => {
+        const value = b.completed || 0;
+        const h = yScale(value);
+        const x = i * slotW + (slotW - barW) / 2;
+        const y = padTop + innerH - h;
+        const rx = 2;
+        return `
+            <g class="dashboard-bar-group" data-week-index="${i}">
+                <title>Week of ${escapeHtml(formatBarLabel(b.startIso))} — ${value} completed</title>
+                <rect class="dashboard-bar${value === 0 ? ' dashboard-bar-empty' : ''}"
+                    x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barW.toFixed(2)}" height="${Math.max(0, h).toFixed(2)}" rx="${rx}" />
+                ${value > 0 ? `<text class="dashboard-bar-value" x="${(x + barW / 2).toFixed(2)}" y="${(y - 4).toFixed(2)}" text-anchor="middle">${value}</text>` : ''}
+                <text class="dashboard-bar-label" x="${(x + barW / 2).toFixed(2)}" y="${(chartH - 6).toFixed(2)}" text-anchor="middle">${escapeHtml(formatBarLabel(b.startIso))}</text>
+            </g>
+        `;
+    }).join('');
+
+    return `
+        <svg class="dashboard-chart" viewBox="0 0 ${chartW} ${chartH}" preserveAspectRatio="none"
+            role="img" aria-label="Tasks completed per week, last ${bars.length} weeks">
+            ${barsSvg}
+        </svg>
+    `;
 }
 
 function renderCard(p, allTasks, today) {
