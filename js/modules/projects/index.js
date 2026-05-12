@@ -75,6 +75,7 @@ import {
     computeDashboardMetrics,
     computeWeeklyCompletionBars,
     DASHBOARD_WEEKS,
+    collectAttachmentsByProject,
     saveProjects,
 } from './data.js';
 
@@ -279,8 +280,8 @@ function render() {
 
 // ── List view (sub-tabs: Overview / My Tasks) ──
 
-const LIST_SUBTABS = ['overview', 'mytasks', 'dashboard'];
-const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard' };
+const LIST_SUBTABS = ['overview', 'mytasks', 'dashboard', 'files'];
+const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard', files: 'Files' };
 
 function renderList() {
     const subtab = LIST_SUBTABS.includes(mode.listSubtab) ? mode.listSubtab : 'overview';
@@ -308,6 +309,8 @@ function renderList() {
         renderMyTasksBody(body);
     } else if (subtab === 'dashboard') {
         renderDashboardBody(body);
+    } else if (subtab === 'files') {
+        renderFilesBody(body);
     } else {
         renderOverviewBody(body);
     }
@@ -564,6 +567,90 @@ function renderWeeklyBarChart(bars) {
             ${barsSvg}
         </svg>
     `;
+}
+
+// ── Files (Task 5.4): cross-project attachments grouped by project ──
+
+function renderFilesBody(root) {
+    const groups = collectAttachmentsByProject(getProjects(), getTasks());
+    const total = groups.reduce((n, g) => n + g.items.length, 0);
+
+    root.innerHTML = `
+        <div class="projects-toolbar">
+            <h2 class="projects-title">Files</h2>
+            <span class="files-total">${total === 0 ? 'No files yet' : `${total} attachment${total === 1 ? '' : 's'} across ${groups.length} project${groups.length === 1 ? '' : 's'}`}</span>
+        </div>
+        <div class="files-groups" id="files-groups"></div>
+    `;
+
+    const host = root.querySelector('#files-groups');
+    if (groups.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'files-empty';
+        empty.innerHTML = `<p>Attach a file or URL to any task and it will appear here.</p>`;
+        host.appendChild(empty);
+        return;
+    }
+
+    for (const g of groups) {
+        const section = document.createElement('section');
+        section.className = 'files-group';
+        section.dataset.projectId = g.projectId;
+        section.innerHTML = `
+            <header class="files-group-head">
+                <h3 class="files-group-name">${escapeHtml(g.projectName || '(unnamed project)')}</h3>
+                <span class="files-group-count">${g.items.length}</span>
+            </header>
+            <div class="files-table" role="table">
+                <div class="files-row files-row-head" role="row">
+                    <span role="columnheader">Task</span>
+                    <span role="columnheader">Name</span>
+                    <span role="columnheader">Type</span>
+                    <span role="columnheader">Size</span>
+                    <span role="columnheader">Added by</span>
+                    <span role="columnheader">Added on</span>
+                </div>
+            </div>
+        `;
+        const table = section.querySelector('.files-table');
+        for (const item of g.items) {
+            table.appendChild(renderFilesRow(item));
+        }
+        host.appendChild(section);
+    }
+}
+
+function renderFilesRow(item) {
+    const a = item.attachment;
+    const row = document.createElement('div');
+    row.className = 'files-row';
+    row.setAttribute('role', 'row');
+    row.tabIndex = 0;
+    row.dataset.taskId = item.taskId;
+    row.setAttribute('aria-label', `Open task ${item.taskName}`);
+
+    const kindLabel = a.kind === 'url' ? 'URL' : 'File';
+    const sizeLabel = a.kind === 'file' && Number.isFinite(a.size) && a.size > 0 ? formatBytes(a.size) : '—';
+    const added = a.addedAt ? formatDate(a.addedAt) : '';
+    const addedBy = a.addedBy || '';
+    const name = a.name || '(unnamed)';
+
+    row.innerHTML = `
+        <span class="files-cell files-cell-task" title="${escapeAttr(item.taskName)}">${escapeHtml(item.taskName || '(untitled)')}</span>
+        <span class="files-cell files-cell-name" title="${escapeAttr(name)}">${escapeHtml(name)}</span>
+        <span class="files-cell files-cell-kind">${escapeHtml(kindLabel)}</span>
+        <span class="files-cell files-cell-size">${escapeHtml(sizeLabel)}</span>
+        <span class="files-cell files-cell-by">${escapeHtml(addedBy)}</span>
+        <span class="files-cell files-cell-when">${escapeHtml(added)}</span>
+    `;
+    row.addEventListener('click', () => openTaskPanel(item.taskId));
+    row.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openTaskPanel(item.taskId);
+        }
+    });
+    return row;
 }
 
 function renderCard(p, allTasks, today) {

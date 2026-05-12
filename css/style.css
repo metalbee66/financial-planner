@@ -2716,3 +2716,103 @@ select.editable { width: 100px; cursor: pointer; }
     font-size: 9px;
     font-family: var(--mono);
 }
+
+/* ── Files tab (Task 5.4) ── */
+
+.files-total {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+}
+.files-groups { display: flex; flex-direction: column; gap: 14px; }
+.files-empty {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    color: var(--text-dim);
+}
+.files-group {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.files-group-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+}
+.files-group-name {
+    flex: 1;
+    margin: 0;
+    color: var(--text);
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+.files-group-count {
+    background: rgba(0,176,240,0.14);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.74rem;
+}
+.files-table { display: flex; flex-direction: column; }
+.files-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1.2fr) minmax(140px, 1.6fr) 60px 80px 100px 100px;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 14px;
+    cursor: pointer;
+    border-top: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+.files-row:first-child { border-top: none; }
+.files-row:hover { background: rgba(0,176,240,0.06); }
+.files-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+.files-row-head {
+    cursor: default;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+}
+.files-row-head:hover { background: transparent; }
+.files-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.files-cell-task { color: var(--text-dim); }
+.files-cell-name { color: var(--text); }
+.files-cell-kind, .files-cell-size, .files-cell-by, .files-cell-when {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-family: var(--mono);
+}
+
+@media (max-width: 720px) {
+    .files-row {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+            "task    when"
+            "name    name"
+            "kind    size"
+            "by      by";
+        row-gap: 4px;
+    }
+    .files-row-head { display: none; }
+    .files-cell-task { grid-area: task; }
+    .files-cell-name { grid-area: name; }
+    .files-cell-kind { grid-area: kind; }
+    .files-cell-size { grid-area: size; text-align: right; }
+    .files-cell-by   { grid-area: by; }
+    .files-cell-when { grid-area: when; text-align: right; }
+}

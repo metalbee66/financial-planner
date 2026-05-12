@@ -1826,6 +1826,139 @@ test.describe('Phase 5.3 — Dashboard tab', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 5.4 — Files summary by project', () => {
+
+    async function gotoFiles(page) {
+        await page.locator('.projects-subtab[data-subtab="files"]').click();
+        await expect(page.locator('.files-groups')).toBeVisible();
+    }
+
+    async function addUrlAttachmentToTask(page, taskName, { name, url }) {
+        await page.locator('.task-row', { hasText: taskName }).locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+        await page.locator('details.task-panel-attachments-url').click();
+        await page.locator('#tp-attachments-url-name').fill(name);
+        await page.locator('#tp-attachments-url-url').fill(url);
+        await page.locator('#tp-attachments-url-add').click();
+        await expect(page.locator('.task-panel-attachment', { hasText: name })).toBeVisible();
+        await page.locator('.task-panel-close').click();
+    }
+
+    test('Files sub-tab is reachable from the projects list', async ({ page }) => {
+        await expect(page.locator('.projects-subtab[data-subtab="files"]')).toBeVisible();
+        await gotoFiles(page);
+        await expect(page.locator('.files-total')).toContainText(/No files yet/i);
+        await expect(page.locator('.files-empty')).toBeVisible();
+    });
+
+    test('renders attachments grouped by project', async ({ page }) => {
+        await createProject(page, { name: 'Alpha' });
+        await page.locator('#task-add-name').fill('A1');
+        await page.locator('#task-add-name').press('Enter');
+        await addUrlAttachmentToTask(page, 'A1', { name: 'spec', url: 'https://example.com/spec' });
+        await backToList(page);
+
+        await createProject(page, { name: 'Beta' });
+        await page.locator('#task-add-name').fill('B1');
+        await page.locator('#task-add-name').press('Enter');
+        await addUrlAttachmentToTask(page, 'B1', { name: 'design', url: 'https://example.com/design' });
+        await backToList(page);
+
+        await gotoFiles(page);
+        await expect(page.locator('.files-group')).toHaveCount(2);
+        // Sorted alphabetically: Alpha first, Beta second
+        const groups = page.locator('.files-group-name');
+        await expect(groups.nth(0)).toHaveText('Alpha');
+        await expect(groups.nth(1)).toHaveText('Beta');
+        await expect(page.locator('.files-row[data-task-id]')).toHaveCount(2);
+        await expect(page.locator('.files-cell-name', { hasText: 'spec' })).toBeVisible();
+        await expect(page.locator('.files-cell-name', { hasText: 'design' })).toBeVisible();
+    });
+
+    test('projects with no attachments are not listed', async ({ page }) => {
+        await createProject(page, { name: 'WithFile' });
+        await page.locator('#task-add-name').fill('T');
+        await page.locator('#task-add-name').press('Enter');
+        await addUrlAttachmentToTask(page, 'T', { name: 'doc', url: 'https://example.com/doc' });
+        await backToList(page);
+
+        await createProject(page, { name: 'Empty' });
+        await page.locator('#task-add-name').fill('Bare');
+        await page.locator('#task-add-name').press('Enter');
+        await backToList(page);
+
+        await gotoFiles(page);
+        await expect(page.locator('.files-group')).toHaveCount(1);
+        await expect(page.locator('.files-group-name')).toHaveText('WithFile');
+    });
+
+    test('inline files render with type "File" and a non-empty size', async ({ page }) => {
+        await createProject(page, { name: 'Files proj' });
+        await page.locator('#task-add-name').fill('Doc job');
+        await page.locator('#task-add-name').press('Enter');
+
+        await page.locator('.task-row', { hasText: 'Doc job' }).locator('.task-row-name').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+        await page.locator('#tp-attachments-file-input').setInputFiles({
+            name: 'notes.txt',
+            mimeType: 'text/plain',
+            buffer: Buffer.from('hello attachment'),
+        });
+        await expect(page.locator('.task-panel-attachment-file', { hasText: 'notes.txt' })).toBeVisible();
+        await page.locator('.task-panel-close').click();
+        await backToList(page);
+
+        await gotoFiles(page);
+        const row = page.locator('.files-row[data-task-id]');
+        await expect(row).toHaveCount(1);
+        await expect(row.locator('.files-cell-kind')).toHaveText('File');
+        await expect(row.locator('.files-cell-size')).not.toHaveText('—');
+        await expect(row.locator('.files-cell-name')).toHaveText('notes.txt');
+    });
+
+    test('URL refs render with type "URL" and size dash', async ({ page }) => {
+        await createProject(page, { name: 'URL proj' });
+        await page.locator('#task-add-name').fill('Link');
+        await page.locator('#task-add-name').press('Enter');
+        await addUrlAttachmentToTask(page, 'Link', { name: 'spec doc', url: 'https://example.com/x' });
+        await backToList(page);
+
+        await gotoFiles(page);
+        const row = page.locator('.files-row[data-task-id]');
+        await expect(row.locator('.files-cell-kind')).toHaveText('URL');
+        await expect(row.locator('.files-cell-size')).toHaveText('—');
+    });
+
+    test('clicking a row jumps to the source task by opening its panel', async ({ page }) => {
+        await createProject(page, { name: 'Nav proj' });
+        await page.locator('#task-add-name').fill('Target');
+        await page.locator('#task-add-name').press('Enter');
+        await addUrlAttachmentToTask(page, 'Target', { name: 'open me', url: 'https://example.com/open' });
+        await backToList(page);
+
+        await gotoFiles(page);
+        await page.locator('.files-row[data-task-id]').click();
+        await expect(page.locator('#task-panel')).toHaveClass(/task-panel-open/);
+        await expect(page.locator('#tp-name')).toHaveValue('Target');
+    });
+
+    test('attachments from multiple tasks within one project share a group', async ({ page }) => {
+        await createProject(page, { name: 'Multi' });
+        await page.locator('#task-add-name').fill('T1');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#task-add-name').fill('T2');
+        await page.locator('#task-add-name').press('Enter');
+        await addUrlAttachmentToTask(page, 'T1', { name: 'one', url: 'https://example.com/1' });
+        await addUrlAttachmentToTask(page, 'T2', { name: 'two', url: 'https://example.com/2' });
+        await backToList(page);
+
+        await gotoFiles(page);
+        await expect(page.locator('.files-group')).toHaveCount(1);
+        await expect(page.locator('.files-row[data-task-id]')).toHaveCount(2);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

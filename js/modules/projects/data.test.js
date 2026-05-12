@@ -69,6 +69,7 @@ import {
     computeDashboardMetrics,
     computeWeeklyCompletionBars,
     DASHBOARD_WEEKS,
+    collectAttachmentsByProject,
 } from './data.js';
 
 const tests = [];
@@ -1795,6 +1796,111 @@ test('computeWeeklyCompletionBars boundary: completedAt at start-of-bucket is in
     ];
     const bars = computeWeeklyCompletionBars(tasks, '2026-05-08');
     eq(bars[7].completed, 1);
+});
+
+// ── Files summary by project (Task 5.4) ──
+
+test('collectAttachmentsByProject empty input returns empty array', () => {
+    eq(collectAttachmentsByProject([], []), []);
+    eq(collectAttachmentsByProject(null, null), []);
+});
+
+test('collectAttachmentsByProject groups attachments by their task\'s project', () => {
+    const projects = [
+        mkProject({ id: 'p1', name: 'Alpha' }),
+        mkProject({ id: 'p2', name: 'Beta' }),
+    ];
+    const a1 = { id: 'a1', kind: 'file', name: 'note.txt', size: 100, type: 'text/plain', addedBy: 'brad', addedAt: '2026-05-01T10:00:00.000Z' };
+    const a2 = { id: 'a2', kind: 'url', name: 'spec', url: 'https://example.com/spec', addedBy: 'diana', addedAt: '2026-05-02T10:00:00.000Z' };
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', name: 'task1', attachments: [a1] }),
+        mkTask({ id: 't2', projectId: 'p2', name: 'task2', attachments: [a2] }),
+    ];
+    const out = collectAttachmentsByProject(projects, tasks);
+    eq(out.length, 2);
+    eq(out[0].projectId, 'p1');
+    eq(out[0].projectName, 'Alpha');
+    eq(out[0].items.length, 1);
+    eq(out[0].items[0].attachment.id, 'a1');
+    eq(out[0].items[0].taskId, 't1');
+    eq(out[0].items[0].taskName, 'task1');
+    eq(out[1].projectId, 'p2');
+    eq(out[1].projectName, 'Beta');
+    eq(out[1].items[0].attachment.id, 'a2');
+});
+
+test('collectAttachmentsByProject sorts items within a project by addedAt desc (newest first)', () => {
+    const projects = [mkProject({ id: 'p1', name: 'P' })];
+    const oldA = { id: 'a1', kind: 'file', name: 'old', addedAt: '2026-05-01T10:00:00.000Z' };
+    const fresh = { id: 'a2', kind: 'file', name: 'fresh', addedAt: '2026-05-05T10:00:00.000Z' };
+    const middle = { id: 'a3', kind: 'url', name: 'mid', url: 'https://x', addedAt: '2026-05-03T10:00:00.000Z' };
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', name: 'A', attachments: [oldA, fresh] }),
+        mkTask({ id: 't2', projectId: 'p1', name: 'B', attachments: [middle] }),
+    ];
+    const out = collectAttachmentsByProject(projects, tasks);
+    eq(out[0].items.map(x => x.attachment.id), ['a2', 'a3', 'a1']);
+});
+
+test('collectAttachmentsByProject skips projects with no attachments', () => {
+    const projects = [
+        mkProject({ id: 'p1', name: 'A' }),
+        mkProject({ id: 'p2', name: 'B' }),
+    ];
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', attachments: [{ id: 'a1', kind: 'file', name: 'f', addedAt: '2026-05-01T10:00:00.000Z' }] }),
+        mkTask({ id: 't2', projectId: 'p2', attachments: [] }),
+        mkTask({ id: 't3', projectId: 'p2' }), // no attachments key at all
+    ];
+    const out = collectAttachmentsByProject(projects, tasks);
+    eq(out.length, 1);
+    eq(out[0].projectId, 'p1');
+});
+
+test('collectAttachmentsByProject skips tasks whose project no longer exists', () => {
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'orphan', attachments: [{ id: 'a1', kind: 'file', name: 'f', addedAt: '2026-05-01T10:00:00.000Z' }] }),
+    ];
+    eq(collectAttachmentsByProject([], tasks), []);
+});
+
+test('collectAttachmentsByProject includes both file and url attachments in the same group', () => {
+    const projects = [mkProject({ id: 'p1', name: 'P' })];
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', name: 'T', attachments: [
+            { id: 'a1', kind: 'file', name: 'f.txt', size: 100, addedAt: '2026-05-01T10:00:00.000Z' },
+            { id: 'a2', kind: 'url', name: 'spec', url: 'https://x', addedAt: '2026-05-02T10:00:00.000Z' },
+        ] }),
+    ];
+    const out = collectAttachmentsByProject(projects, tasks);
+    eq(out[0].items.length, 2);
+    const kinds = out[0].items.map(x => x.attachment.kind).sort();
+    eq(kinds, ['file', 'url']);
+});
+
+test('collectAttachmentsByProject sorts groups by project name (case-insensitive)', () => {
+    const projects = [
+        mkProject({ id: 'p1', name: 'zebra' }),
+        mkProject({ id: 'p2', name: 'Alpha' }),
+        mkProject({ id: 'p3', name: 'mango' }),
+    ];
+    const att = (id) => ({ id, kind: 'file', name: 'f', addedAt: '2026-05-01T10:00:00.000Z' });
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', attachments: [att('a1')] }),
+        mkTask({ id: 't2', projectId: 'p2', attachments: [att('a2')] }),
+        mkTask({ id: 't3', projectId: 'p3', attachments: [att('a3')] }),
+    ];
+    const out = collectAttachmentsByProject(projects, tasks);
+    eq(out.map(g => g.projectName), ['Alpha', 'mango', 'zebra']);
+});
+
+test('collectAttachmentsByProject does not mutate inputs', () => {
+    const projects = [mkProject({ id: 'p1', name: 'P' })];
+    const att = { id: 'a1', kind: 'file', name: 'f', addedAt: '2026-05-01T10:00:00.000Z' };
+    const tasks = [mkTask({ id: 't1', projectId: 'p1', attachments: [att] })];
+    const beforeAttachments = tasks[0].attachments.slice();
+    collectAttachmentsByProject(projects, tasks);
+    eq(tasks[0].attachments, beforeAttachments);
 });
 
 // ── runner ──

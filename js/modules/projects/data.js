@@ -1195,6 +1195,42 @@ function addDaysIso(iso, n) {
     return `${yy}-${mm}-${dd}`;
 }
 
+// ── Cross-project Files summary (Task 5.4) ──
+
+/**
+ * Flatten every task's attachments into one project-grouped list for the
+ * Files tab. Groups are sorted by project name (case-insensitive); within
+ * each group items are sorted by `addedAt` desc so the freshest uploads
+ * sit at the top. Projects with no attachments and orphaned tasks (whose
+ * project no longer exists) are dropped.
+ *
+ * Returns: [{ projectId, projectName, items: [{ attachment, taskId, taskName }] }]
+ */
+export function collectAttachmentsByProject(projects, tasks) {
+    if (!Array.isArray(projects) || !Array.isArray(tasks)) return [];
+    const byProject = new Map();
+    for (const p of projects) {
+        if (p && p.id) byProject.set(p.id, { projectId: p.id, projectName: p.name || '', items: [] });
+    }
+    for (const t of tasks) {
+        if (!t || !Array.isArray(t.attachments) || t.attachments.length === 0) continue;
+        const group = byProject.get(t.projectId);
+        if (!group) continue;
+        for (const a of t.attachments) {
+            if (!a) continue;
+            group.items.push({ attachment: a, taskId: t.id, taskName: t.name || '' });
+        }
+    }
+    const groups = [];
+    for (const g of byProject.values()) {
+        if (g.items.length === 0) continue;
+        g.items.sort((a, b) => (b.attachment.addedAt || '').localeCompare(a.attachment.addedAt || ''));
+        groups.push(g);
+    }
+    groups.sort((a, b) => (a.projectName || '').localeCompare(b.projectName || '', undefined, { sensitivity: 'base' }));
+    return groups;
+}
+
 // ── Persistence ──
 
 export function loadProjects() {
