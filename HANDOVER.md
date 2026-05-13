@@ -1,6 +1,6 @@
 # Family Planner — Handover Notes
 
-> **State as of 2026-05-12:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0, 1, 2, **all of Phase 3** (Tasks 3.1 deps + cycle detection, 3.2 comments thread, 3.3 activity/audit feed, 3.4 file attachments, 3.5 milestones), **all of Phase 4** (4.1 list view + 4.2 Gantt timeline + 4.3 month-grid calendar), and **all of Phase 5** (5.1 Overview + 5.2 My Tasks + 5.3 Dashboard + **5.4 Files**) of v2.0.0 are complete and committed. 5.4 landed during this session — Phase 5 is now feature-complete pending Checkpoint F (performance review on 5+ projects, 50+ tasks). The Playwright E2E harness now runs **112 tests** including a `tests.html` driver that executes the in-browser unit suite (**190 cases**) — single `npm run test:e2e` covers both layers in ~9 min. Real-Firebase + two-user smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 / 5.4 still unverified. **`server.py` uses `ThreadingHTTPServer`** which eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake; **a `FAMILY_PLANNER_NO_BROWSER` env var** suppresses the auto-open browser tab during test runs (set automatically by `playwright.config.js`). Phases 6–8 build out the rest of the Projects module — see [tasks/plan.md](../tasks/plan.md).
+> **State as of 2026-05-13:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0, 1, 2, **all of Phase 3** (Tasks 3.1 deps + cycle detection, 3.2 comments thread, 3.3 activity/audit feed, 3.4 file attachments, 3.5 milestones), **all of Phase 4** (4.1 list view + 4.2 Gantt timeline + 4.3 month-grid calendar), and **all of Phase 5** (5.1 Overview + 5.2 My Tasks + 5.3 Dashboard + **5.4 Files**) of v2.0.0 are complete, committed, and **pushed**. Phase 5 is feature-complete pending Checkpoint F (performance review on 5+ projects, 50+ tasks). The Playwright E2E harness runs **112 tests** including a `tests.html` driver that executes the in-browser unit suite (**190 cases**) — single `npm run test:e2e` covers both layers in ~9 min. Real-Firebase + two-user smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 / 5.4 still unverified. **`server.py` uses `ThreadingHTTPServer`** which eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake; **a `FAMILY_PLANNER_NO_BROWSER` env var** suppresses the auto-open browser tab during test runs (set automatically by `playwright.config.js`). Phases 6–8 build out the rest of the Projects module — see [tasks/plan.md](../tasks/plan.md).
 
 ---
 
@@ -219,9 +219,10 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `master`. Phase 5.4 landed this session and is committed locally as `58973af`; **not yet pushed**. The live site at https://metalbee66.github.io/financial-planner/ still reflects the previous push (Phase 5.3 + handover). Manual smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 / 5.4 still pending.
-- **Last commit:** `58973af` — Files tab: cross-project attachments grouped by project (Task 5.4). Worktree clean. `master == origin/master + 1`.
+- **Active branch:** `master`. Phase 5.4 was pushed end of last session, so the live site at https://metalbee66.github.io/financial-planner/ now has the Files sub-tab. Manual smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 / 5.4 still pending.
+- **Last commit:** `a6dadf9` — Handover: Phase 5.4 (Files tab) complete + harness now 112 tests. Worktree clean. `master == origin/master`.
 - **Phase 5 commits on master (newest first):**
+  - `a6dadf9` — Handover: Phase 5.4 (Files tab) complete + harness now 112 tests
   - `58973af` — Files tab: cross-project attachments grouped by project (Task 5.4)
   - `84d256e` — Handover: record Phase 5.3 push
   - `9fa80d7` — Handover: Phase 5.3 (Dashboard tab) complete + harness now 105 tests
@@ -261,7 +262,7 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ### Manual smoke on the deployed site (Checkpoint F — Phase 5 feature-complete)
 
-> **Not yet deployed.** Phase 5.4 is committed locally as `58973af` but not pushed. Push first, wait ~30s for the GitHub Pages rebuild, then hard-refresh https://metalbee66.github.io/financial-planner/ (Ctrl+Shift+R) and run the manual checks below. The harness covered the functional acceptance criteria automatically — these checks cover what the harness can't (real Firebase, two-user, visual layout, perf on realistic data volume).
+> **Already deployed.** Phase 5.4 was pushed at the end of last session. Hard-refresh https://metalbee66.github.io/financial-planner/ (Ctrl+Shift+R) and run the manual checks below. The harness covered the functional acceptance criteria automatically — these checks cover what the harness can't (real Firebase, two-user, visual layout, perf on realistic data volume).
 
 The Playwright suite (`npm run test:e2e`, 112 tests, ~9 min) covers the **functional** acceptance criteria for Phase 1.1, 1.2, 2.1, 2.2, 3.1–3.5, 4.1, 4.2, 4.3, **5.1**, **5.2**, **5.3**, and **5.4** plus a Phase 0 module-shell regression check, plus a `tests.html` driver that runs all 190 data-layer unit cases. Firebase is blocked at the network layer in tests so they run hermetically against localStorage.
 
