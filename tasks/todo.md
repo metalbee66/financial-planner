@@ -72,7 +72,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 
 > Needs n8n + M365 set up — see [user-actions.md → Pre-Phase-6](user-actions.md#pre-phase-6-n8n--m365-infrastructure-for-email).
 
-- [ ] **6.1** Audit-event → notification trigger map — M — [plan §6.1](plan.md#task-61-audit-event--notification-trigger-map)
+- [x] **6.1** Audit-event → notification trigger map — M — [plan §6.1](plan.md#task-61-audit-event--notification-trigger-map) — _done 2026-05-15, pure mapper + 61 new unit tests; harness now 251 unit cases (still 112 E2E)_
 - [ ] **6.2** In-app bell + per-user preferences UI — M — [plan §6.2](plan.md#task-62-in-app-bell--per-user-preferences-ui)
 - [ ] **6.3** Email queue write + n8n workflow — M — [plan §6.3](plan.md#task-63-email-queue-write--n8n-workflow)
 - [ ] **6.4** Daily digest mode — M — [plan §6.4](plan.md#task-64-daily-digest-mode)

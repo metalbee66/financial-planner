@@ -78,6 +78,12 @@ import {
     collectAttachmentsByProject,
     saveProjects,
 } from './data.js';
+import {
+    eventToNotificationsForRecipients,
+    candidateRecipientsForEvent,
+    addNotificationToBucket,
+    deriveDependencyUnblockedTriggers,
+} from './notifications.js';
 
 const STATUS_LABELS = {
     'planning': 'Planning',
@@ -153,10 +159,13 @@ export function renderProjectsTab() {
 
 function ensureProjectsData() {
     if (!state.projectsData || !Array.isArray(state.projectsData.items)) {
-        state.projectsData = { items: [], tasks: [] };
+        state.projectsData = { items: [], tasks: [], notifications: {} };
     }
     if (!Array.isArray(state.projectsData.tasks)) {
         state.projectsData.tasks = [];
+    }
+    if (!state.projectsData.notifications || typeof state.projectsData.notifications !== 'object' || Array.isArray(state.projectsData.notifications)) {
+        state.projectsData.notifications = {};
     }
 }
 
@@ -189,11 +198,48 @@ function setBoth(items, tasks) {
     saveProjects(state.projectsData);
 }
 
+function getNotifications() {
+    ensureProjectsData();
+    return state.projectsData.notifications;
+}
+
+/**
+ * Fold one or more trigger events into the per-user notification bucket
+ * map without saving. Returns the new map. Caller is responsible for
+ * persisting (typically via a combined save with the originating mutation).
+ *
+ * Each trigger is `{event, task, project}`. Recipients are resolved per
+ * trigger and each gets at most one notification.
+ */
+function foldTriggersIntoBucket(triggers, startMap) {
+    let map = (startMap && typeof startMap === 'object') ? startMap : {};
+    for (const t of triggers) {
+        if (!t || !t.event || !t.task || !t.project) continue;
+        const recipients = candidateRecipientsForEvent(t.event, t.task, t.project);
+        const notifs = eventToNotificationsForRecipients(t.event, t.task, t.project, recipients);
+        for (const n of notifs) map = addNotificationToBucket(map, n);
+    }
+    return map;
+}
+
+/**
+ * Apply one mutation + a set of audit events + their derived notifications
+ * in a single save. `nextTasks` already has the events appended;
+ * `triggers` is the set of notification trigger events to fan out.
+ */
+function commitTasksWithTriggers(nextTasks, triggers) {
+    ensureProjectsData();
+    const nextNotifications = foldTriggersIntoBucket(triggers, getNotifications());
+    state.projectsData = { ...state.projectsData, tasks: nextTasks, notifications: nextNotifications };
+    saveProjects(state.projectsData);
+}
+
 /**
  * Patch a task and auto-log audit events for any tracked field that changed
  * (status / assignee / due-date — see TRACKED_FIELD_EVENT_KINDS in data.js).
  * Every UI site that mutates a task should go through here so the activity
- * feed stays consistent. One save per call.
+ * feed stays consistent. One save per call — also folds in any notification
+ * triggers (assignee changes, milestone completions, dep-unblock fan-out).
  */
 function applyTaskPatch(taskId, patch) {
     const tasks = getTasks();
@@ -202,7 +248,21 @@ function applyTaskPatch(taskId, patch) {
     const events = taskPatchEvents(prev, patch, currentUserEmail());
     let next = updateTaskInList(tasks, taskId, patch);
     for (const e of events) next = addEventToTask(next, taskId, e);
-    setTasks(next);
+    const updatedTask = findTask(next, taskId) || prev;
+    const project = findProject(getProjects(), updatedTask.projectId);
+    const triggers = [];
+    if (project) {
+        for (const evt of events) {
+            triggers.push({ event: evt, task: updatedTask, project });
+            // Status → done can unblock dependents; fan out one trigger per.
+            if (evt.kind === 'status_changed') {
+                for (const unblock of deriveDependencyUnblockedTriggers(evt, updatedTask, next)) {
+                    triggers.push({ event: unblock.event, task: unblock.task, project });
+                }
+            }
+        }
+    }
+    commitTasksWithTriggers(next, triggers);
 }
 
 /** Add a dep + log a `dependency_added` event in one save. Returns boolean. */
@@ -215,7 +275,7 @@ function applyAddDependency(taskId, depId) {
         by: currentUserEmail(),
         after: depId,
     });
-    setTasks(addEventToTask(next, taskId, evt));
+    commitTasksWithTriggers(addEventToTask(next, taskId, evt), []);
     return true;
 }
 
@@ -229,7 +289,7 @@ function applyRemoveDependency(taskId, depId) {
         by: currentUserEmail(),
         before: depId,
     });
-    setTasks(addEventToTask(next, taskId, evt));
+    commitTasksWithTriggers(addEventToTask(next, taskId, evt), []);
     return true;
 }
 
@@ -243,7 +303,7 @@ function applyAddAttachment(taskId, attachment) {
         by: currentUserEmail(),
         after: attachment.name,
     });
-    setTasks(addEventToTask(next, taskId, evt));
+    commitTasksWithTriggers(addEventToTask(next, taskId, evt), []);
     return true;
 }
 
@@ -257,8 +317,27 @@ function applyRemoveAttachment(taskId, attachment) {
         by: currentUserEmail(),
         before: attachment.name,
     });
-    setTasks(addEventToTask(next, taskId, evt));
+    commitTasksWithTriggers(addEventToTask(next, taskId, evt), []);
     return true;
+}
+
+/**
+ * Append a comment + fan out the synthetic `comment_added` trigger in one
+ * save. Returns the new task list (same-ref no-op if the task isn't found).
+ */
+function applyAddComment(taskId, comment) {
+    const tasks = getTasks();
+    const next = addCommentToTask(tasks, taskId, comment);
+    if (next === tasks) return tasks;
+    const task = findTask(next, taskId);
+    const project = task && findProject(getProjects(), task.projectId);
+    const trigger = task && project ? [{
+        event: { kind: 'comment_added', by: comment.author, at: comment.createdAt, before: null, after: comment.id },
+        task,
+        project,
+    }] : [];
+    commitTasksWithTriggers(next, trigger);
+    return next;
 }
 
 function render() {
@@ -1437,7 +1516,9 @@ function onSubmit(editingId) {
     if (err) { showFormError(err); return; }
 
     if (editingId) {
-        setProjects(updateProjectInList(getProjects(), editingId, form));
+        const before = findProject(getProjects(), editingId);
+        const updatedItems = updateProjectInList(getProjects(), editingId, form);
+        commitProjectsWithStatusTrigger(updatedItems, before, findProject(updatedItems, editingId));
         goAfterForm();
     } else {
         setProjects(addProjectToList(getProjects(), next));
@@ -1445,6 +1526,30 @@ function onSubmit(editingId) {
         // can start adding tasks. detailProjectId wasn't set before save.
         goDetail(next.id);
     }
+}
+
+/**
+ * Save the projects list and, if `after.status` transitioned to 'completed'
+ * (from anything else), fan out a synthetic `project_completed` trigger to
+ * every participant.
+ */
+function commitProjectsWithStatusTrigger(items, before, after) {
+    ensureProjectsData();
+    let triggers = [];
+    if (after && before && after.status === 'completed' && before.status !== 'completed') {
+        // For project triggers, the "task" param of foldTriggersIntoBucket
+        // expects shape with id; passing the project itself works because
+        // candidateRecipientsForEvent('project_completed') ignores the task
+        // entirely. We pass a sentinel object so the same fold helper applies.
+        triggers = [{
+            event: { kind: 'project_completed', by: currentUserEmail(), at: new Date().toISOString(), before: before.status, after: after.status },
+            task: { id: null },
+            project: after,
+        }];
+    }
+    const nextNotifications = foldTriggersIntoBucket(triggers, getNotifications());
+    state.projectsData = { ...state.projectsData, items, notifications: nextNotifications };
+    saveProjects(state.projectsData);
 }
 
 function onDelete(p) {
@@ -2075,9 +2180,9 @@ function wireActivitySection(panel, task) {
             author: currentUserEmail(),
             text,
         });
-        const next = addCommentToTask(getTasks(), task.id, c);
-        if (next === getTasks()) return;
-        setTasks(next);
+        const before = getTasks();
+        const next = applyAddComment(task.id, c);
+        if (next === before) return;
         // render() re-attaches the panel from the latest task data via the
         // openTaskPanelId guard, so the new comment renders without a manual
         // redraw here.

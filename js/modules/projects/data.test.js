@@ -70,7 +70,19 @@ import {
     computeWeeklyCompletionBars,
     DASHBOARD_WEEKS,
     collectAttachmentsByProject,
+    emailToParticipantId,
 } from './data.js';
+import {
+    NOTIFICATION_KINDS,
+    MAX_NOTIFICATIONS_PER_USER,
+    eventToNotification,
+    eventToNotificationsForRecipients,
+    candidateRecipientsForEvent,
+    deriveDependencyUnblockedTriggers,
+    computeTimeBasedTriggers,
+    addNotificationToBucket,
+    processTrigger,
+} from './notifications.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -1901,6 +1913,365 @@ test('collectAttachmentsByProject does not mutate inputs', () => {
     const beforeAttachments = tasks[0].attachments.slice();
     collectAttachmentsByProject(projects, tasks);
     eq(tasks[0].attachments, beforeAttachments);
+});
+
+// ── emailToParticipantId (Task 6.1 prerequisite) ──
+
+test('emailToParticipantId resolves built-in mappings', () => {
+    eq(emailToParticipantId('metalbee66@gmail.com'), 'brad');
+    eq(emailToParticipantId('dianaleshcheva@gmail.com'), 'diana');
+});
+
+test('emailToParticipantId returns null for unknown / empty input', () => {
+    eq(emailToParticipantId(''), null);
+    eq(emailToParticipantId(null), null);
+    eq(emailToParticipantId(undefined), null);
+    eq(emailToParticipantId('someone@example.com'), null);
+});
+
+// ── notifications.js — eventToNotification (Task 6.1) ──
+
+function mkProjectLit(overrides) {
+    return {
+        id: 'pid',
+        name: 'Test Project',
+        status: 'active',
+        startDate: null,
+        endDate: null,
+        participants: ['brad', 'diana'],
+        description: '',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        archivedAt: null,
+        ...overrides,
+    };
+}
+
+function mkEvent(overrides) {
+    return {
+        id: 'e_1', kind: 'status_changed', by: 'metalbee66@gmail.com',
+        at: '2026-05-15T10:00:00.000Z', before: null, after: null,
+        ...overrides,
+    };
+}
+
+test('NOTIFICATION_KINDS covers exactly the seven trigger kinds from plan §6.1', () => {
+    eq(NOTIFICATION_KINDS.slice().sort(), [
+        'comment_added',
+        'dependency_unblocked',
+        'milestone_completed',
+        'project_completed',
+        'task_assigned',
+        'task_due_soon',
+        'task_overdue',
+    ]);
+});
+
+test('eventToNotification returns null when any required input is missing', () => {
+    const p = mkProjectLit(); const t = mkTask({ id: 't1', projectId: 'pid' });
+    eq(eventToNotification(null, t, p, 'brad'), null);
+    eq(eventToNotification(mkEvent(), null, p, 'brad'), null);
+    eq(eventToNotification(mkEvent(), t, null, 'brad'), null);
+    eq(eventToNotification(mkEvent(), t, p, ''), null);
+});
+
+// task_assigned
+
+test('task_assigned fires for the new assignee', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', name: 'Lay tiles', assignee: 'diana' });
+    const evt = mkEvent({ kind: 'assignee_changed', by: 'metalbee66@gmail.com', before: null, after: 'diana' });
+    const n = eventToNotification(evt, t, p, 'diana');
+    truthy(n, 'diana should be notified');
+    eq(n.kind, 'task_assigned');
+    eq(n.to, 'diana');
+    eq(n.taskId, 't1');
+    eq(n.projectId, 'pid');
+    truthy(n.title.includes('Lay tiles'));
+    truthy(n.summary.includes('Brad'), 'summary mentions the actor by display name');
+});
+
+test('task_assigned does NOT fire for non-assignees or the old assignee', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'diana' });
+    const evt = mkEvent({ kind: 'assignee_changed', by: 'metalbee66@gmail.com', before: 'brad', after: 'diana' });
+    eq(eventToNotification(evt, t, p, 'brad'), null);
+});
+
+test('task_assigned self-action returns null (Brad assigns to Brad)', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad' });
+    const evt = mkEvent({ kind: 'assignee_changed', by: 'metalbee66@gmail.com', before: null, after: 'brad' });
+    eq(eventToNotification(evt, t, p, 'brad'), null);
+});
+
+// comment_added
+
+test('comment_added fires for the task assignee when someone else comments', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad', name: 'Plant roses' });
+    const evt = mkEvent({ kind: 'comment_added', by: 'dianaleshcheva@gmail.com', after: 'c_1' });
+    const n = eventToNotification(evt, t, p, 'brad');
+    truthy(n);
+    eq(n.kind, 'comment_added');
+    eq(n.to, 'brad');
+    truthy(n.summary.includes('Diana'));
+});
+
+test('comment_added does NOT fire for the commenter (self-action)', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad' });
+    const evt = mkEvent({ kind: 'comment_added', by: 'metalbee66@gmail.com', after: 'c_1' });
+    eq(eventToNotification(evt, t, p, 'brad'), null);
+});
+
+test('comment_added on an unassigned task notifies nobody', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: null });
+    const evt = mkEvent({ kind: 'comment_added', by: 'metalbee66@gmail.com', after: 'c_1' });
+    eq(eventToNotification(evt, t, p, 'brad'), null);
+    eq(eventToNotification(evt, t, p, 'diana'), null);
+});
+
+// dependency_unblocked
+
+test('dependency_unblocked fires for the assignee of the newly unblocked task', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't2', projectId: 'pid', assignee: 'diana', name: 'Paint walls' });
+    const evt = mkEvent({ kind: 'dependency_unblocked', by: 'metalbee66@gmail.com', after: 't1' });
+    const n = eventToNotification(evt, t, p, 'diana');
+    truthy(n);
+    eq(n.kind, 'dependency_unblocked');
+    truthy(n.summary.includes('Paint walls'));
+});
+
+test('dependency_unblocked does NOT notify the actor who completed the predecessor', () => {
+    const p = mkProjectLit();
+    // Diana completes the predecessor; her own dependent task should not notify her.
+    const t = mkTask({ id: 't2', projectId: 'pid', assignee: 'diana' });
+    const evt = mkEvent({ kind: 'dependency_unblocked', by: 'dianaleshcheva@gmail.com', after: 't1' });
+    eq(eventToNotification(evt, t, p, 'diana'), null);
+});
+
+// milestone_completed (synthesised from status_changed)
+
+test('milestone_completed notifies all project participants except the actor', () => {
+    const p = mkProjectLit({ participants: ['brad', 'diana', 'external-vendor'] });
+    const t = mkTask({ id: 't1', projectId: 'pid', name: 'Site handover', isMilestone: true, status: 'done' });
+    const evt = mkEvent({ kind: 'status_changed', by: 'metalbee66@gmail.com', before: 'in-progress', after: 'done' });
+    const nBrad = eventToNotification(evt, t, p, 'brad');
+    const nDiana = eventToNotification(evt, t, p, 'diana');
+    const nExt = eventToNotification(evt, t, p, 'external-vendor');
+    eq(nBrad, null);
+    truthy(nDiana);
+    eq(nDiana.kind, 'milestone_completed');
+    truthy(nExt);
+});
+
+test('status_changed on a non-milestone task produces no notification', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', isMilestone: false, status: 'done' });
+    const evt = mkEvent({ kind: 'status_changed', by: 'metalbee66@gmail.com', before: 'in-progress', after: 'done' });
+    eq(eventToNotification(evt, t, p, 'diana'), null);
+});
+
+test('status_changed to non-done on a milestone produces no notification', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', isMilestone: true, status: 'in-progress' });
+    const evt = mkEvent({ kind: 'status_changed', by: 'metalbee66@gmail.com', before: 'done', after: 'in-progress' });
+    eq(eventToNotification(evt, t, p, 'diana'), null);
+});
+
+test('milestone_completed does not notify a non-participant', () => {
+    const p = mkProjectLit({ participants: ['brad'] });
+    const t = mkTask({ id: 't1', projectId: 'pid', isMilestone: true, status: 'done' });
+    const evt = mkEvent({ kind: 'status_changed', by: 'metalbee66@gmail.com', before: 'in-progress', after: 'done' });
+    eq(eventToNotification(evt, t, p, 'diana'), null);
+});
+
+// task_due_soon / task_overdue (synthetic, scan-based)
+
+test('task_due_soon fires for the assignee', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad', name: 'File tax return' });
+    const evt = { kind: 'task_due_soon', by: null, at: '2026-05-15T00:00:00.000Z', before: null, after: '2026-05-16' };
+    const n = eventToNotification(evt, t, p, 'brad');
+    truthy(n);
+    eq(n.kind, 'task_due_soon');
+    eq(n.by, null);
+});
+
+test('task_overdue fires for the assignee', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad', name: 'File tax return' });
+    const evt = { kind: 'task_overdue', by: null, at: '2026-05-15T00:00:00.000Z', before: null, after: '2026-05-10' };
+    const n = eventToNotification(evt, t, p, 'brad');
+    truthy(n);
+    eq(n.kind, 'task_overdue');
+});
+
+// project_completed
+
+test('project_completed notifies all participants except the actor', () => {
+    const p = mkProjectLit({ participants: ['brad', 'diana'] });
+    const t = { id: null };
+    const evt = mkEvent({ kind: 'project_completed', by: 'dianaleshcheva@gmail.com', before: 'active', after: 'completed' });
+    const nBrad = eventToNotification(evt, t, p, 'brad');
+    const nDiana = eventToNotification(evt, t, p, 'diana');
+    truthy(nBrad);
+    eq(nBrad.kind, 'project_completed');
+    eq(nBrad.taskId, null);
+    eq(nBrad.projectId, 'pid');
+    eq(nDiana, null);
+});
+
+// Unknown kinds
+
+test('eventToNotification ignores audit-only kinds (due_date_changed, dependency_added, etc.)', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad' });
+    for (const kind of ['due_date_changed', 'dependency_added', 'dependency_removed', 'attachment_added', 'attachment_removed', 'unknown_kind']) {
+        const evt = mkEvent({ kind, by: 'dianaleshcheva@gmail.com' });
+        eq(eventToNotification(evt, t, p, 'brad'), null, `kind=${kind}`);
+    }
+});
+
+// ── candidateRecipientsForEvent ──
+
+test('candidateRecipientsForEvent picks the right recipient set per kind', () => {
+    const p = mkProjectLit({ participants: ['brad', 'diana', 'extern'] });
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad', isMilestone: false });
+    eq(candidateRecipientsForEvent({ kind: 'assignee_changed', after: 'diana' }, t, p), ['diana']);
+    eq(candidateRecipientsForEvent({ kind: 'comment_added' }, t, p), ['brad']);
+    eq(candidateRecipientsForEvent({ kind: 'dependency_unblocked' }, t, p), ['brad']);
+    eq(candidateRecipientsForEvent({ kind: 'task_due_soon' }, t, p), ['brad']);
+    eq(candidateRecipientsForEvent({ kind: 'task_overdue' }, t, p), ['brad']);
+    // status_changed only fans out for milestones going to done.
+    eq(candidateRecipientsForEvent({ kind: 'status_changed', before: 'in-progress', after: 'done' }, t, p), []);
+    const tm = { ...t, isMilestone: true };
+    eq(candidateRecipientsForEvent({ kind: 'status_changed', before: 'in-progress', after: 'done' }, tm, p), ['brad', 'diana', 'extern']);
+    eq(candidateRecipientsForEvent({ kind: 'project_completed' }, t, p), ['brad', 'diana', 'extern']);
+    eq(candidateRecipientsForEvent({ kind: 'unknown' }, t, p), []);
+});
+
+// ── deriveDependencyUnblockedTriggers ──
+
+test('deriveDependencyUnblockedTriggers returns no triggers for non-status events', () => {
+    const t = mkTask({ id: 't1', projectId: 'pid', status: 'done' });
+    eq(deriveDependencyUnblockedTriggers({ kind: 'assignee_changed', after: 'brad' }, t, [t]), []);
+});
+
+test('deriveDependencyUnblockedTriggers emits one trigger per newly-unblocked dependent', () => {
+    const a = mkTask({ id: 't1', projectId: 'pid', status: 'done', assignee: 'brad' });
+    const b = mkTask({ id: 't2', projectId: 'pid', status: 'not-started', assignee: 'diana', dependsOn: ['t1'] });
+    const c = mkTask({ id: 't3', projectId: 'pid', status: 'not-started', assignee: 'diana', dependsOn: ['t1'] });
+    const evt = { kind: 'status_changed', by: 'metalbee66@gmail.com', at: 'now', before: 'in-progress', after: 'done' };
+    const triggers = deriveDependencyUnblockedTriggers(evt, a, [a, b, c]);
+    eq(triggers.length, 2);
+    eq(triggers[0].event.kind, 'dependency_unblocked');
+    eq(triggers[0].task.id, 't2');
+    eq(triggers[1].task.id, 't3');
+});
+
+test('deriveDependencyUnblockedTriggers skips dependents that still have other blockers', () => {
+    // t2 depends on both t1 and t4; t4 is still not-started, so t2 is not unblocked.
+    const a = mkTask({ id: 't1', projectId: 'pid', status: 'done' });
+    const blocker2 = mkTask({ id: 't4', projectId: 'pid', status: 'not-started' });
+    const b = mkTask({ id: 't2', projectId: 'pid', status: 'not-started', assignee: 'diana', dependsOn: ['t1', 't4'] });
+    const evt = { kind: 'status_changed', by: 'metalbee66@gmail.com', at: 'now', before: 'in-progress', after: 'done' };
+    eq(deriveDependencyUnblockedTriggers(evt, a, [a, blocker2, b]).length, 0);
+});
+
+test('deriveDependencyUnblockedTriggers skips dependents that are themselves already done', () => {
+    const a = mkTask({ id: 't1', projectId: 'pid', status: 'done' });
+    const b = mkTask({ id: 't2', projectId: 'pid', status: 'done', assignee: 'diana', dependsOn: ['t1'] });
+    const evt = { kind: 'status_changed', by: 'metalbee66@gmail.com', at: 'now', before: 'in-progress', after: 'done' };
+    eq(deriveDependencyUnblockedTriggers(evt, a, [a, b]).length, 0);
+});
+
+test('deriveDependencyUnblockedTriggers ignores transitions that were already done', () => {
+    const a = mkTask({ id: 't1', projectId: 'pid', status: 'done' });
+    const b = mkTask({ id: 't2', projectId: 'pid', status: 'not-started', assignee: 'diana', dependsOn: ['t1'] });
+    // before === 'done' → not a transition into done.
+    const evt = { kind: 'status_changed', by: 'metalbee66@gmail.com', at: 'now', before: 'done', after: 'done' };
+    eq(deriveDependencyUnblockedTriggers(evt, a, [a, b]).length, 0);
+});
+
+// ── computeTimeBasedTriggers ──
+
+test('computeTimeBasedTriggers separates overdue from due-soon tasks', () => {
+    const today = '2026-05-15T00:00:00.000Z';
+    const overdue = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad', dueDate: '2026-05-10', status: 'in-progress' });
+    const dueToday = mkTask({ id: 't2', projectId: 'pid', assignee: 'brad', dueDate: '2026-05-15', status: 'not-started' });
+    const dueTomorrow = mkTask({ id: 't3', projectId: 'pid', assignee: 'diana', dueDate: '2026-05-16', status: 'not-started' });
+    const later = mkTask({ id: 't4', projectId: 'pid', assignee: 'diana', dueDate: '2026-06-01', status: 'not-started' });
+    const triggers = computeTimeBasedTriggers([overdue, dueToday, dueTomorrow, later], today);
+    eq(triggers.length, 3);
+    eq(triggers[0].event.kind, 'task_overdue');
+    eq(triggers[1].event.kind, 'task_due_soon');
+    eq(triggers[2].event.kind, 'task_due_soon');
+});
+
+test('computeTimeBasedTriggers skips done / unassigned / dateless tasks', () => {
+    const today = '2026-05-15T00:00:00.000Z';
+    const done = mkTask({ id: 't1', projectId: 'pid', assignee: 'brad', dueDate: '2026-05-10', status: 'done' });
+    const unassigned = mkTask({ id: 't2', projectId: 'pid', assignee: null, dueDate: '2026-05-10', status: 'not-started' });
+    const undated = mkTask({ id: 't3', projectId: 'pid', assignee: 'brad', dueDate: null, status: 'not-started' });
+    eq(computeTimeBasedTriggers([done, unassigned, undated], today).length, 0);
+});
+
+test('computeTimeBasedTriggers returns empty array for bad input', () => {
+    eq(computeTimeBasedTriggers(null, '2026-05-15T00:00:00.000Z'), []);
+    eq(computeTimeBasedTriggers([], 'not-a-date'), []);
+    eq(computeTimeBasedTriggers([], ''), []);
+});
+
+// ── addNotificationToBucket / processTrigger / eventToNotificationsForRecipients ──
+
+test('addNotificationToBucket appends per-user and creates a fresh map immutably', () => {
+    const start = {};
+    const n1 = { id: 'n1', to: 'brad', kind: 'task_assigned', title: 't', summary: 's', at: '2026-01-01T00:00:00.000Z', read: false };
+    const next = addNotificationToBucket(start, n1);
+    eq(next.brad.length, 1);
+    eq(Object.keys(start).length, 0, 'original map untouched');
+    const next2 = addNotificationToBucket(next, { ...n1, id: 'n2' });
+    eq(next2.brad.length, 2);
+});
+
+test('addNotificationToBucket trims oldest past MAX_NOTIFICATIONS_PER_USER', () => {
+    let map = {};
+    for (let i = 0; i < MAX_NOTIFICATIONS_PER_USER + 5; i++) {
+        map = addNotificationToBucket(map, { id: 'n' + i, to: 'brad', kind: 'task_assigned', title: 't', summary: 's', at: '2026-01-01T00:00:00.000Z', read: false });
+    }
+    eq(map.brad.length, MAX_NOTIFICATIONS_PER_USER);
+    eq(map.brad[0].id, 'n5', 'first 5 trimmed off the front');
+});
+
+test('addNotificationToBucket same-ref no-op for falsy input or missing recipient', () => {
+    const start = { brad: [] };
+    eq(addNotificationToBucket(start, null), start);
+    eq(addNotificationToBucket(start, { id: 'n', to: null, kind: 'x', title: '', summary: '', at: '', read: false }), start);
+});
+
+test('eventToNotificationsForRecipients fans out across recipients, drops nulls', () => {
+    const p = mkProjectLit({ participants: ['brad', 'diana', 'extern'] });
+    const t = mkTask({ id: 't1', projectId: 'pid', isMilestone: true, status: 'done', name: 'Topping out' });
+    const evt = mkEvent({ kind: 'status_changed', by: 'metalbee66@gmail.com', before: 'in-progress', after: 'done' });
+    const out = eventToNotificationsForRecipients(evt, t, p, ['brad', 'diana', 'extern']);
+    eq(out.length, 2, 'brad (actor) dropped; diana + extern get notifications');
+    eq(out[0].to, 'diana');
+    eq(out[1].to, 'extern');
+});
+
+test('processTrigger writes one notification per resolved recipient and returns the merged map', () => {
+    const p = mkProjectLit({ participants: ['brad', 'diana'] });
+    const t = mkTask({ id: 't1', projectId: 'pid', isMilestone: true, status: 'done', name: 'Ribbon cut' });
+    const evt = mkEvent({ kind: 'status_changed', by: 'metalbee66@gmail.com', before: 'in-progress', after: 'done' });
+    const { bucketMap, notifications } = processTrigger(evt, t, p, {});
+    eq(notifications.length, 1);
+    eq(notifications[0].to, 'diana');
+    eq(bucketMap.diana.length, 1);
+    truthy(!bucketMap.brad, 'brad bucket not created (he was the actor)');
 });
 
 // ── runner ──

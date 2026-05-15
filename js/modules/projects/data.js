@@ -18,7 +18,7 @@ export const PROJECT_STATUSES = ['planning', 'active', 'on-hold', 'completed', '
 export const TASK_STATUSES = ['not-started', 'in-progress', 'review', 'done', 'blocked'];
 export const TASK_PRIORITIES = ['low', 'normal', 'high'];
 export const DEFAULT_PARTICIPANTS = ['brad', 'diana'];
-export const DEFAULT_PROJECTS = { items: [], tasks: [] };
+export const DEFAULT_PROJECTS = { items: [], tasks: [], notifications: {} };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
 const TASK_STATUS_SET = new Set(TASK_STATUSES);
@@ -985,6 +985,17 @@ export function defaultMyTasksUser(email) {
 }
 
 /**
+ * Strict email → participant id resolver. Returns null for unknown / empty
+ * emails. Use this when you need to compare an actor (event.by, comment author)
+ * to a participant id — defaultMyTasksUser's "fallback to brad" is wrong for
+ * that check because it would silently match brad against any unknown email.
+ */
+export function emailToParticipantId(email) {
+    if (!email) return null;
+    return EMAIL_TO_USER[email] || null;
+}
+
+/**
  * Selectable users for the My Tasks view: brad and diana always come first
  * (in canonical order), then any external assignees seen in the task list,
  * sorted alphabetically and deduped.
@@ -1244,6 +1255,9 @@ export function loadProjects() {
         return {
             items: parsed.items.map(sanitiseProject).filter(Boolean),
             tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(sanitiseTask).filter(Boolean) : [],
+            notifications: (parsed.notifications && typeof parsed.notifications === 'object' && !Array.isArray(parsed.notifications))
+                ? parsed.notifications
+                : {},
         };
     } catch (e) {
         console.error('loadProjects parse error:', e);
