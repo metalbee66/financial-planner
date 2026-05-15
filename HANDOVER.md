@@ -1,6 +1,6 @@
 # Family Planner — Handover Notes
 
-> **State as of 2026-05-13:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0, 1, 2, **all of Phase 3** (Tasks 3.1 deps + cycle detection, 3.2 comments thread, 3.3 activity/audit feed, 3.4 file attachments, 3.5 milestones), **all of Phase 4** (4.1 list view + 4.2 Gantt timeline + 4.3 month-grid calendar), and **all of Phase 5** (5.1 Overview + 5.2 My Tasks + 5.3 Dashboard + **5.4 Files**) of v2.0.0 are complete, committed, and **pushed**. Phase 5 is feature-complete pending Checkpoint F (performance review on 5+ projects, 50+ tasks). The Playwright E2E harness runs **112 tests** including a `tests.html` driver that executes the in-browser unit suite (**190 cases**) — single `npm run test:e2e` covers both layers in ~9 min. Real-Firebase + two-user smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 / 5.4 still unverified. **`server.py` uses `ThreadingHTTPServer`** which eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake; **a `FAMILY_PLANNER_NO_BROWSER` env var** suppresses the auto-open browser tab during test runs (set automatically by `playwright.config.js`). Phases 6–8 build out the rest of the Projects module — see [tasks/plan.md](../tasks/plan.md).
+> **State as of 2026-05-15:** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. Phases 0, 1, 2, **all of Phase 3** (Tasks 3.1 deps + cycle detection, 3.2 comments thread, 3.3 activity/audit feed, 3.4 file attachments, 3.5 milestones), **all of Phase 4** (4.1 list view + 4.2 Gantt timeline + 4.3 month-grid calendar), and **all of Phase 5** (5.1 Overview + 5.2 My Tasks + 5.3 Dashboard + **5.4 Files**) of v2.0.0 are complete, committed, and pushed. **Checkpoint F manual smoke passed 2026-05-15** (14 clean / 2 pass-with-caveat / 0 fail) — see [tasks/todo.md → Polish backlog](tasks/todo.md) for the 9 polish items surfaced (Timeline dep arrows, Dashboard chart scaling, dropdown contrast, joint-assignee feature, project-status auto-promote, etc.). The Playwright E2E harness runs **112 tests** including a `tests.html` driver that executes the in-browser unit suite (**190 cases**) — single `npm run test:e2e` covers both layers in ~9 min. **`server.py` uses `ThreadingHTTPServer`** which eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake; **a `FAMILY_PLANNER_NO_BROWSER` env var** suppresses the auto-open browser tab during test runs (set automatically by `playwright.config.js`). Phases 6–8 build out the rest of the Projects module — see [tasks/plan.md](tasks/plan.md).
 
 ---
 
@@ -10,16 +10,16 @@
 
 **Hosting:** GitHub Pages (static) + Firebase Realtime Database (auth + data sync).
 
-**Repo:** https://github.com/metalbee66/financial-planner (public; renaming this would break the GitHub Pages URL — deferred decision, see [tasks/user-actions.md](../tasks/user-actions.md))
+**Repo:** https://github.com/metalbee66/financial-planner (public; renaming this would break the GitHub Pages URL — deferred decision, see [tasks/user-actions.md](tasks/user-actions.md))
 
 **Live:** https://metalbee66.github.io/financial-planner/
 
 **Deploy:** push to `master` → GitHub Pages rebuilds in ~30 seconds. There is no build step.
 
 **Plan & status docs:**
-- [tasks/plan.md](../tasks/plan.md) — full v2.0.0 implementation plan, 8 phases, ~25 tasks
-- [tasks/todo.md](../tasks/todo.md) — flat checklist with done/pending state
-- [tasks/user-actions.md](../tasks/user-actions.md) — manual ops Brad needs to do (n8n setup, Firebase rules, etc.)
+- [tasks/plan.md](tasks/plan.md) — full v2.0.0 implementation plan, 8 phases, ~25 tasks
+- [tasks/todo.md](tasks/todo.md) — flat checklist with done/pending state
+- [tasks/user-actions.md](tasks/user-actions.md) — manual ops Brad needs to do (n8n setup, Firebase rules, etc.)
 
 ---
 
@@ -119,7 +119,7 @@ This replaced the pre-Phase-0 cross-file globals. ES module bindings are read-on
 
 ### Firebase
 - Config in `firebase-config.js` (API key is safe to be public)
-- Database URL: `https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app` (still has the `financial-planner` slug — see [user-actions.md](../tasks/user-actions.md) D1 for the deferred rename decision)
+- Database URL: `https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app` (still has the `financial-planner` slug — see [user-actions.md](tasks/user-actions.md) D1 for the deferred rename decision)
 - Auth: Google Sign-In, restricted to `metalbee66@gmail.com` and `dianaleshcheva@gmail.com`
 - Data path: `household/family/{key}`
 - Falls back to localStorage if Firebase is unavailable
@@ -213,14 +213,15 @@ These predate the v2.0.0 restructure and are still pending:
 6. **Contribution auto-calc** — Brad/Diana Regular marked `autoCalc:true` but not yet recalculated when outgoings change
 7. **Mobile polish** — responsive breakpoints exist but could be refined
 
-The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI, celebrations, migration) lives in [tasks/plan.md](../tasks/plan.md) and [tasks/todo.md](../tasks/todo.md).
+The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI, celebrations, migration) lives in [tasks/plan.md](tasks/plan.md) and [tasks/todo.md](tasks/todo.md).
 
 ---
 
 ## Where to pick up
 
-- **Active branch:** `master`. Phase 5.4 was pushed end of last session, so the live site at https://metalbee66.github.io/financial-planner/ now has the Files sub-tab. Manual smoke for 4.1 / 4.2 / 4.3 / 5.1 / 5.2 / 5.3 / 5.4 still pending.
-- **Last commit:** `a6dadf9` — Handover: Phase 5.4 (Files tab) complete + harness now 112 tests. Worktree clean. `master == origin/master`.
+- **Active branch:** `master`. Phase 5 is feature-complete and **deployed**. **Checkpoint F manual smoke passed 2026-05-15** — verdict captured in [tasks/todo.md](tasks/todo.md) under Phase 5 with the polish backlog (PB.1–PB.9) immediately below. Two pass-with-caveat: PB.4 (Timeline dep arrows have no arrowheads and float far from bars), PB.5 (Dashboard chart scaling distorts when one bucket dominates).
+- **Smoke session also surfaced a deploy-pipeline incident:** the repo had been flipped private, silently disabling Pages from 2026-04-11 onward. Re-enabled on 2026-05-15 by flipping back to public + `POST /repos/.../pages` with `branch=master, path=/`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
+- **Last commit:** push pending — see "commit + push closeout writeup" todo. Pre-closeout last commit was `2984aac` (Handover: record Phase 5.4 push).
 - **Phase 5 commits on master (newest first):**
   - `a6dadf9` — Handover: Phase 5.4 (Files tab) complete + harness now 112 tests
   - `58973af` — Files tab: cross-project attachments grouped by project (Task 5.4)
@@ -257,12 +258,13 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
   - `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
   - `fd8055d` — Participant management on a project (Task 1.2)
   - `0c93b0f` — Project entity CRUD with tests (Task 1.1)
-- **Next task:** Phase 5 is feature-complete. **Push `58973af`** to deploy 5.4, then proceed to Phase 6 — Task 6.1 (audit-event → notification trigger map; [plan §6.1](../tasks/plan.md#task-61-audit-event--notification-trigger-map)). M-sized. Centralises the rule "what triggers a notification" in `notifications.js` so every audit event written by Phase 3.3 also passes through `eventToNotification(event, task, project, user)` returning a notification object or null. Covers seven trigger kinds: assigned-to-me, comment-on-my-task, dependency-unblocked, due-in-24h, overdue, milestone-done, project-complete. Each user only gets notifications for events relevant to them; self-actions don't notify self. Phase 6 builds the in-app bell (6.2) on top, then wires the email queue + n8n workflow (6.3) which depends on external infra — see [user-actions.md → Pre-Phase-6](../tasks/user-actions.md#pre-phase-6-n8n--m365-infrastructure-for-email) for the n8n + M365 setup gate.
+- **Next task:** Phase 5 done (Checkpoint F passed). Proceed to Phase 6 — Task 6.1 (audit-event → notification trigger map; [plan §6.1](tasks/plan.md#task-61-audit-event--notification-trigger-map)). M-sized. Centralises the rule "what triggers a notification" in `notifications.js` so every audit event written by Phase 3.3 also passes through `eventToNotification(event, task, project, user)` returning a notification object or null. Covers seven trigger kinds: assigned-to-me, comment-on-my-task, dependency-unblocked, due-in-24h, overdue, milestone-done, project-complete. Each user only gets notifications for events relevant to them; self-actions don't notify self. Phase 6 builds the in-app bell (6.2) on top, then wires the email queue + n8n workflow (6.3) which depends on external infra — see [user-actions.md → Pre-Phase-6](tasks/user-actions.md#pre-phase-6-n8n--m365-infrastructure-for-email) for the n8n + M365 setup gate.
+- **Polish backlog (PB.1–PB.9)** in [tasks/todo.md](tasks/todo.md) under Phase 5 — pick up between phases or as standalone polish; not blocking 6.1.
 - **Branch convention:** L/M-sized tasks **were** landed on `family-planner/<slug>` feature branches up to and including Task 3.1, but Tasks 3.2–3.5, 4.1–4.3, 5.1–5.4 all went direct to master with scoped per-task commits and a green test suite before push. This is now the established convention: direct to master with full suite green.
 
 ### Manual smoke on the deployed site (Checkpoint F — Phase 5 feature-complete)
 
-> **Already deployed.** Phase 5.4 was pushed at the end of last session. Hard-refresh https://metalbee66.github.io/financial-planner/ (Ctrl+Shift+R) and run the manual checks below. The harness covered the functional acceptance criteria automatically — these checks cover what the harness can't (real Firebase, two-user, visual layout, perf on realistic data volume).
+> **Done 2026-05-15.** All 16 steps run through; verdict 14 clean / 2 pass-with-caveat / 0 fail. The two caveats (PB.4 Timeline dep arrows, PB.5 Dashboard chart scaling) are tracked in [tasks/todo.md → Polish backlog](tasks/todo.md). The session also surfaced a deploy-pipeline incident (Pages had been silently disabled since 2026-04-11 because the repo went private) — re-enabled and captured in [tasks/lessons.md → L1](tasks/lessons.md). The 16-step procedure below is kept as the reference template for the next checkpoint.
 
 The Playwright suite (`npm run test:e2e`, 112 tests, ~9 min) covers the **functional** acceptance criteria for Phase 1.1, 1.2, 2.1, 2.2, 3.1–3.5, 4.1, 4.2, 4.3, **5.1**, **5.2**, **5.3**, and **5.4** plus a Phase 0 module-shell regression check, plus a `tests.html` driver that runs all 190 data-layer unit cases. Firebase is blocked at the network layer in tests so they run hermetically against localStorage.
 
@@ -317,6 +319,6 @@ If you (or another agent) come back to this project cold:
 1. Read this file top-to-bottom.
 2. `cd app && git status && git log --oneline -10` — confirm what's actually committed.
 3. `git branch --show-current` — am I on `master` or the active feature branch?
-4. Check [tasks/todo.md](../tasks/todo.md) and [tasks/user-actions.md](../tasks/user-actions.md) for the active checklist and any deferred manual ops.
+4. Check [tasks/todo.md](tasks/todo.md) and [tasks/user-actions.md](tasks/user-actions.md) for the active checklist and any deferred manual ops.
 5. `cd app && npm install` (one-time) → `npm run test:e2e` to sanity-check both data and UI layers are green. Then open <http://localhost:8080/tests.html> for the data-only layer.
 6. Then pick up the "Next task" pointer above.

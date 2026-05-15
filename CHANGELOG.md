@@ -2,7 +2,7 @@
 
 ## v2.0.0 (in progress) — Modular monolith + Projects module
 
-Rebranding "Financial Planner" → "Family Planner" and restructuring the app into a modular monolith. The existing finance features become the **Finance** module; a new **Projects** module (Asana-like project management) is added alongside. Future modules slot into the same registry. See [tasks/plan.md](../tasks/plan.md) for the full plan.
+Rebranding "Financial Planner" → "Family Planner" and restructuring the app into a modular monolith. The existing finance features become the **Finance** module; a new **Projects** module (Asana-like project management) is added alongside. Future modules slot into the same registry. See [tasks/plan.md](tasks/plan.md) for the full plan.
 
 ### Phase 0 — Rebrand & Modular-Monolith Conversion (complete, 2026-04-28)
 
@@ -45,7 +45,7 @@ Rebranding "Financial Planner" → "Family Planner" and restructuring the app in
 
 ### Phase 3+ remaining
 
-See [tasks/plan.md](../tasks/plan.md). Phase 3 complete pending Checkpoint D (two-user smoke test). Phase 4 complete pending Checkpoint E (three-view review). Phase 5 complete pending Checkpoint F (performance review on 5+ projects). Still ahead: **email notifications via n8n + M365 Outlook** (Phase 6), celebrations + local AI (Phase 7), and final retirement of the PM DLBooks tab (Phase 8).
+See [tasks/plan.md](tasks/plan.md). Phase 3 complete pending Checkpoint D (two-user smoke test). Phase 4 complete pending Checkpoint E (three-view review). Phase 5 complete pending Checkpoint F (performance review on 5+ projects). Still ahead: **email notifications via n8n + M365 Outlook** (Phase 6), celebrations + local AI (Phase 7), and final retirement of the PM DLBooks tab (Phase 8).
 
 ## v1.0.0 — 2026-03-26 (Financial Planner)
 
