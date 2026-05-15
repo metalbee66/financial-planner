@@ -223,9 +223,9 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 - **Active branch:** `master`. Phase 5 is feature-complete + **Task 6.1 (notification trigger map) is feature-complete and tested**. **Checkpoint F manual smoke passed 2026-05-15** — verdict captured in [tasks/todo.md](tasks/todo.md) under Phase 5 with the polish backlog (PB.1–PB.9) immediately below. Two pass-with-caveat: PB.4 (Timeline dep arrows have no arrowheads and float far from bars), PB.5 (Dashboard chart scaling distorts when one bucket dominates).
 - **Smoke session also surfaced a deploy-pipeline incident:** the repo had been flipped private, silently disabling Pages from 2026-04-11 onward. Re-enabled on 2026-05-15 by flipping back to public + `POST /repos/.../pages` with `branch=master, path=/`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
-- **Last commit:** push pending — see "commit + push 6.1 closeout" todo. Pre-6.1 last commit was `c618bb1` (Closeout Checkpoint F + bring tasks/ inside the repo).
+- **Last commit:** `4cd8605` — Notifications: audit-event → notification trigger map (Task 6.1).
 - **Phase 6 commits on master (newest first):**
-  - _(pending push)_ — Task 6.1: notification trigger map (`notifications.js` + wiring + 61 new unit tests)
+  - `4cd8605` — Notifications: audit-event → notification trigger map (Task 6.1)
 - **Phase 5 commits on master (newest first):**
   - `a6dadf9` — Handover: Phase 5.4 (Files tab) complete + harness now 112 tests
   - `58973af` — Files tab: cross-project attachments grouped by project (Task 5.4)
