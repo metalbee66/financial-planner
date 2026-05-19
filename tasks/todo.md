@@ -58,12 +58,12 @@ Working list derived from [plan.md](plan.md). Manual ops tracked separately in [
 
 Not blocking Phase 6 — pick up between phases or as standalone polish.
 
-- [ ] **PB.1** Autofocus Name field on new-project form — XS — _smoke ad hoc_
-- [ ] **PB.2** Dropdown options low contrast / hard to read across the app (deps picker + others) — S — _smoke steps 5, 9_
-- [ ] **PB.3** "Reset filters" button on list-view toolbar — XS — _smoke step 9_
-- [ ] **PB.4** Timeline dep arrows: add arrowheads, fix positioning so they visibly connect the bars/diamonds they belong to — M — _smoke step 10_
-- [ ] **PB.5** Dashboard chart: bar/label scaling distorts when one bucket dominates (label clips, no headroom) — S — _smoke step 14_
-- [ ] **PB.6** Firebase SDK Cross-Origin-Opener-Policy warnings on sign-in popup (cosmetic; consider SDK upgrade or `signInWithRedirect`) — XS — _smoke step 16_
+- [x] **PB.1** Autofocus Name field on new-project form — XS — _smoke ad hoc_ — _done 2026-05-19, `94cbe78`_
+- [x] **PB.2** Dropdown options low contrast / hard to read across the app (deps picker + others) — S — _smoke steps 5, 9_ — _done 2026-05-19, `1f28614`_
+- [x] **PB.3** "Reset filters" button on list-view toolbar — XS — _smoke step 9_ — _done 2026-05-19, `94cbe78` (button only renders when state is non-default)_
+- [x] **PB.4** Timeline dep arrows: add arrowheads, fix positioning so they visibly connect the bars/diamonds they belong to — M — _smoke step 10_ — _done 2026-05-19, `16b4f10` (4 px y-offset bug from `.timeline-rows` padding + marker-end arrowheads)_
+- [x] **PB.5** Dashboard chart: bar/label scaling distorts when one bucket dominates (label clips, no headroom) — S — _smoke step 14_ — _done 2026-05-19, `cb17652` (chartMax rounds up ≥ max+1 or 1.2× max)_
+- [x] **PB.6** Firebase SDK Cross-Origin-Opener-Policy warnings on sign-in popup (cosmetic; consider SDK upgrade or `signInWithRedirect`) — XS — _smoke step 16_ — _done 2026-05-19, `94cbe78` (switched popup → redirect)_
 - [ ] **PB.7** Project status doesn't reflect task completion (100% done can sit at "planning") — needs spec: auto-promote vs suggestion banner vs derive — S spec + S impl — _smoke step 12_
 - [ ] **PB.8** Dashboard cards should drill down to a filtered task list (e.g. click "Due this week" → list of project·task) — M — _smoke step 14_
 - [ ] **PB.9** Joint-assignee support (Brad + Diana on one task) — needs spec: multi-select assignees vs "Joint" pseudo-value; ripples through sort/group/filter/My-Tasks bucketing/audit format — M spec + L impl — _smoke step 10_
