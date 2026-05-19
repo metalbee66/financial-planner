@@ -88,22 +88,18 @@ export function showApp() {
 }
 
 export async function signInWithGoogle() {
+    // signInWithRedirect (not Popup) avoids the Cross-Origin-Opener-Policy
+    // warnings the Firebase auth iframe used to spam in the console. The page
+    // navigates to Google, then back. The ALLOWED_EMAILS gate lives in shell.js's
+    // onAuthStateChanged listener, which fires on return.
     const provider = new firebase.auth.GoogleAuthProvider();
     try {
-        const result = await firebaseAuth.signInWithPopup(provider);
-        const email = result.user.email;
-
-        if (ALLOWED_EMAILS.length > 0 && !ALLOWED_EMAILS.includes(email)) {
-            await firebaseAuth.signOut();
-            alert('Access denied. Your email is not authorised.');
-            return null;
-        }
-        return result.user;
+        await firebaseAuth.signInWithRedirect(provider);
     } catch (e) {
         console.error('Sign-in error:', e);
         alert('Sign-in failed: ' + e.message);
-        return null;
     }
+    return null;
 }
 
 export function signOut() {

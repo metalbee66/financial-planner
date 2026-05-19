@@ -2106,6 +2106,18 @@ select.editable { width: 100px; cursor: pointer; }
     line-height: 1;
 }
 .tasks-toolbar-dir:hover { background: var(--surface); }
+.tasks-toolbar-reset {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1.3;
+}
+.tasks-toolbar-reset:hover { background: var(--surface); color: var(--text); }
 .tasks-group-header {
     margin-top: 8px;
     padding: 4px 8px;

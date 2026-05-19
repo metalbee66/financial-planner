@@ -840,6 +840,13 @@ function renderDetail() {
     }
 }
 
+function isToolbarNonDefault(sort, group, filters) {
+    if (sort.by !== DEFAULT_TASK_SORT.by || sort.dir !== DEFAULT_TASK_SORT.dir) return true;
+    if (group !== DEFAULT_TASK_GROUP) return true;
+    if (filters.assignee || filters.status || filters.milestonesOnly) return true;
+    return false;
+}
+
 function renderListBody(root, p, allTasks) {
     const filters = mode.taskFilters || {};
     const sort = mode.taskSort || DEFAULT_TASK_SORT;
@@ -894,6 +901,9 @@ function renderListBody(root, p, allTasks) {
                     ).join('')}
                 </select>
             </label>
+            ${isToolbarNonDefault(sort, group, filters)
+                ? `<button type="button" class="tasks-toolbar-reset" id="tasks-toolbar-reset" title="Reset sort, group, and filters">Reset</button>`
+                : ''}
         </div>
         <div class="tasks-add-row" id="tasks-add-row"></div>
         <div class="tasks-list" id="tasks-list"></div>
@@ -926,6 +936,15 @@ function renderListBody(root, p, allTasks) {
         mode.taskFilters = { ...(mode.taskFilters || {}), status: v ? v : null };
         render();
     });
+    const resetBtn = root.querySelector('#tasks-toolbar-reset');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            mode.taskFilters = {};
+            mode.taskSort = { ...DEFAULT_TASK_SORT };
+            mode.taskGroup = DEFAULT_TASK_GROUP;
+            render();
+        });
+    }
 
     renderAddTaskRow(root.querySelector('#tasks-add-row'), p);
     const filteredTasks = filterTasks(allTasks, filters);
@@ -1476,6 +1495,10 @@ function renderForm() {
         e.preventDefault();
         onSubmit(editing && editing.id);
     });
+
+    if (!editing) {
+        host.querySelector('#pf-name').focus();
+    }
 }
 
 function readForm() {
