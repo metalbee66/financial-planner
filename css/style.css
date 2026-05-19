@@ -2302,15 +2302,15 @@ select.editable { width: 100px; cursor: pointer; }
 
 /* Dependency arrows overlay */
 .timeline-arrows {
-    color: var(--text-dim);
+    color: var(--accent);
     overflow: visible;
 }
 .timeline-arrow {
     stroke: currentColor;
-    stroke-width: 1.5;
+    stroke-width: 2;
     fill: none;
-    stroke-dasharray: 4 3;
-    opacity: 0.7;
+    stroke-dasharray: 6 4;
+    opacity: 1;
 }
 
 /* Calendar (month grid) view (Task 4.3) */
