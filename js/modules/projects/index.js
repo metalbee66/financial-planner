@@ -621,7 +621,11 @@ function renderWeeklyBarChart(bars) {
     const innerH = chartH - padTop - padBottom;
     const slotW = chartW / bars.length;
     const barW = Math.max(8, slotW * 0.66);
-    const yScale = (n) => max > 0 ? (n / max) * innerH : 0;
+    // Round the y-axis max up so the tallest bar never reaches the chart top
+    // (otherwise its value label clips out of the viewBox). At least +1 unit of
+    // headroom for the small-N case, ≥20% for the dominant-bucket case.
+    const chartMax = max <= 0 ? 1 : Math.max(max + 1, Math.ceil(max * 1.2));
+    const yScale = (n) => (n / chartMax) * innerH;
 
     const barsSvg = bars.map((b, i) => {
         const value = b.completed || 0;
