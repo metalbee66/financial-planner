@@ -974,36 +974,11 @@ function renderTimelineBody(root, p, allTasks) {
         return;
     }
 
-    // Sort bars left-to-right so deps usually point forward and crossings stay rare
+    // Sort bars left-to-right by start
     const ordered = bars.slice().sort((a, b) => {
         if (a.leftPct !== b.leftPct) return a.leftPct - b.leftPct;
         return (a.task.createdAt || '').localeCompare(b.task.createdAt || '');
     });
-
-    // Build a row-index map so dep arrows can locate source/target rows in the
-    // visible order. Tasks not on the timeline (no dates) are skipped — their
-    // deps simply don't render.
-    const idxById = new Map();
-    ordered.forEach((b, i) => idxById.set(b.id, i));
-    const arrows = [];
-    for (const b of ordered) {
-        const deps = Array.isArray(b.task.dependsOn) ? b.task.dependsOn : [];
-        for (const depId of deps) {
-            if (!idxById.has(depId)) continue;
-            const fromIdx = idxById.get(depId);
-            const toIdx = idxById.get(b.id);
-            const fromBar = ordered[fromIdx];
-            arrows.push({
-                fromIdx,
-                toIdx,
-                fromX: fromBar.leftPct + fromBar.widthPct,
-                toX: b.leftPct,
-            });
-        }
-    }
-
-    const ROW_H = 32;
-    const rowCenter = (i) => i * ROW_H + ROW_H / 2;
 
     const renderItem = (b) => {
         const dataId = escapeAttr(b.id);
@@ -1046,25 +1021,8 @@ function renderTimelineBody(root, p, allTasks) {
                     </div>
                 `).join('')}
             </div>
-            <div class="timeline-rows" style="position:relative;">
+            <div class="timeline-rows">
                 ${ordered.map(renderItem).join('')}
-                ${arrows.length ? `
-                    <svg class="timeline-arrows" aria-hidden="true"
-                        style="position:absolute; left:200px; top:4px; width:calc(100% - 200px); height:${ordered.length * ROW_H}px; pointer-events:none; display:block;">
-                        <defs>
-                            <marker id="tl-arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
-                                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                                <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
-                            </marker>
-                        </defs>
-                        ${arrows.map(a => `
-                            <line class="timeline-arrow"
-                                x1="${a.fromX}%" y1="${rowCenter(a.fromIdx)}"
-                                x2="${a.toX}%" y2="${rowCenter(a.toIdx)}"
-                                marker-end="url(#tl-arrowhead)" />
-                        `).join('')}
-                    </svg>
-                ` : ''}
             </div>
             ${unscheduled > 0
                 ? `<div class="timeline-unscheduled">${unscheduled} unscheduled task${unscheduled === 1 ? '' : 's'} (no start or due date)</div>`

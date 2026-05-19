@@ -40,7 +40,7 @@ Working list derived from [plan.md](plan.md). Manual ops tracked separately in [
 ## Phase 4 — Per-Project Views
 
 - [x] **4.1** List view (sort, group, filter) — M — [plan §4.1](plan.md#task-41-list-view-with-filtering--grouping) — _done 2026-05-07_
-- [x] **4.2** Timeline (Gantt, month zoom + dep arrows + milestones) — L — [plan §4.2](plan.md#task-42-timeline-view-gantt-style-month-zoom) — _done 2026-05-07_
+- [x] **4.2** Timeline (Gantt, month zoom + milestones; dep-arrow overlay removed 2026-05-19 — see PB.4 below) — L — [plan §4.2](plan.md#task-42-timeline-view-gantt-style-month-zoom) — _done 2026-05-07_
   - [x] 4.2a Bars only, no deps — _done 2026-05-07_
   - [x] 4.2b Dependency arrows + milestones overlay — _done 2026-05-07_
 - [x] **4.3** Calendar (month grid) — M — [plan §4.3](plan.md#task-43-calendar-view-month-grid) — _done 2026-05-07_
@@ -61,7 +61,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **PB.1** Autofocus Name field on new-project form — XS — _smoke ad hoc_ — _done 2026-05-19, `94cbe78`_
 - [x] **PB.2** Dropdown options low contrast / hard to read across the app (deps picker + others) — S — _smoke steps 5, 9_ — _done 2026-05-19, `1f28614`_
 - [x] **PB.3** "Reset filters" button on list-view toolbar — XS — _smoke step 9_ — _done 2026-05-19, `94cbe78` (button only renders when state is non-default)_
-- [x] **PB.4** Timeline dep arrows: add arrowheads, fix positioning so they visibly connect the bars/diamonds they belong to — M — _smoke step 10_ — _done 2026-05-19, `16b4f10` (4 px y-offset bug from `.timeline-rows` padding + marker-end arrowheads)_
+- [x] **PB.4** Timeline dep arrows: **SHELVED 2026-05-19.** Three rounds of fixes (`16b4f10` y-offset + arrowheads, `70ca556` SVG-width, `7fe169e` visibility boost) all produced straight diagonals that cut through intervening rows. Arrows removed entirely from the Timeline view in the shelving commit. Dep relationships still surface on the per-task panel (Dependencies section) and via the `⛔ Blocked by N` row badge in List view. Proper visualisation would need Manhattan routing (right-angle doglegs) — not in PB-scope; revive under a Phase 7+ task if Brad wants it back.
 - [x] **PB.5** Dashboard chart: bar/label scaling distorts when one bucket dominates (label clips, no headroom) — S — _smoke step 14_ — _done 2026-05-19, `cb17652` (chartMax rounds up ≥ max+1 or 1.2× max)_
 - [x] **PB.6** Firebase SDK Cross-Origin-Opener-Policy warnings on sign-in popup (cosmetic; consider SDK upgrade or `signInWithRedirect`) — XS — _smoke step 16_ — _done 2026-05-19, `94cbe78` (switched popup → redirect)_
 - [ ] **PB.7** Project status doesn't reflect task completion (100% done can sit at "planning") — needs spec: auto-promote vs suggestion banner vs derive — S spec + S impl — _smoke step 12_

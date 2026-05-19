@@ -2300,19 +2300,6 @@ select.editable { width: 100px; cursor: pointer; }
 .timeline-milestone.status-done .timeline-milestone-glyph { color: var(--green); text-shadow: 0 0 4px rgba(0,200,83,0.4); }
 .timeline-milestone.status-blocked .timeline-milestone-glyph { color: var(--red); text-shadow: 0 0 4px rgba(255,82,82,0.4); }
 
-/* Dependency arrows overlay */
-.timeline-arrows {
-    color: var(--accent);
-    overflow: visible;
-}
-.timeline-arrow {
-    stroke: currentColor;
-    stroke-width: 2;
-    fill: none;
-    stroke-dasharray: 6 4;
-    opacity: 1;
-}
-
 /* Calendar (month grid) view (Task 4.3) */
 .cal-container {
     margin-top: 16px;

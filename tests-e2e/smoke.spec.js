@@ -1259,24 +1259,10 @@ test.describe('Phase 4.2 — Timeline view (Gantt)', () => {
         await expect(page.locator('#tp-name')).toHaveValue('Final inspection');
     });
 
-    test('a task that depends on another renders a dependency arrow between them', async ({ page }) => {
-        await createProject(page, { name: 'Deps arrows' });
-        await addTask(page, 'Pour foundation');
-        await addTask(page, 'Frame walls');
-        await setTaskDates(page, 'Pour foundation', { startDate: '2026-06-01', dueDate: '2026-06-10' });
-        await setTaskDates(page, 'Frame walls', { startDate: '2026-06-12', dueDate: '2026-06-25' });
-
-        // Add dep: Frame walls depends on Pour foundation
-        await page.locator('.task-row-name', { hasText: 'Frame walls' }).click();
-        await page.locator('#tp-deps-picker').selectOption({ label: 'Pour foundation' });
-        await page.locator('#tp-deps-add-btn').click();
-        await page.locator('#tp-save').click();
-
-        await page.locator('.view-tab[data-view="timeline"]').click();
-        // SVG overlay carries one arrow path per dependency
-        await expect(page.locator('.timeline-arrows')).toBeVisible();
-        await expect(page.locator('.timeline-arrows .timeline-arrow')).toHaveCount(1);
-    });
+    // Dependency-arrow rendering on the Timeline view was removed (PB.4 shelved
+    // — straight diagonals cut through intervening rows; Manhattan routing was
+    // out of scope). The dep relationship still lives on the data model and on
+    // the per-task panel; only the Timeline-overlay visualisation is gone.
 });
 
 // ──────────────────────────────────────────────────────────────────────────
