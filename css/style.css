@@ -22,6 +22,14 @@ body {
     min-height: 100vh;
 }
 
+/* Dropdown options inherit OS defaults on most browsers, which renders as
+   dark-on-light against the app's dark theme and looks washed out. Forcing
+   the option background + color (Chrome/Edge on Windows respect this) plus
+   color-scheme: dark (so the SDK-rendered scrollbar/chrome match) keeps the
+   open dropdown legible. */
+select { color-scheme: dark; }
+select option { background-color: var(--surface); color: var(--text); }
+
 /* ── Header / Top-level Module Nav ── */
 
 header {
