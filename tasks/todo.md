@@ -64,9 +64,24 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **PB.4** Timeline dep arrows: **SHELVED 2026-05-19.** Three rounds of fixes (`16b4f10` y-offset + arrowheads, `70ca556` SVG-width, `7fe169e` visibility boost) all produced straight diagonals that cut through intervening rows. Arrows removed entirely from the Timeline view in the shelving commit. Dep relationships still surface on the per-task panel (Dependencies section) and via the `⛔ Blocked by N` row badge in List view. Proper visualisation would need Manhattan routing (right-angle doglegs) — not in PB-scope; revive under a Phase 7+ task if Brad wants it back.
 - [x] **PB.5** Dashboard chart: bar/label scaling distorts when one bucket dominates (label clips, no headroom) — S — _smoke step 14_ — _done 2026-05-19, `cb17652` (chartMax rounds up ≥ max+1 or 1.2× max)_
 - [x] **PB.6** Firebase SDK Cross-Origin-Opener-Policy warnings on sign-in popup (cosmetic; consider SDK upgrade or `signInWithRedirect`) — XS — _smoke step 16_ — _done 2026-05-19, `94cbe78` (switched popup → redirect)_
-- [ ] **PB.7** Project status doesn't reflect task completion (100% done can sit at "planning") — needs spec: auto-promote vs suggestion banner vs derive — S spec + S impl — _smoke step 12_
-- [ ] **PB.8** Dashboard cards should drill down to a filtered task list (e.g. click "Due this week" → list of project·task) — M — _smoke step 14_
-- [ ] **PB.9** Joint-assignee support (Brad + Diana on one task) — needs spec: multi-select assignees vs "Joint" pseudo-value; ripples through sort/group/filter/My-Tasks bucketing/audit format — M spec + L impl — _smoke step 10_
+> **Polish round 2026-05-19:** PB.7/8/9 specced and planned. See [SPEC-polish.md](SPEC-polish.md) + [plan-polish.md](plan-polish.md). Hybrid PB.7 (`statusOverride` flag + `effectiveProjectStatus()`), multi-select array PB.9 (`task.assignees` + `readAssignees()`), and `dashboardView`-filter PB.8. Phase order: PB.7 → PB.9 → PB.8 → wrap.
+
+- [ ] **PB.7** Project status doesn't reflect task completion — **hybrid: derived default + `statusOverride` flag** — [plan-polish §Phase 1](plan-polish.md#phase-1--pb7-hybrid-project-status-derivation)
+  - [ ] **PB.7.T1** Data layer — `statusOverride` field + `effectiveProjectStatus()` + ≥8 unit cases — S
+  - [ ] **PB.7.T2** UI toggle + read-path migration + `pb7-status-derive` E2E block — M
+  - [ ] **Polish Checkpoint 1**: two-tab Firebase smoke + user review
+- [ ] **PB.9** Joint-assignee — **multi-select: `task.assignees` array, "Joint" label for canonical Brad+Diana pair** — [plan-polish §Phase 2](plan-polish.md#phase-2--pb9-joint-assignee-multi-select)
+  - [ ] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + ≥10 unit cases — M
+  - [ ] **PB.9.T4** Task form multi-select + task panel chip render — M
+  - [ ] **PB.9.T5** List view, group-by, filter UI, My Tasks consumption — M
+  - [ ] **PB.9.T6** Audit feed + notifications recipient resolver + `pb9-joint-assignee` E2E + two-tab smoke — M
+  - [ ] **Polish Checkpoint 2**: `git grep .assignee` triage + two-tab smoke + user review
+- [ ] **PB.8** Dashboard cards drill down to filtered task list — **`dashboardView` filter primitive** — [plan-polish §Phase 3](plan-polish.md#phase-3--pb8-dashboard-card-drill-down)
+  - [ ] **PB.8.T7** `dashboardView` enum on `filterTasks` + card-to-view map + ≥5 unit cases — S
+  - [ ] **PB.8.T8** Clickable cards + keyboard nav + `pb8-drill-down` E2E block — M
+  - [ ] **Polish Checkpoint 3**: user review
+- [ ] **PB Wrap.T9** Update todo.md, HANDOVER.md, CHANGELOG.md — XS (docs only)
+  - [ ] **Polish Checkpoint DONE**: 9 of 9 PB items resolved, ready for Phase 6
 
 ## Phase 6 — Email Notifications via n8n + In-App Bell
 
