@@ -54,11 +54,13 @@ function trim(s) {
 export function createProject(input) {
     const inStatus = input && input.status;
     const inParticipants = input && input.participants;
+    const inOverride = input && input.statusOverride;
     const at = nowIso();
     return {
         id: generateId(),
         name: trim(input && input.name),
         status: STATUS_SET.has(inStatus) ? inStatus : 'planning',
+        statusOverride: inOverride === true,
         startDate: (input && input.startDate) || null,
         endDate: (input && input.endDate) || null,
         participants: Array.isArray(inParticipants) && inParticipants.length
@@ -74,14 +76,22 @@ export function createProject(input) {
 /**
  * Backfill defaults for projects loaded from storage. Future-proofs against
  * shape drift between schema versions without a migration script.
+ *
+ * `statusOverride` (PB.7): when missing on legacy records, default true for
+ * non-derivable statuses (`on-hold`, `cancelled`) so we don't fight the user
+ * by auto-flipping them to derived values; default false otherwise.
  */
 export function sanitiseProject(p) {
     if (!p || typeof p !== 'object') return null;
     const at = nowIso();
+    const status = STATUS_SET.has(p.status) ? p.status : 'planning';
+    const explicitOverride = typeof p.statusOverride === 'boolean';
+    const overrideDefault = (status === 'on-hold' || status === 'cancelled');
     return {
         id: p.id || generateId(),
         name: trim(p.name),
-        status: STATUS_SET.has(p.status) ? p.status : 'planning',
+        status,
+        statusOverride: explicitOverride ? p.statusOverride : overrideDefault,
         startDate: p.startDate || null,
         endDate: p.endDate || null,
         participants: Array.isArray(p.participants) && p.participants.length
@@ -98,6 +108,7 @@ export function sanitiseProject(p) {
 export function validateProject(p) {
     if (!p || !trim(p.name)) return 'Name is required';
     if (!STATUS_SET.has(p.status)) return `Invalid status: ${p.status}`;
+    if (typeof p.statusOverride !== 'boolean') return 'statusOverride must be a boolean';
     if (!Array.isArray(p.participants) || p.participants.length === 0) {
         return 'At least one participant is required';
     }
@@ -105,6 +116,26 @@ export function validateProject(p) {
         return 'End date must be on or after start date';
     }
     return null;
+}
+
+/**
+ * Resolve the effective project status (PB.7).
+ *
+ * Override on → stored `status` wins (including non-derivable `on-hold` /
+ * `cancelled`). Override off + no tasks → stored `status`. Otherwise derive
+ * from task completion: 0 done → 'planning', all done → 'completed',
+ * partial → 'active'. Caller is expected to pass the slice of tasks
+ * belonging to this project.
+ */
+export function effectiveProjectStatus(project, tasks) {
+    if (!project) return null;
+    if (project.statusOverride) return project.status;
+    if (!Array.isArray(tasks) || tasks.length === 0) return project.status;
+    let done = 0;
+    for (const t of tasks) if (t && t.status === 'done') done++;
+    if (done === 0) return 'planning';
+    if (done === tasks.length) return 'completed';
+    return 'active';
 }
 
 // ── List mutators (return new arrays; never mutate input) ──

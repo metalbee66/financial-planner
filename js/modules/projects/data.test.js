@@ -20,6 +20,7 @@ import {
     deleteProjectFromList,
     findProject,
     sanitiseProject,
+    effectiveProjectStatus,
     createTask,
     sanitiseTask,
     validateTask,
@@ -129,6 +130,23 @@ test('createProject ids are unique across rapid calls', () => {
     eq(ids.size, 50, 'all ids unique');
 });
 
+// PB.7
+
+test('createProject defaults statusOverride to false', () => {
+    const p = createProject({ name: 'X' });
+    eq(p.statusOverride, false);
+});
+
+test('createProject accepts an explicit statusOverride', () => {
+    eq(createProject({ name: 'X', statusOverride: true }).statusOverride, true);
+    eq(createProject({ name: 'X', statusOverride: false }).statusOverride, false);
+});
+
+test('createProject coerces non-boolean statusOverride to false', () => {
+    eq(createProject({ name: 'X', statusOverride: 'yes' }).statusOverride, false);
+    eq(createProject({ name: 'X', statusOverride: 1 }).statusOverride, false);
+});
+
 test('createProject preserves caller-supplied participants', () => {
     const p = createProject({ name: 'X', participants: ['brad'] });
     eq(p.participants, ['brad']);
@@ -171,6 +189,12 @@ test('validateProject rejects empty participants', () => {
 
 test('PROJECT_STATUSES exposes the planned enum', () => {
     eq(PROJECT_STATUSES, ['planning', 'active', 'on-hold', 'completed', 'cancelled']);
+});
+
+test('validateProject rejects non-boolean statusOverride', () => {
+    const p = createProject({ name: 'X' });
+    p.statusOverride = 'yes';
+    truthy(validateProject(p));
 });
 
 // ── list mutators ──
@@ -237,6 +261,68 @@ test('sanitiseProject preserves valid fields', () => {
     eq(out.id, p.id);
     eq(out.status, 'active');
     eq(out.createdAt, p.createdAt);
+});
+
+// PB.7 — sanitiseProject statusOverride defaults
+
+test('sanitiseProject defaults statusOverride=false for derivable statuses (legacy records)', () => {
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'planning' }).statusOverride, false);
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'active' }).statusOverride, false);
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'completed' }).statusOverride, false);
+});
+
+test('sanitiseProject defaults statusOverride=true for on-hold / cancelled (legacy records)', () => {
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'on-hold' }).statusOverride, true);
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'cancelled' }).statusOverride, true);
+});
+
+test('sanitiseProject preserves an explicit statusOverride regardless of status', () => {
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'on-hold', statusOverride: false }).statusOverride, false);
+    eq(sanitiseProject({ id: 'p_a', name: 'A', status: 'planning', statusOverride: true }).statusOverride, true);
+});
+
+// ── effectiveProjectStatus (PB.7) ──
+
+// Build a task with just the status field — effectiveProjectStatus only reads `status`.
+function statusTask(s) { return { status: s }; }
+
+test('effectiveProjectStatus returns stored status when override is on', () => {
+    const p = createProject({ name: 'X', status: 'on-hold', statusOverride: true });
+    eq(effectiveProjectStatus(p, [statusTask('done'), statusTask('done')]), 'on-hold');
+});
+
+test('effectiveProjectStatus returns stored status when override is on (cancelled)', () => {
+    const p = createProject({ name: 'X', status: 'cancelled', statusOverride: true });
+    eq(effectiveProjectStatus(p, [statusTask('not-started')]), 'cancelled');
+});
+
+test('effectiveProjectStatus returns stored status with empty/missing task list', () => {
+    const p = createProject({ name: 'X', status: 'active' });
+    eq(effectiveProjectStatus(p, []), 'active');
+    eq(effectiveProjectStatus(p, null), 'active');
+    eq(effectiveProjectStatus(p, undefined), 'active');
+});
+
+test('effectiveProjectStatus derives planning when no tasks are done', () => {
+    const p = createProject({ name: 'X', status: 'active' });
+    eq(effectiveProjectStatus(p, [statusTask('not-started'), statusTask('in-progress')]), 'planning');
+});
+
+test('effectiveProjectStatus derives active when some tasks are done', () => {
+    const p = createProject({ name: 'X', status: 'planning' });
+    eq(effectiveProjectStatus(p, [statusTask('done'), statusTask('in-progress')]), 'active');
+});
+
+test('effectiveProjectStatus derives completed when all tasks are done', () => {
+    const p = createProject({ name: 'X', status: 'planning' });
+    eq(effectiveProjectStatus(p, [statusTask('done'), statusTask('done')]), 'completed');
+});
+
+test('effectiveProjectStatus derives even when stored status is on-hold but override is off', () => {
+    // Sanitiser would have set override=true for a legacy on-hold record, but if the user
+    // explicitly toggles override off, derivation must win.
+    const p = { ...createProject({ name: 'X', status: 'on-hold' }), statusOverride: false };
+    eq(effectiveProjectStatus(p, [statusTask('done')]), 'completed');
 });
 
 // ── createTask ──
