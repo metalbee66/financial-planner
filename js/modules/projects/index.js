@@ -1050,7 +1050,7 @@ function renderTimelineBody(root, p, allTasks) {
                 ${ordered.map(renderItem).join('')}
                 ${arrows.length ? `
                     <svg class="timeline-arrows" aria-hidden="true"
-                        style="position:absolute; left:200px; right:0; top:4px; height:${ordered.length * ROW_H}px; pointer-events:none;">
+                        style="position:absolute; left:200px; top:4px; width:calc(100% - 200px); height:${ordered.length * ROW_H}px; pointer-events:none; display:block;">
                         <defs>
                             <marker id="tl-arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
                                 markerWidth="7" markerHeight="7" orient="auto-start-reverse">
