@@ -16,7 +16,7 @@
  * Phase 6.3 will mirror the "instant" subset into the email queue.
  */
 
-import { countBlockingDeps, emailToParticipantId } from './data.js';
+import { countBlockingDeps, emailToParticipantId, readAssignees } from './data.js';
 
 /** All notification kinds this module knows how to produce. */
 export const NOTIFICATION_KINDS = [
@@ -97,7 +97,11 @@ export function eventToNotification(event, task, project, user) {
 
     switch (event.kind) {
         case 'assignee_changed': {
-            if (event.after !== user) return null;
+            // PB.9: event.after is an array of new assignees (legacy: string).
+            const after = Array.isArray(event.after)
+                ? event.after
+                : (event.after ? [event.after] : []);
+            if (!after.includes(user)) return null;
             return makeNotification({
                 kind: 'task_assigned',
                 to: user,
@@ -111,7 +115,7 @@ export function eventToNotification(event, task, project, user) {
         }
 
         case 'comment_added': {
-            if (task.assignee !== user) return null;
+            if (!readAssignees(task).includes(user)) return null;
             return makeNotification({
                 kind: 'comment_added',
                 to: user,
@@ -125,7 +129,7 @@ export function eventToNotification(event, task, project, user) {
         }
 
         case 'dependency_unblocked': {
-            if (task.assignee !== user) return null;
+            if (!readAssignees(task).includes(user)) return null;
             return makeNotification({
                 kind: 'dependency_unblocked',
                 to: user,
@@ -157,7 +161,7 @@ export function eventToNotification(event, task, project, user) {
         }
 
         case 'task_due_soon': {
-            if (task.assignee !== user) return null;
+            if (!readAssignees(task).includes(user)) return null;
             return makeNotification({
                 kind: 'task_due_soon',
                 to: user,
@@ -171,7 +175,7 @@ export function eventToNotification(event, task, project, user) {
         }
 
         case 'task_overdue': {
-            if (task.assignee !== user) return null;
+            if (!readAssignees(task).includes(user)) return null;
             return makeNotification({
                 kind: 'task_overdue',
                 to: user,
@@ -232,13 +236,17 @@ export function candidateRecipientsForEvent(event, task, project) {
     if (!event || !task || !project) return [];
     const participants = Array.isArray(project.participants) ? project.participants : [];
     switch (event.kind) {
-        case 'assignee_changed':
+        case 'assignee_changed': {
+            // PB.9: event.after is now an array. Legacy single-string events
+            // (recorded before T6) still resolve via the fallback.
+            if (Array.isArray(event.after)) return event.after.slice();
             return event.after ? [event.after] : [];
+        }
         case 'comment_added':
         case 'dependency_unblocked':
         case 'task_due_soon':
         case 'task_overdue':
-            return task.assignee ? [task.assignee] : [];
+            return readAssignees(task);
         case 'status_changed':
             if (!task.isMilestone || event.after !== 'done' || event.before === 'done') return [];
             return participants.slice();
@@ -301,7 +309,7 @@ export function computeTimeBasedTriggers(tasks, todayIso) {
     const tomorrowMs = todayMs + 24 * 60 * 60 * 1000;
     const out = [];
     for (const t of tasks) {
-        if (!t || !t.dueDate || !t.assignee) continue;
+        if (!t || !t.dueDate || readAssignees(t).length === 0) continue;
         if (t.status === 'done') continue;
         const dueMs = Date.parse(t.dueDate);
         if (Number.isNaN(dueMs)) continue;

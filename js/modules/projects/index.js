@@ -2344,8 +2344,17 @@ function formatEventSummary(e, tasks) {
         case 'status_changed':
             return `${author} changed status from <em>${escapeHtml(TASK_STATUS_LABELS[e.before] || e.before || '—')}</em> to <em>${escapeHtml(TASK_STATUS_LABELS[e.after] || e.after || '—')}</em>`;
         case 'assignee_changed': {
-            const before = e.before ? participantLabel(e.before) : 'unassigned';
-            const after = e.after ? participantLabel(e.after) : 'unassigned';
+            // PB.9: before/after are arrays (new) or strings (legacy events). Joint
+            // pair collapses to "Joint" in the audit just like in the row chip.
+            const labelify = (v) => {
+                const ids = Array.isArray(v) ? v : (v ? [v] : []);
+                if (ids.length === 0) return 'unassigned';
+                const jointKey = DEFAULT_PARTICIPANTS.slice().sort().join(',');
+                if (ids.slice().sort().join(',') === jointKey) return 'Joint';
+                return ids.map(participantLabel).join(', ');
+            };
+            const before = labelify(e.before);
+            const after = labelify(e.after);
             return `${author} changed assignee from <em>${escapeHtml(before)}</em> to <em>${escapeHtml(after)}</em>`;
         }
         case 'due_date_changed': {
@@ -2403,12 +2412,7 @@ function onTaskPanelSave(orig) {
         name: panel.querySelector('#tp-name').value.trim(),
         status: panel.querySelector('#tp-status').value,
         priority: panel.querySelector('#tp-priority').value,
-        // PB.9: write the new assignees array. The legacy `assignee` is dual-
-        // written (first member or null) so taskPatchEvents + notifications.js
-        // continue to fire events while they still read the legacy field —
-        // T6 migrates those and drops the dual-write.
         assignees: checked,
-        assignee: checked[0] || null,
         startDate: panel.querySelector('#tp-start').value || null,
         dueDate: panel.querySelector('#tp-due').value || null,
         description: panel.querySelector('#tp-desc').value,

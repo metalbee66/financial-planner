@@ -943,6 +943,36 @@ test('taskPatchEvents returns [] for empty/null inputs', () => {
     eq(taskPatchEvents(createTask({ name: 'A', projectId: 'p' }), null, 'b'), []);
 });
 
+// PB.9 — taskPatchEvents handles the assignees array
+
+test('taskPatchEvents emits assignee_changed when assignees array changes (single -> joint)', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', assignees: ['brad'] });
+    const events = taskPatchEvents(prev, { assignees: ['brad', 'diana'] }, 'b');
+    eq(events.length, 1);
+    eq(events[0].kind, 'assignee_changed');
+});
+
+test('taskPatchEvents assignee_changed payload carries before/after arrays (PB.9)', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', assignees: ['brad'] });
+    const events = taskPatchEvents(prev, { assignees: ['brad', 'diana'] }, 'b');
+    eq(events[0].before, ['brad']);
+    eq(events[0].after, ['brad', 'diana']);
+});
+
+test('taskPatchEvents treats identical assignee sets (any order) as a no-op', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', assignees: ['brad', 'diana'] });
+    eq(taskPatchEvents(prev, { assignees: ['diana', 'brad'] }, 'b'), []);
+});
+
+test('taskPatchEvents accepts a legacy patch.assignee and still produces an array event', () => {
+    const prev = createTask({ name: 'A', projectId: 'p', assignees: [] });
+    const events = taskPatchEvents(prev, { assignee: 'brad' }, 'b');
+    eq(events.length, 1);
+    eq(events[0].kind, 'assignee_changed');
+    eq(events[0].before, []);
+    eq(events[0].after, ['brad']);
+});
+
 test('sanitiseTask preserves events array', () => {
     const e = createEvent({ kind: 'status_changed', by: 'b', before: 'not-started', after: 'done' });
     const t = createTask({ name: 'A', projectId: 'p', events: [e] });
@@ -2407,6 +2437,65 @@ test('candidateRecipientsForEvent picks the right recipient set per kind', () =>
     eq(candidateRecipientsForEvent({ kind: 'status_changed', before: 'in-progress', after: 'done' }, tm, p), ['brad', 'diana', 'extern']);
     eq(candidateRecipientsForEvent({ kind: 'project_completed' }, t, p), ['brad', 'diana', 'extern']);
     eq(candidateRecipientsForEvent({ kind: 'unknown' }, t, p), []);
+});
+
+// PB.9 — recipient resolution for joint tasks
+
+test('candidateRecipientsForEvent comment_added returns every assignee on a joint task', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignees: ['brad', 'diana'] });
+    eq(candidateRecipientsForEvent({ kind: 'comment_added' }, t, p), ['brad', 'diana']);
+});
+
+test('candidateRecipientsForEvent assignee_changed reads array event.after (PB.9)', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignees: ['brad', 'diana'] });
+    eq(
+        candidateRecipientsForEvent({ kind: 'assignee_changed', after: ['brad', 'diana'] }, t, p),
+        ['brad', 'diana']
+    );
+});
+
+test('candidateRecipientsForEvent assignee_changed tolerates legacy string event.after', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignee: 'diana' });
+    eq(candidateRecipientsForEvent({ kind: 'assignee_changed', after: 'diana' }, t, p), ['diana']);
+});
+
+test('candidateRecipientsForEvent comment_added returns [] for an unassigned task', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignees: [] });
+    eq(candidateRecipientsForEvent({ kind: 'comment_added' }, t, p), []);
+});
+
+test('eventToNotification task_assigned fires for each member of an array event.after', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', name: 'Joint task', assignees: ['brad', 'diana'] });
+    const evt = mkEvent({ kind: 'assignee_changed', by: 'metalbee66@gmail.com', before: [], after: ['brad', 'diana'] });
+    // Brad is the actor (self) so he should NOT get notified
+    eq(eventToNotification(evt, t, p, 'brad'), null);
+    // Diana should
+    const nDiana = eventToNotification(evt, t, p, 'diana');
+    truthy(nDiana, 'diana should be notified');
+    eq(nDiana.kind, 'task_assigned');
+});
+
+test('eventToNotification comment_added notifies every joint assignee except the commenter', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', name: 'Plant roses', assignees: ['brad', 'diana'] });
+    // Diana is the commenter, brad is the joint partner — brad should be notified, diana shouldn't
+    const evt = mkEvent({ kind: 'comment_added', by: 'dianaleshcheva@gmail.com', after: 'c_1' });
+    truthy(eventToNotification(evt, t, p, 'brad'));
+    eq(eventToNotification(evt, t, p, 'diana'), null);
+});
+
+test('computeTimeBasedTriggers includes joint tasks (PB.9)', () => {
+    const t = mkTask({ id: 't1', projectId: 'pid', assignees: ['brad', 'diana'], dueDate: '2026-05-08', status: 'in-progress' });
+    const out = computeTimeBasedTriggers([t], '2026-05-15');
+    // joint task overdue → one synthetic trigger; recipients resolved downstream
+    eq(out.length, 1);
+    eq(out[0].event.kind, 'task_overdue');
+    eq(out[0].task.id, 't1');
 });
 
 // ── deriveDependencyUnblockedTriggers ──

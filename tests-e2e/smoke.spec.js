@@ -2039,6 +2039,35 @@ test.describe('PB.7 — Project status derivation', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('PB.9 — Joint assignee', () => {
+
+    test('joint task renders Joint chip and matches each individual assignee filter', async ({ page }) => {
+        await createProject(page, { name: 'Joint test' });
+        await page.locator('#task-add-name').fill('Joint task');
+        await page.locator('#task-add-name').press('Enter');
+
+        // Open the panel and check both Brad + Diana via the multi-select.
+        await page.locator('.task-row', { hasText: 'Joint task' }).locator('.task-row-name').click();
+        await page.locator('#tp-assignees input[type="checkbox"][value="brad"]').check();
+        await page.locator('#tp-assignees input[type="checkbox"][value="diana"]').check();
+        await page.locator('#tp-save').click();
+
+        // Row collapses the canonical pair into a single "Joint" chip.
+        const row = page.locator('.task-row', { hasText: 'Joint task' });
+        await expect(row.locator('.chip')).toHaveCount(1);
+        await expect(row.locator('.chip .chip-label')).toHaveText('Joint');
+
+        // Filter by Brad — joint task is present (intersection semantics).
+        await page.locator('#tasks-filter-assignee').selectOption('brad');
+        await expect(page.locator('.task-row', { hasText: 'Joint task' })).toBeVisible();
+
+        // Filter by Diana — same task still present.
+        await page.locator('#tasks-filter-assignee').selectOption('diana');
+        await expect(page.locator('.task-row', { hasText: 'Joint task' })).toBeVisible();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

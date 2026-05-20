@@ -439,15 +439,15 @@ export function addCommentToTask(list, taskId, comment) {
 // ── Activity / audit-trail (Task 3.3) ──
 
 /**
- * Map of task field → event kind for the audit-tracked subset. Per plan §3.3
- * we log status/assignee/dueDate changes plus dependency add/remove (those
- * have their own helpers because they're list deltas, not field overwrites).
+ * Map of scalar task field → event kind. Per plan §3.3 we log status and
+ * dueDate changes here; assignee changes are array-shaped and handled
+ * separately in taskPatchEvents (PB.9). Dependency add/remove have their
+ * own helpers because they're list deltas, not field overwrites.
  * Untracked fields (name, description, priority, startDate) intentionally
  * don't generate events to keep the feed focused on user-meaningful changes.
  */
 const TRACKED_FIELD_EVENT_KINDS = {
     status: 'status_changed',
-    assignee: 'assignee_changed',
     dueDate: 'due_date_changed',
 };
 
@@ -487,6 +487,11 @@ export function addEventToTask(list, taskId, event) {
  * Diff `prev` against `patch` over the audit-tracked fields and return one
  * event per actual change. Empty array for untracked fields, no-op patches,
  * or null inputs. Caller appends each via `addEventToTask`.
+ *
+ * Scalar fields (status, dueDate) compare with ===. Assignees (PB.9) is an
+ * array — handled separately: if the patch touches assignees (new shape) or
+ * assignee (legacy), we read both sides via readAssignees and emit an event
+ * with array payloads when the sorted sets differ.
  */
 export function taskPatchEvents(prev, patch, by) {
     if (!prev || !patch) return [];
@@ -497,6 +502,17 @@ export function taskPatchEvents(prev, patch, by) {
         const after = patch[field] == null ? null : patch[field];
         if (before === after) continue;
         events.push(createEvent({ kind, by, before, after }));
+    }
+    const patchTouchesAssignees = Object.prototype.hasOwnProperty.call(patch, 'assignees')
+        || Object.prototype.hasOwnProperty.call(patch, 'assignee');
+    if (patchTouchesAssignees) {
+        const before = readAssignees(prev);
+        const after = readAssignees({ ...prev, ...patch });
+        const beforeKey = before.slice().sort().join(',');
+        const afterKey = after.slice().sort().join(',');
+        if (beforeKey !== afterKey) {
+            events.push(createEvent({ kind: 'assignee_changed', by, before, after }));
+        }
     }
     return events;
 }
