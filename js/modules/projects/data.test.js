@@ -56,6 +56,8 @@ import {
     groupTopLevelTasks,
     TASK_SORT_FIELDS,
     TASK_GROUP_OPTIONS,
+    DASHBOARD_CARD_VIEWS,
+    DASHBOARD_VIEWS,
     computeTimelineRange,
     computeTaskBars,
     getMonthGridCells,
@@ -1318,6 +1320,113 @@ test('filterTasks treats null filter values as "no filter on that dimension"', (
     eq(
         filterTasks(list, { assignee: null, status: null, milestonesOnly: false }).map(t => t.name),
         ['a', 'b']
+    );
+});
+
+// PB.8 — dashboardView filter primitive
+
+test('DASHBOARD_VIEWS exposes the five drillable views', () => {
+    eq(DASHBOARD_VIEWS.slice().sort(), ['completedLast30Days', 'dueThisWeek', 'open', 'overdue', 'upcomingMilestones']);
+});
+
+test('DASHBOARD_CARD_VIEWS maps the five clickable cards to their views (activeProjects is non-clickable)', () => {
+    eq(DASHBOARD_CARD_VIEWS, {
+        openTasks: 'open',
+        overdueTasks: 'overdue',
+        dueThisWeek: 'dueThisWeek',
+        completedLast30Days: 'completedLast30Days',
+        upcomingMilestones: 'upcomingMilestones',
+    });
+});
+
+test('filterTasks dashboardView=open returns tasks whose status is not done', () => {
+    const list = [
+        mkTask({ name: 'open', status: 'in-progress' }),
+        mkTask({ name: 'done', status: 'done' }),
+    ];
+    eq(
+        filterTasks(list, { dashboardView: 'open', today: '2026-05-15' }).map(t => t.name),
+        ['open']
+    );
+});
+
+test('filterTasks dashboardView=overdue keeps non-done tasks past today', () => {
+    const list = [
+        mkTask({ name: 'overdue', status: 'in-progress', dueDate: '2026-05-10' }),
+        mkTask({ name: 'today',   status: 'in-progress', dueDate: '2026-05-15' }),
+        mkTask({ name: 'done',    status: 'done',        dueDate: '2026-05-10' }),
+        mkTask({ name: 'nodate',  status: 'in-progress', dueDate: null }),
+    ];
+    eq(
+        filterTasks(list, { dashboardView: 'overdue', today: '2026-05-15' }).map(t => t.name),
+        ['overdue']
+    );
+});
+
+test('filterTasks dashboardView=dueThisWeek keeps tasks due in the next 6 days inclusive', () => {
+    const list = [
+        mkTask({ name: 'today',   status: 'in-progress', dueDate: '2026-05-15' }),
+        mkTask({ name: 'in6',     status: 'in-progress', dueDate: '2026-05-21' }),
+        mkTask({ name: 'past6',   status: 'in-progress', dueDate: '2026-05-22' }),
+        mkTask({ name: 'overdue', status: 'in-progress', dueDate: '2026-05-14' }),
+        mkTask({ name: 'done',    status: 'done',        dueDate: '2026-05-15' }),
+    ];
+    eq(
+        filterTasks(list, { dashboardView: 'dueThisWeek', today: '2026-05-15' }).map(t => t.name).sort(),
+        ['in6', 'today']
+    );
+});
+
+test('filterTasks dashboardView=completedLast30Days keeps done tasks completed within the trailing window', () => {
+    const list = [
+        mkTask({ name: 'recent', status: 'done', completedAt: '2026-05-01T10:00:00.000Z' }),
+        mkTask({ name: 'today',  status: 'done', completedAt: '2026-05-15T10:00:00.000Z' }),
+        mkTask({ name: 'old',    status: 'done', completedAt: '2026-04-10T10:00:00.000Z' }),
+        mkTask({ name: 'open',   status: 'in-progress' }),
+    ];
+    eq(
+        filterTasks(list, { dashboardView: 'completedLast30Days', today: '2026-05-15' }).map(t => t.name).sort(),
+        ['recent', 'today']
+    );
+});
+
+test('filterTasks dashboardView=upcomingMilestones keeps non-done milestones due within 14 days inclusive', () => {
+    const list = [
+        mkTask({ name: 'm-today',  status: 'in-progress', isMilestone: true,  dueDate: '2026-05-15' }),
+        mkTask({ name: 'm-13days', status: 'in-progress', isMilestone: true,  dueDate: '2026-05-28' }),
+        mkTask({ name: 'm-late',   status: 'in-progress', isMilestone: true,  dueDate: '2026-05-30' }),
+        mkTask({ name: 'm-done',   status: 'done',        isMilestone: true,  dueDate: '2026-05-15' }),
+        mkTask({ name: 'notms',    status: 'in-progress', isMilestone: false, dueDate: '2026-05-15' }),
+    ];
+    eq(
+        filterTasks(list, { dashboardView: 'upcomingMilestones', today: '2026-05-15' }).map(t => t.name).sort(),
+        ['m-13days', 'm-today']
+    );
+});
+
+test('filterTasks dashboardView combines with assignee filter (AND)', () => {
+    const list = [
+        mkTask({ name: 'bradOverdue',  status: 'in-progress', dueDate: '2026-05-10', assignees: ['brad'] }),
+        mkTask({ name: 'dianaOverdue', status: 'in-progress', dueDate: '2026-05-10', assignees: ['diana'] }),
+        mkTask({ name: 'bradOnTime',   status: 'in-progress', dueDate: '2026-05-20', assignees: ['brad'] }),
+    ];
+    eq(
+        filterTasks(list, { dashboardView: 'overdue', assignee: 'brad', today: '2026-05-15' }).map(t => t.name),
+        ['bradOverdue']
+    );
+});
+
+test('filterTasks ignores dashboardView when absent (back-compat)', () => {
+    const list = [mkTask({ name: 'a' }), mkTask({ name: 'b' })];
+    eq(filterTasks(list, {}).map(t => t.name), ['a', 'b']);
+});
+
+test('filterTasks dashboardView keeps the non-matching parent of a matching subtask (scaffold-aware)', () => {
+    const parent = mkTask({ name: 'parent', status: 'done' });
+    const child = mkTask({ name: 'child', parentTaskId: parent.id, status: 'in-progress' });
+    eq(
+        filterTasks([parent, child], { dashboardView: 'open', today: '2026-05-15' }).map(t => t.name).sort(),
+        ['child', 'parent']
     );
 });
 

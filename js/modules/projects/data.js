@@ -630,7 +630,57 @@ export const TASK_SORT_FIELDS = ['dueDate', 'name', 'priority'];
 /** Group-by options surfaced in the list view. */
 export const TASK_GROUP_OPTIONS = ['none', 'status', 'assignee'];
 
+/**
+ * PB.8 — drillable Dashboard cards. Each key is the metric on the card; each
+ * value is the `dashboardView` enum filterTasks understands. The non-drillable
+ * `activeProjects` card is deliberately absent (Resolved Decision 1).
+ */
+export const DASHBOARD_CARD_VIEWS = {
+    openTasks: 'open',
+    overdueTasks: 'overdue',
+    dueThisWeek: 'dueThisWeek',
+    completedLast30Days: 'completedLast30Days',
+    upcomingMilestones: 'upcomingMilestones',
+};
+
+export const DASHBOARD_VIEWS = Object.values(DASHBOARD_CARD_VIEWS);
+const DASHBOARD_VIEW_SET = new Set(DASHBOARD_VIEWS);
+
 const PRIORITY_ORDER = { high: 0, normal: 1, low: 2 };
+
+/**
+ * Resolve a dashboardView enum to a per-task predicate. Returns null for an
+ * unknown view so callers can skip the dimension. `today` is a YYYY-MM-DD
+ * string used for date-window arithmetic; window edges match
+ * computeDashboardMetrics so card counts and filtered list counts agree.
+ */
+function dashboardViewPredicate(view, today) {
+    if (!DASHBOARD_VIEW_SET.has(view)) return null;
+    const weekEnd = today ? addDaysIso(today, 6) : null;
+    const milestoneEnd = today ? addDaysIso(today, 13) : null;
+    const thirtyDaysAgo = today ? addDaysIso(today, -30) : null;
+    switch (view) {
+        case 'open':
+            return (t) => t.status !== 'done';
+        case 'overdue':
+            return (t) => t.status !== 'done' && t.dueDate && today && t.dueDate < today;
+        case 'dueThisWeek':
+            return (t) => t.status !== 'done' && t.dueDate && today
+                && t.dueDate >= today && t.dueDate <= weekEnd;
+        case 'completedLast30Days':
+            return (t) => {
+                if (t.status !== 'done') return false;
+                if (!t.completedAt || !today || !thirtyDaysAgo) return false;
+                const cd = isoDatePart(t.completedAt);
+                return cd && cd >= thirtyDaysAgo && cd <= today;
+            };
+        case 'upcomingMilestones':
+            return (t) => t.isMilestone === true && t.status !== 'done'
+                && t.dueDate && today && t.dueDate >= today && t.dueDate <= milestoneEnd;
+        default:
+            return null;
+    }
+}
 
 /**
  * Pure sort: returns a new array. Tasks with no `dueDate` always sort to the
@@ -680,7 +730,12 @@ export function filterTasks(list, filters) {
     const hasAssignee = f.assignee != null;
     const hasStatus = f.status != null;
     const hasMilestone = !!f.milestonesOnly;
-    if (!hasAssignee && !hasStatus && !hasMilestone) return list.slice();
+    // PB.8: dashboardView is a date-aware predicate set chosen by the
+    // Dashboard card click. `today` defaults to the current date for live UI;
+    // tests pass an explicit value for determinism.
+    const today = f.today || new Date().toISOString().slice(0, 10);
+    const viewPredicate = f.dashboardView ? dashboardViewPredicate(f.dashboardView, today) : null;
+    if (!hasAssignee && !hasStatus && !hasMilestone && !viewPredicate) return list.slice();
 
     const passes = (t) => {
         // PB.9: intersection semantics — selecting "brad" includes joint tasks
@@ -689,6 +744,7 @@ export function filterTasks(list, filters) {
         if (hasAssignee && !readAssignees(t).includes(f.assignee)) return false;
         if (hasStatus && t.status !== f.status) return false;
         if (hasMilestone && !t.isMilestone) return false;
+        if (viewPredicate && !viewPredicate(t)) return false;
         return true;
     };
 

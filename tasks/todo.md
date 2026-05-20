@@ -77,7 +77,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
   - [x] **PB.9.T6** taskPatchEvents arrays + notifications.js readAssignees + audit render Joint label + dropped dual-write + `pb9-joint-assignee` E2E + 10 new unit cases — _done 2026-05-20_
   - [ ] **Polish Checkpoint 2**: `git grep .assignee` triage + two-tab smoke + user review
 - [ ] **PB.8** Dashboard cards drill down to filtered task list — **`dashboardView` filter primitive** — [plan-polish §Phase 3](plan-polish.md#phase-3--pb8-dashboard-card-drill-down)
-  - [ ] **PB.8.T7** `dashboardView` enum on `filterTasks` + card-to-view map + ≥5 unit cases — S
+  - [x] **PB.8.T7** `dashboardView` enum on `filterTasks` + `DASHBOARD_CARD_VIEWS` map + 11 unit cases — _done 2026-05-20_
   - [ ] **PB.8.T8** Clickable cards + keyboard nav + `pb8-drill-down` E2E block — M
   - [ ] **Polish Checkpoint 3**: user review
 - [ ] **PB Wrap.T9** Update todo.md, HANDOVER.md, CHANGELOG.md — XS (docs only)
