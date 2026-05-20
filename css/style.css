@@ -2036,7 +2036,8 @@ select.editable { width: 100px; cursor: pointer; }
     border-left-color: var(--accent);
 }
 .task-row-done .task-row-milestone-glyph { opacity: 0.5; }
-.task-panel-milestone-toggle {
+.task-panel-milestone-toggle,
+.project-form-override-toggle {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -2045,7 +2046,8 @@ select.editable { width: 100px; cursor: pointer; }
     color: var(--text);
     font-size: 0.9rem;
 }
-.task-panel-milestone-toggle input[type="checkbox"] {
+.task-panel-milestone-toggle input[type="checkbox"],
+.project-form-override-toggle input[type="checkbox"] {
     width: 16px;
     height: 16px;
     accent-color: var(--accent);

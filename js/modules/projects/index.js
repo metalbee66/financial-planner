@@ -26,6 +26,7 @@ import {
     updateProjectInList,
     deleteProjectFromList,
     findProject,
+    effectiveProjectStatus,
     createTask,
     validateTask,
     addTaskToList,
@@ -395,6 +396,19 @@ function renderList() {
     }
 }
 
+/**
+ * Clone the project list with `status` set to its effective value (PB.7).
+ * Pass-through for the original record otherwise. Callers feed this into
+ * sort / metric helpers so derivation is the single read path.
+ */
+function resolveProjectStatuses(projects, allTasks) {
+    if (!Array.isArray(projects)) return [];
+    return projects.map(p => {
+        const ptasks = (allTasks || []).filter(t => t.projectId === p.id);
+        return { ...p, status: effectiveProjectStatus(p, ptasks) };
+    });
+}
+
 function renderOverviewBody(root) {
     const items = getProjects().filter(p => !p.archivedAt);
 
@@ -439,7 +453,8 @@ function renderOverviewBody(root) {
     const grid = root.querySelector('#projects-grid');
     const allTasks = getTasks();
     const today = todayIso();
-    sortProjectsForOverview(items, allTasks, { by: sortBy })
+    const resolved = resolveProjectStatuses(items, allTasks);
+    sortProjectsForOverview(resolved, allTasks, { by: sortBy })
         .forEach(p => grid.appendChild(renderCard(p, allTasks, today)));
 }
 
@@ -579,7 +594,8 @@ function renderDashboardBody(root) {
     const today = todayIso();
     const allProjects = getProjects();
     const allTasks = getTasks();
-    const metrics = computeDashboardMetrics(allProjects, allTasks, today);
+    const resolvedProjects = resolveProjectStatuses(allProjects, allTasks);
+    const metrics = computeDashboardMetrics(resolvedProjects, allTasks, today);
     const bars = computeWeeklyCompletionBars(allTasks, today, DASHBOARD_WEEKS);
 
     const cardsHtml = DASHBOARD_CARDS.map(card => {
@@ -799,12 +815,13 @@ function renderDetail() {
     const participants = renderChipsHtml(p.participants);
     const allTasks = findTasksByProject(getTasks(), p.id);
     const activeView = mode.detailView || DEFAULT_DETAIL_VIEW;
+    const effStatus = effectiveProjectStatus(p, allTasks);
 
     host.innerHTML = `
         <div class="projects-toolbar">
             <button class="projects-back-btn" id="projects-back-btn" aria-label="Back to projects">← Back</button>
             <h2 class="projects-title">${escapeHtml(p.name)}</h2>
-            <span class="status-badge status-${p.status}">${STATUS_LABELS[p.status] || p.status}</span>
+            <span class="status-badge status-${effStatus}">${STATUS_LABELS[effStatus] || effStatus}</span>
             <button class="btn-secondary" id="projects-edit-btn">Edit project</button>
         </div>
         <div class="project-detail-meta">
@@ -1403,6 +1420,13 @@ function renderForm() {
         ? sanitiseProject(editing)
         : createProject({});
 
+    // PB.7: dropdown shows the effective status (what the user sees elsewhere) when
+    // override is off, so toggling override on freezes that value into stored.
+    const projectTasks = editing ? findTasksByProject(getTasks(), editing.id) : [];
+    const initialStatus = draft.statusOverride
+        ? draft.status
+        : effectiveProjectStatus(draft, projectTasks);
+
     host.innerHTML = `
         <div class="projects-toolbar">
             <button class="projects-back-btn" id="projects-back-btn" aria-label="Back to projects">← Back</button>
@@ -1418,7 +1442,7 @@ function renderForm() {
                     <label for="pf-status">Status</label>
                     <select id="pf-status">
                         ${PROJECT_STATUSES.map(s =>
-                            `<option value="${s}"${s === draft.status ? ' selected' : ''}>${STATUS_LABELS[s]}</option>`
+                            `<option value="${s}"${s === initialStatus ? ' selected' : ''}>${STATUS_LABELS[s]}</option>`
                         ).join('')}
                     </select>
                 </div>
@@ -1430,6 +1454,12 @@ function renderForm() {
                     <label for="pf-end">End date</label>
                     <input type="date" id="pf-end" value="${escapeAttr(draft.endDate || '')}" />
                 </div>
+            </div>
+            <div class="form-row">
+                <label class="project-form-override-toggle">
+                    <input type="checkbox" id="pf-status-override"${draft.statusOverride ? ' checked' : ''} />
+                    <span>Manage status manually (otherwise derive from task completion)</span>
+                </label>
             </div>
             <div class="form-row" id="pf-participants-row">
                 <label>Participants</label>
@@ -1465,6 +1495,18 @@ function renderForm() {
         onSubmit(editing && editing.id);
     });
 
+    // PB.7: on uncheck, snap the dropdown back to the value derivation would
+    // produce (forcing statusOverride:false so we get the derived path even
+    // when the loaded record has override on). Saving then writes that as
+    // stored, keeping the displayed status stable across the toggle.
+    const overrideBox = host.querySelector('#pf-status-override');
+    const statusSelect = host.querySelector('#pf-status');
+    overrideBox.addEventListener('change', () => {
+        if (!overrideBox.checked) {
+            statusSelect.value = effectiveProjectStatus({ ...draft, statusOverride: false }, projectTasks);
+        }
+    });
+
     if (!editing) {
         host.querySelector('#pf-name').focus();
     }
@@ -1474,6 +1516,7 @@ function readForm() {
     return {
         name: host.querySelector('#pf-name').value,
         status: host.querySelector('#pf-status').value,
+        statusOverride: host.querySelector('#pf-status-override').checked,
         startDate: host.querySelector('#pf-start').value || null,
         endDate: host.querySelector('#pf-end').value || null,
         participants: getParticipantEditorValue(host.querySelector('#pf-participants')),

@@ -1945,6 +1945,83 @@ test.describe('Phase 5.4 — Files summary by project', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('PB.7 — Project status derivation', () => {
+
+    test('status auto-derives through planning → active → completed as tasks land', async ({ page }) => {
+        await createProject(page, { name: 'Derive', status: 'planning' });
+        // Add two tasks so we can demonstrate the partial = active transition.
+        await page.locator('#task-add-name').fill('Step 1');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#task-add-name').fill('Step 2');
+        await page.locator('#task-add-name').press('Enter');
+
+        const detailBadge = page.locator('.projects-toolbar > .status-badge');
+        // Two tasks, 0 done → planning
+        await expect(detailBadge).toHaveText('Planning');
+
+        // 1/2 done → active
+        await page.locator('.task-row', { hasText: 'Step 1' }).locator('.task-row-status').selectOption('done');
+        await expect(detailBadge).toHaveText('Active');
+
+        // 2/2 done → completed
+        await page.locator('.task-row', { hasText: 'Step 2' }).locator('.task-row-status').selectOption('done');
+        await expect(detailBadge).toHaveText('Completed');
+
+        // Card on the Overview also reflects the derived value
+        await backToList(page);
+        await expect(page.locator('.project-card', { hasText: 'Derive' }).locator('.status-badge')).toHaveText('Completed');
+    });
+
+    test('toggling override ON freezes status and survives reload', async ({ page }) => {
+        await createProject(page, { name: 'Frozen', status: 'planning' });
+        await page.locator('#task-add-name').fill('Done task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row').first().locator('.task-row-status').selectOption('done');
+        const detailBadge = page.locator('.projects-toolbar > .status-badge');
+        await expect(detailBadge).toHaveText('Completed');
+
+        // Edit form: with override off, the dropdown shows the effective value so
+        // toggling override on freezes that value into stored.
+        await page.locator('#projects-edit-btn').click();
+        await expect(page.locator('#pf-status')).toHaveValue('completed');
+
+        // Toggle override on, then pick on-hold.
+        await page.locator('#pf-status-override').check();
+        await page.locator('#pf-status').selectOption('on-hold');
+        await page.locator('#pf-save').click();
+        await expect(detailBadge).toHaveText('On hold');
+
+        // Reload: sanitiseProject preserves the explicit override=true on the loaded record.
+        await page.reload();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Frozen' }).click();
+        await expect(detailBadge).toHaveText('On hold');
+    });
+
+    test('toggling override OFF re-derives immediately', async ({ page }) => {
+        await createProject(page, { name: 'Rederive', status: 'planning' });
+        await page.locator('#task-add-name').fill('Done task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row').first().locator('.task-row-status').selectOption('done');
+        const detailBadge = page.locator('.projects-toolbar > .status-badge');
+
+        // Bring it manually to on-hold via the override path.
+        await page.locator('#projects-edit-btn').click();
+        await page.locator('#pf-status-override').check();
+        await page.locator('#pf-status').selectOption('on-hold');
+        await page.locator('#pf-save').click();
+        await expect(detailBadge).toHaveText('On hold');
+
+        // Untick override: dropdown snaps to the about-to-derive value, save, status flips.
+        await page.locator('#projects-edit-btn').click();
+        await page.locator('#pf-status-override').uncheck();
+        await expect(page.locator('#pf-status')).toHaveValue('completed');
+        await page.locator('#pf-save').click();
+        await expect(detailBadge).toHaveText('Completed');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

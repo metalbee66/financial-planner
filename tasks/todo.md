@@ -68,7 +68,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 
 - [ ] **PB.7** Project status doesn't reflect task completion — **hybrid: derived default + `statusOverride` flag** — [plan-polish §Phase 1](plan-polish.md#phase-1--pb7-hybrid-project-status-derivation)
   - [x] **PB.7.T1** Data layer — `statusOverride` field + `effectiveProjectStatus()` + 14 unit cases — _done 2026-05-19_
-  - [ ] **PB.7.T2** UI toggle + read-path migration + `pb7-status-derive` E2E block — M
+  - [x] **PB.7.T2** UI toggle + read-path migration + `pb7-status-derive` E2E block (3 scenarios) — _done 2026-05-20_
   - [ ] **Polish Checkpoint 1**: two-tab Firebase smoke + user review
 - [ ] **PB.9** Joint-assignee — **multi-select: `task.assignees` array, "Joint" label for canonical Brad+Diana pair** — [plan-polish §Phase 2](plan-polish.md#phase-2--pb9-joint-assignee-multi-select)
   - [ ] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + ≥10 unit cases — M
