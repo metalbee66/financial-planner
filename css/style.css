@@ -2037,7 +2037,8 @@ select.editable { width: 100px; cursor: pointer; }
 }
 .task-row-done .task-row-milestone-glyph { opacity: 0.5; }
 .task-panel-milestone-toggle,
-.project-form-override-toggle {
+.project-form-override-toggle,
+.task-panel-assignee-checkbox {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -2047,10 +2048,22 @@ select.editable { width: 100px; cursor: pointer; }
     font-size: 0.9rem;
 }
 .task-panel-milestone-toggle input[type="checkbox"],
-.project-form-override-toggle input[type="checkbox"] {
+.project-form-override-toggle input[type="checkbox"],
+.task-panel-assignee-checkbox input[type="checkbox"] {
     width: 16px;
     height: 16px;
     accent-color: var(--accent);
+}
+.task-panel-assignees-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 6px 0;
+}
+.task-panel-head-chips {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 8px;
 }
 .task-panel-milestone-glyph {
     color: var(--accent);

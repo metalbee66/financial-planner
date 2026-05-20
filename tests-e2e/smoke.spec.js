@@ -69,6 +69,23 @@ async function backToList(page) {
     await expect(page.locator('.projects-grid, .projects-empty-state')).toBeVisible();
 }
 
+/**
+ * PB.9: the panel assignee picker became a checkbox group. This helper reproduces
+ * the single-assignee semantics the old `selectOption('brad')` style had —
+ * uncheck everything, then check the requested one. Pass '' / null for unassigned.
+ */
+async function setPanelAssignee(page, assignee) {
+    const checkboxes = page.locator('#tp-assignees input[type="checkbox"]');
+    const n = await checkboxes.count();
+    for (let i = 0; i < n; i++) {
+        const cb = checkboxes.nth(i);
+        if (await cb.isChecked()) await cb.uncheck();
+    }
+    if (assignee) {
+        await page.locator(`#tp-assignees input[type="checkbox"][value="${assignee}"]`).check();
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 test.describe('Phase 1.1 — Project CRUD', () => {
 
@@ -659,7 +676,7 @@ test.describe('Phase 3.3 — Activity / audit-trail feed', () => {
         await addTask(page, 'Plan');
         await openTaskPanel(page, 'Plan');
 
-        await page.locator('#tp-assignee').selectOption('brad');
+        await setPanelAssignee(page, 'brad');
         await page.locator('#tp-due').fill('2026-12-31');
         await page.locator('#tp-save').click();
 
@@ -988,7 +1005,7 @@ test.describe('Phase 4.1 — List view (sort, group, filter)', () => {
         await page.locator('.task-row-name', { hasText: taskName }).click();
         if (fields.priority) await page.locator('#tp-priority').selectOption(fields.priority);
         if (fields.assignee !== undefined) {
-            await page.locator('#tp-assignee').selectOption(fields.assignee || '');
+            await setPanelAssignee(page, fields.assignee || '');
         }
         if (fields.status) await page.locator('#tp-status').selectOption(fields.status);
         await page.locator('#tp-save').click();
@@ -1541,7 +1558,7 @@ test.describe('Phase 5.2 — My Tasks (per-user summary tab)', () => {
     async function setTaskAssigneeDue(page, taskName, { assignee, dueDate, status } = {}) {
         await page.locator('.task-row-name', { hasText: taskName }).click();
         if (assignee !== undefined) {
-            await page.locator('#tp-assignee').selectOption(assignee || '');
+            await setPanelAssignee(page, assignee || '');
         }
         if (dueDate !== undefined) {
             await page.locator('#tp-due').fill(dueDate || '');

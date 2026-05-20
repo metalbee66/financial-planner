@@ -27,6 +27,7 @@ import {
     deleteProjectFromList,
     findProject,
     effectiveProjectStatus,
+    readAssignees,
     createTask,
     validateTask,
     addTaskToList,
@@ -1216,7 +1217,8 @@ function collectAssigneeOptions(project, tasks) {
     };
     (project.participants || []).forEach(p => add(p, participantLabel(p)));
     tasks.forEach(t => {
-        if (t.assignee) add(t.assignee, participantLabel(t.assignee));
+        // PB.9: surface externals from the assignees array, not just legacy single field.
+        for (const a of readAssignees(t)) add(a, participantLabel(a));
     });
     return out;
 }
@@ -1322,9 +1324,7 @@ function renderTaskRow(t, project, isSubtask) {
         + (t.isMilestone ? ' task-row-milestone' : '');
     row.dataset.taskId = t.id;
 
-    const assigneeHtml = t.assignee
-        ? `<span class="chip${DEFAULT_PARTICIPANTS.includes(t.assignee) ? '' : ' chip-external'}"><span class="chip-avatar">${escapeHtml(initialOf(participantLabel(t.assignee)))}</span><span class="chip-label">${escapeHtml(participantLabel(t.assignee))}</span></span>`
-        : '<span class="task-row-unassigned">Unassigned</span>';
+    const assigneeHtml = renderAssigneeChipsHtml(t) || '<span class="task-row-unassigned">Unassigned</span>';
 
     const dueHtml = t.dueDate
         ? `<span class="task-row-due${isOverdue(t) ? ' task-row-due-overdue' : ''}">${escapeHtml(formatDate(t.dueDate))}</span>`
@@ -1408,6 +1408,27 @@ function isOverdue(t) {
 
 function participantLabel(p) {
     return PARTICIPANT_LABELS[p] || p;
+}
+
+/**
+ * Render the assignees of a task as one or more chip spans (PB.9). The
+ * canonical Brad+Diana pair collapses into a single "Joint" chip; otherwise
+ * one chip per assignee. Returns '' for an unassigned task so callers can
+ * choose their own fallback (e.g. "Unassigned" placeholder vs blank).
+ */
+function renderAssigneeChipsHtml(task) {
+    const ids = readAssignees(task);
+    if (ids.length === 0) return '';
+    const sorted = ids.slice().sort();
+    const jointKey = DEFAULT_PARTICIPANTS.slice().sort().join(',');
+    if (sorted.length === DEFAULT_PARTICIPANTS.length && sorted.join(',') === jointKey) {
+        return `<span class="chip"><span class="chip-avatar">J</span><span class="chip-label">Joint</span></span>`;
+    }
+    return ids.map(id => {
+        const isExternal = !DEFAULT_PARTICIPANTS.includes(id);
+        const label = participantLabel(id);
+        return `<span class="chip${isExternal ? ' chip-external' : ''}"><span class="chip-avatar">${escapeHtml(initialOf(label))}</span><span class="chip-label">${escapeHtml(label)}</span></span>`;
+    }).join('');
 }
 
 // ── Form view (create or edit) ──
@@ -1718,6 +1739,7 @@ function renderTaskPanel(t) {
     panel.innerHTML = `
         <div class="task-panel-head">
             <span class="task-panel-project">${escapeHtml(projectName)}</span>
+            <span class="task-panel-head-chips">${renderAssigneeChipsHtml(t)}</span>
             <button type="button" class="task-panel-close" aria-label="Close panel">×</button>
         </div>
         <div class="task-panel-body">
@@ -1743,13 +1765,15 @@ function renderTaskPanel(t) {
                     </select>
                 </div>
                 <div>
-                    <label for="tp-assignee">Assignee</label>
-                    <select id="tp-assignee">
-                        <option value=""${!t.assignee ? ' selected' : ''}>Unassigned</option>
-                        ${assigneeOptions.map(p =>
-                            `<option value="${escapeAttr(p)}"${p === t.assignee ? ' selected' : ''}>${escapeHtml(participantLabel(p))}</option>`
-                        ).join('')}
-                    </select>
+                    <label>Assignees</label>
+                    <div id="tp-assignees" class="task-panel-assignees-checkboxes" role="group" aria-label="Assignees">
+                        ${assigneeOptions.map(p => `
+                            <label class="task-panel-assignee-checkbox">
+                                <input type="checkbox" value="${escapeAttr(p)}"${readAssignees(t).includes(p) ? ' checked' : ''} />
+                                <span>${escapeHtml(participantLabel(p))}</span>
+                            </label>
+                        `).join('')}
+                    </div>
                 </div>
             </div>
             <div class="form-row form-row-grid">
@@ -2362,11 +2386,18 @@ function formatRelativeTime(iso) {
 function onTaskPanelSave(orig) {
     const panel = document.getElementById('task-panel');
     if (!panel) return;
+    const checked = Array.from(panel.querySelectorAll('#tp-assignees input[type="checkbox"]:checked'))
+        .map(el => el.value);
     const patch = {
         name: panel.querySelector('#tp-name').value.trim(),
         status: panel.querySelector('#tp-status').value,
         priority: panel.querySelector('#tp-priority').value,
-        assignee: panel.querySelector('#tp-assignee').value || null,
+        // PB.9: write the new assignees array. The legacy `assignee` is dual-
+        // written (first member or null) so taskPatchEvents + notifications.js
+        // continue to fire events while they still read the legacy field —
+        // T6 migrates those and drops the dual-write.
+        assignees: checked,
+        assignee: checked[0] || null,
         startDate: panel.querySelector('#tp-start').value || null,
         dueDate: panel.querySelector('#tp-due').value || null,
         description: panel.querySelector('#tp-desc').value,
