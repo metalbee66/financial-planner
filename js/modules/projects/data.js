@@ -167,6 +167,13 @@ export function findProject(list, id) {
 export function createTask(input) {
     const inStatus = input && input.status;
     const inPriority = input && input.priority;
+    const inAssignees = input && input.assignees;
+    const inAssignee = input && input.assignee;
+    // PB.9: stop writing the legacy `assignee` field. Backfill from it if a
+    // caller still supplies the old single-string shape.
+    const assignees = Array.isArray(inAssignees)
+        ? inAssignees.slice()
+        : (typeof inAssignee === 'string' && inAssignee ? [inAssignee] : []);
     const at = nowIso();
     return {
         id: generateTaskId(),
@@ -174,7 +181,7 @@ export function createTask(input) {
         name: trim(input && input.name),
         description: trim(input && input.description),
         status: TASK_STATUS_SET.has(inStatus) ? inStatus : 'not-started',
-        assignee: (input && input.assignee) || null,
+        assignees,
         startDate: (input && input.startDate) || null,
         dueDate: (input && input.dueDate) || null,
         priority: TASK_PRIORITY_SET.has(inPriority) ? inPriority : 'normal',
@@ -190,16 +197,36 @@ export function createTask(input) {
     };
 }
 
+/**
+ * Canonical reader for a task's assignees (PB.9). Returns the `assignees`
+ * array if present and non-empty; otherwise backfills from the legacy
+ * single-string `assignee` field; otherwise returns `[]`. Safe on null /
+ * undefined / unknown shape.
+ */
+export function readAssignees(task) {
+    if (!task) return [];
+    if (Array.isArray(task.assignees) && task.assignees.length > 0) return task.assignees;
+    if (typeof task.assignee === 'string' && task.assignee) return [task.assignee];
+    return [];
+}
+
 export function sanitiseTask(t) {
     if (!t || typeof t !== 'object') return null;
     const at = nowIso();
+    // PB.9: prefer non-empty assignees array; otherwise backfill from the
+    // legacy assignee string; otherwise empty. Drop the legacy field on
+    // output so storage normalises to assignees-only after first load.
+    const existing = Array.isArray(t.assignees) ? t.assignees.slice() : null;
+    const assignees = existing && existing.length > 0
+        ? existing
+        : (typeof t.assignee === 'string' && t.assignee ? [t.assignee] : []);
     return {
         id: t.id || generateTaskId(),
         projectId: t.projectId || null,
         name: trim(t.name),
         description: trim(t.description),
         status: TASK_STATUS_SET.has(t.status) ? t.status : 'not-started',
-        assignee: t.assignee || null,
+        assignees,
         startDate: t.startDate || null,
         dueDate: t.dueDate || null,
         priority: TASK_PRIORITY_SET.has(t.priority) ? t.priority : 'normal',
@@ -220,6 +247,10 @@ export function validateTask(t) {
     if (!t.projectId) return 'projectId is required';
     if (!TASK_STATUS_SET.has(t.status)) return `Invalid status: ${t.status}`;
     if (!TASK_PRIORITY_SET.has(t.priority)) return `Invalid priority: ${t.priority}`;
+    if (!Array.isArray(t.assignees)) return 'assignees must be an array';
+    for (const a of t.assignees) {
+        if (typeof a !== 'string' || !a) return 'assignees must contain non-empty strings';
+    }
     if (t.startDate && t.dueDate && t.dueDate < t.startDate) {
         return 'Due date must be on or after start date';
     }
@@ -636,7 +667,10 @@ export function filterTasks(list, filters) {
     if (!hasAssignee && !hasStatus && !hasMilestone) return list.slice();
 
     const passes = (t) => {
-        if (hasAssignee && t.assignee !== f.assignee) return false;
+        // PB.9: intersection semantics — selecting "brad" includes joint tasks
+        // where brad is one of multiple assignees. Legacy single-assignee tasks
+        // still match via readAssignees' backfill from the old field.
+        if (hasAssignee && !readAssignees(t).includes(f.assignee)) return false;
         if (hasStatus && t.status !== f.status) return false;
         if (hasMilestone && !t.isMilestone) return false;
         return true;
@@ -676,18 +710,31 @@ export function groupTopLevelTasks(list, by) {
             .map(s => ({ key: s, tasks: buckets.get(s) }));
     }
     if (by === 'assignee') {
+        // PB.9: bucket key is the sorted-comma-joined assignees list, so joint
+        // tasks land in their own bucket (e.g. "brad,diana") rather than
+        // appearing under each individual. Empty assignees → "" (unassigned).
         const buckets = new Map();
         for (const t of list) {
-            const k = t.assignee || '';
+            const k = readAssignees(t).slice().sort().join(',');
             if (!buckets.has(k)) buckets.set(k, []);
             buckets.get(k).push(t);
         }
         const order = [];
-        for (const k of DEFAULT_PARTICIPANTS) if (buckets.has(k)) order.push(k);
-        const others = Array.from(buckets.keys())
-            .filter(k => k && !DEFAULT_PARTICIPANTS.includes(k))
-            .sort();
-        order.push(...others);
+        // 1. Default participants individually (brad, then diana).
+        for (const id of DEFAULT_PARTICIPANTS) if (buckets.has(id)) order.push(id);
+        // 2. Canonical joint pair (brad,diana under the current defaults).
+        const jointKey = DEFAULT_PARTICIPANTS.slice().sort().join(',');
+        if (buckets.has(jointKey) && jointKey !== '' && !order.includes(jointKey)) {
+            order.push(jointKey);
+        }
+        const placed = new Set(order);
+        const remaining = Array.from(buckets.keys()).filter(k => k !== '' && !placed.has(k));
+        // 3. Other single-IDs (no comma) alphabetically.
+        const singleOthers = remaining.filter(k => !k.includes(',')).sort();
+        // 4. Other multi-IDs alphabetically.
+        const multiOthers = remaining.filter(k => k.includes(',')).sort();
+        order.push(...singleOthers, ...multiOthers);
+        // 5. Unassigned last.
         if (buckets.has('')) order.push('');
         return order.map(k => ({ key: k, tasks: buckets.get(k) }));
     }
@@ -1036,11 +1083,12 @@ export function collectMyTasksUserOptions(tasks) {
     const seen = new Set(builtIn);
     const externals = [];
     for (const t of (tasks || [])) {
-        const a = t && t.assignee;
-        if (!a) continue;
-        if (seen.has(a)) continue;
-        seen.add(a);
-        externals.push(a);
+        // PB.9: pick external IDs out of the assignees array (still tolerates legacy).
+        for (const a of readAssignees(t)) {
+            if (!a || seen.has(a)) continue;
+            seen.add(a);
+            externals.push(a);
+        }
     }
     externals.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
     return builtIn.concat(externals).map(v => ({ value: v, label: v }));
@@ -1062,7 +1110,8 @@ export function collectMyTasksUserOptions(tasks) {
 export function bucketTasksForUser(tasks, userId, todayIso) {
     const empty = { overdue: [], thisWeek: [], upcoming: [], completed: [] };
     if (!Array.isArray(tasks) || tasks.length === 0) return empty;
-    const mine = tasks.filter(t => t && t.assignee === userId);
+    // PB.9: joint tasks (multi-assignee) show up for each member of the team.
+    const mine = tasks.filter(t => t && readAssignees(t).includes(userId));
     if (mine.length === 0) return empty;
 
     const weekEnd = todayIso ? addDaysIso(todayIso, 6) : null;

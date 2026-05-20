@@ -71,7 +71,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
   - [x] **PB.7.T2** UI toggle + read-path migration + `pb7-status-derive` E2E block (3 scenarios) — _done 2026-05-20_
   - [ ] **Polish Checkpoint 1**: two-tab Firebase smoke + user review
 - [ ] **PB.9** Joint-assignee — **multi-select: `task.assignees` array, "Joint" label for canonical Brad+Diana pair** — [plan-polish §Phase 2](plan-polish.md#phase-2--pb9-joint-assignee-multi-select)
-  - [ ] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + ≥10 unit cases — M
+  - [x] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + MyTasks/options consumers + 22 unit cases — _done 2026-05-20_
   - [ ] **PB.9.T4** Task form multi-select + task panel chip render — M
   - [ ] **PB.9.T5** List view, group-by, filter UI, My Tasks consumption — M
   - [ ] **PB.9.T6** Audit feed + notifications recipient resolver + `pb9-joint-assignee` E2E + two-tab smoke — M

@@ -29,6 +29,7 @@ import {
     deleteTaskFromList,
     findTask,
     findTasksByProject,
+    readAssignees,
     findSubtasks,
     promoteSubtasksInList,
     deleteTaskCascadeFromList,
@@ -361,6 +362,28 @@ test('createTask ids are unique across rapid calls', () => {
     eq(ids.size, 50);
 });
 
+// PB.9 — assignees array (replaces legacy assignee string)
+
+test('createTask defaults assignees to an empty array', () => {
+    const t = createTask({ name: 'X', projectId: 'p' });
+    eq(t.assignees, []);
+});
+
+test('createTask accepts an explicit assignees array', () => {
+    const t = createTask({ name: 'X', projectId: 'p', assignees: ['brad', 'diana'] });
+    eq(t.assignees, ['brad', 'diana']);
+});
+
+test('createTask backfills assignees from legacy single assignee input', () => {
+    const t = createTask({ name: 'X', projectId: 'p', assignee: 'brad' });
+    eq(t.assignees, ['brad']);
+});
+
+test('createTask stops writing the legacy assignee field', () => {
+    const t = createTask({ name: 'X', projectId: 'p', assignee: 'brad' });
+    truthy(!('assignee' in t), 'no legacy assignee field on new tasks');
+});
+
 test('TASK_STATUSES exposes the planned enum', () => {
     eq(TASK_STATUSES, ['not-started', 'in-progress', 'review', 'done', 'blocked']);
 });
@@ -398,6 +421,48 @@ test('validateTask rejects due before start', () => {
 test('validateTask accepts equal start and due', () => {
     const t = createTask({ name: 'X', projectId: 'p', startDate: '2026-05-10', dueDate: '2026-05-10' });
     falsy(validateTask(t));
+});
+
+// PB.9 — validateTask works against the new assignees array
+
+test('validateTask rejects non-array assignees', () => {
+    const t = createTask({ name: 'X', projectId: 'p' });
+    t.assignees = 'brad';
+    truthy(validateTask(t));
+});
+
+test('validateTask rejects non-string members in assignees', () => {
+    const t = createTask({ name: 'X', projectId: 'p' });
+    t.assignees = ['brad', 42];
+    truthy(validateTask(t));
+});
+
+test('validateTask accepts an empty assignees array (unassigned is valid)', () => {
+    const t = createTask({ name: 'X', projectId: 'p' });
+    eq(t.assignees, []);
+    falsy(validateTask(t));
+});
+
+// PB.9 — readAssignees defensively returns the canonical array
+
+test('readAssignees returns the assignees array when non-empty', () => {
+    eq(readAssignees({ assignees: ['brad', 'diana'] }), ['brad', 'diana']);
+});
+
+test('readAssignees backfills from legacy assignee string', () => {
+    eq(readAssignees({ assignee: 'brad' }), ['brad']);
+});
+
+test('readAssignees prefers a non-empty assignees array over legacy', () => {
+    eq(readAssignees({ assignees: ['diana'], assignee: 'brad' }), ['diana']);
+});
+
+test('readAssignees returns empty array for missing/null/empty', () => {
+    eq(readAssignees(null), []);
+    eq(readAssignees(undefined), []);
+    eq(readAssignees({}), []);
+    eq(readAssignees({ assignees: [] }), []);
+    eq(readAssignees({ assignee: '' }), []);
 });
 
 // ── task list mutators ──
@@ -477,6 +542,33 @@ test('sanitiseTask preserves valid fields', () => {
     eq(out.id, t.id);
     eq(out.status, 'in-progress');
     eq(out.priority, 'high');
+});
+
+// PB.9 — sanitiseTask handles assignees + legacy assignee transition
+
+test('sanitiseTask backfills assignees from legacy assignee field', () => {
+    const out = sanitiseTask({ id: 't1', name: 'X', projectId: 'p', assignee: 'brad' });
+    eq(out.assignees, ['brad']);
+});
+
+test('sanitiseTask backfills assignees when an empty array is paired with legacy assignee', () => {
+    const out = sanitiseTask({ id: 't1', name: 'X', projectId: 'p', assignees: [], assignee: 'diana' });
+    eq(out.assignees, ['diana']);
+});
+
+test('sanitiseTask preserves an existing non-empty assignees array, ignoring legacy field', () => {
+    const out = sanitiseTask({ id: 't1', name: 'X', projectId: 'p', assignees: ['brad', 'diana'], assignee: 'should-be-ignored' });
+    eq(out.assignees, ['brad', 'diana']);
+});
+
+test('sanitiseTask returns empty assignees when neither field is set', () => {
+    const out = sanitiseTask({ id: 't1', name: 'X', projectId: 'p' });
+    eq(out.assignees, []);
+});
+
+test('sanitiseTask drops the legacy assignee field on output', () => {
+    const out = sanitiseTask({ id: 't1', name: 'X', projectId: 'p', assignee: 'brad' });
+    truthy(!('assignee' in out), 'sanitised tasks have no legacy assignee field');
 });
 
 // ── subtasks (Task 2.2) ──
@@ -1199,6 +1291,24 @@ test('filterTasks treats null filter values as "no filter on that dimension"', (
     );
 });
 
+// PB.9 — filterTasks assignee uses intersection semantics
+
+test('filterTasks by assignee matches joint tasks (intersection)', () => {
+    const list = [
+        mkTask({ name: 'soloBrad', assignees: ['brad'] }),
+        mkTask({ name: 'joint', assignees: ['brad', 'diana'] }),
+        mkTask({ name: 'soloDiana', assignees: ['diana'] }),
+    ];
+    eq(
+        filterTasks(list, { assignee: 'brad' }).map(t => t.name).sort(),
+        ['joint', 'soloBrad']
+    );
+    eq(
+        filterTasks(list, { assignee: 'diana' }).map(t => t.name).sort(),
+        ['joint', 'soloDiana']
+    );
+});
+
 // ── groupTopLevelTasks (Task 4.1) ──
 
 test('TASK_GROUP_OPTIONS exposes the supported group-by values', () => {
@@ -1246,6 +1356,48 @@ test('groupTopLevelTasks unknown group-by falls back to a single all-bucket', ()
     const groups = groupTopLevelTasks(list, 'mystery');
     eq(groups.length, 1);
     eq(groups[0].tasks.map(t => t.name), ['X']);
+});
+
+// PB.9 — groupTopLevelTasks handles joint and other multi-assignee buckets
+
+test('groupTopLevelTasks assignee buckets brad+diana as a joint key', () => {
+    const list = [
+        mkTask({ name: 'solo', assignees: ['brad'] }),
+        mkTask({ name: 'joint', assignees: ['brad', 'diana'] }),
+    ];
+    const groups = groupTopLevelTasks(list, 'assignee');
+    eq(groups.map(g => g.key), ['brad', 'brad,diana']);
+    eq(groups[1].tasks.map(t => t.name), ['joint']);
+});
+
+test('groupTopLevelTasks assignee joint key is sort-stable regardless of input order', () => {
+    // [diana, brad] and [brad, diana] should land in the same bucket
+    const list = [
+        mkTask({ name: 'reversed', assignees: ['diana', 'brad'] }),
+        mkTask({ name: 'ordered',  assignees: ['brad', 'diana'] }),
+    ];
+    const groups = groupTopLevelTasks(list, 'assignee');
+    eq(groups.length, 1);
+    eq(groups[0].key, 'brad,diana');
+    eq(groups[0].tasks.map(t => t.name), ['reversed', 'ordered']);
+});
+
+test('groupTopLevelTasks assignee order: defaults → joint → single others → multi others → unassigned', () => {
+    const list = [
+        mkTask({ name: 'unassigned', assignees: [] }),
+        mkTask({ name: 'multiZ',     assignees: ['brad', 'zoe'] }),
+        mkTask({ name: 'multiA',     assignees: ['alex', 'brad'] }),
+        mkTask({ name: 'diana',      assignees: ['diana'] }),
+        mkTask({ name: 'guest',      assignees: ['guest'] }),
+        mkTask({ name: 'brad',       assignees: ['brad'] }),
+        mkTask({ name: 'joint',      assignees: ['brad', 'diana'] }),
+        mkTask({ name: 'alex',       assignees: ['alex'] }),
+    ];
+    const groups = groupTopLevelTasks(list, 'assignee');
+    eq(
+        groups.map(g => g.key),
+        ['brad', 'diana', 'brad,diana', 'alex', 'guest', 'alex,brad', 'brad,zoe', '']
+    );
 });
 
 // ── Timeline range / bars (Task 4.2) ──
@@ -1708,6 +1860,14 @@ test('bucketTasksForUser ignores blocked status the same as any non-done', () =>
     eq(out.overdue.map(t => t.id), ['blk']);
 });
 
+test('bucketTasksForUser picks up joint tasks for either participant (PB.9)', () => {
+    const tasks = [
+        mkTask({ id: 'joint', assignees: ['brad', 'diana'], dueDate: '2026-04-01', status: 'in-progress' }),
+    ];
+    eq(bucketTasksForUser(tasks, 'brad',  '2026-05-08').overdue.map(t => t.id), ['joint']);
+    eq(bucketTasksForUser(tasks, 'diana', '2026-05-08').overdue.map(t => t.id), ['joint']);
+});
+
 test('defaultMyTasksUser maps known emails to brad/diana', () => {
     eq(defaultMyTasksUser('metalbee66@gmail.com'), 'brad');
     eq(defaultMyTasksUser('dianaleshcheva@gmail.com'), 'diana');
@@ -1732,6 +1892,15 @@ test('collectMyTasksUserOptions adds external assignees alphabetically after bra
         mkTask({ assignee: 'zoe' }),  // dup
         mkTask({ assignee: null }),   // skip
         mkTask({ assignee: '' }),     // skip
+    ];
+    const opts = collectMyTasksUserOptions(tasks);
+    eq(opts.map(o => o.value), ['brad', 'diana', 'alex', 'zoe']);
+});
+
+test('collectMyTasksUserOptions picks up externals from the assignees array (PB.9)', () => {
+    const tasks = [
+        mkTask({ assignees: ['brad', 'zoe'] }),
+        mkTask({ assignees: ['alex'] }),
     ];
     const opts = collectMyTasksUserOptions(tasks);
     eq(opts.map(o => o.value), ['brad', 'diana', 'alex', 'zoe']);
