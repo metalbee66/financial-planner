@@ -73,7 +73,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [ ] **PB.9** Joint-assignee — **multi-select: `task.assignees` array, "Joint" label for canonical Brad+Diana pair** — [plan-polish §Phase 2](plan-polish.md#phase-2--pb9-joint-assignee-multi-select)
   - [x] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + MyTasks/options consumers + 22 unit cases — _done 2026-05-20_
   - [x] **PB.9.T4** Task form checkbox group + panel head chips + row chip helper — _done 2026-05-20_
-  - [ ] **PB.9.T5** List view, group-by, filter UI, My Tasks consumption — M
+  - [x] **PB.9.T5** Group-by-assignee labels render "Joint" for canonical pair + comma-joined for other multi-ID keys (row chip, filter, My Tasks already done by T3+T4) — _done 2026-05-20_
   - [ ] **PB.9.T6** Audit feed + notifications recipient resolver + `pb9-joint-assignee` E2E + two-tab smoke — M
   - [ ] **Polish Checkpoint 2**: `git grep .assignee` triage + two-tab smoke + user review
 - [ ] **PB.8** Dashboard cards drill down to filtered task list — **`dashboardView` filter primitive** — [plan-polish §Phase 3](plan-polish.md#phase-3--pb8-dashboard-card-drill-down)

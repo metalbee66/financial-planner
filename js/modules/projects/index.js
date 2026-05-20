@@ -1312,7 +1312,18 @@ function renderTasksList(root, project, tasks, totalTasksInProject) {
 
 function groupLabelFor(key, groupBy) {
     if (groupBy === 'status') return TASK_STATUS_LABELS[key] || key;
-    if (groupBy === 'assignee') return key === '' ? 'Unassigned' : participantLabel(key);
+    if (groupBy === 'assignee') {
+        // PB.9: bucket keys are sorted-comma-joined assignees. Canonical
+        // Brad+Diana pair renders as "Joint"; other multi-ID buckets render
+        // their participant labels comma-joined.
+        if (key === '') return 'Unassigned';
+        const jointKey = DEFAULT_PARTICIPANTS.slice().sort().join(',');
+        if (key === jointKey) return 'Joint';
+        if (key.includes(',')) {
+            return key.split(',').map(id => participantLabel(id)).join(', ');
+        }
+        return participantLabel(key);
+    }
     return 'Tasks';
 }
 
