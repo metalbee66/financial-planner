@@ -66,22 +66,19 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **PB.6** Firebase SDK Cross-Origin-Opener-Policy warnings on sign-in popup (cosmetic; consider SDK upgrade or `signInWithRedirect`) — XS — _smoke step 16_ — _done 2026-05-19, `94cbe78` (switched popup → redirect)_
 > **Polish round 2026-05-19:** PB.7/8/9 specced and planned. See [SPEC-polish.md](SPEC-polish.md) + [plan-polish.md](plan-polish.md). Hybrid PB.7 (`statusOverride` flag + `effectiveProjectStatus()`), multi-select array PB.9 (`task.assignees` + `readAssignees()`), and `dashboardView`-filter PB.8. Phase order: PB.7 → PB.9 → PB.8 → wrap.
 
-- [ ] **PB.7** Project status doesn't reflect task completion — **hybrid: derived default + `statusOverride` flag** — [plan-polish §Phase 1](plan-polish.md#phase-1--pb7-hybrid-project-status-derivation)
-  - [x] **PB.7.T1** Data layer — `statusOverride` field + `effectiveProjectStatus()` + 14 unit cases — _done 2026-05-19_
-  - [x] **PB.7.T2** UI toggle + read-path migration + `pb7-status-derive` E2E block (3 scenarios) — _done 2026-05-20_
-  - [ ] **Polish Checkpoint 1**: two-tab Firebase smoke + user review
-- [ ] **PB.9** Joint-assignee — **multi-select: `task.assignees` array, "Joint" label for canonical Brad+Diana pair** — [plan-polish §Phase 2](plan-polish.md#phase-2--pb9-joint-assignee-multi-select)
-  - [x] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + MyTasks/options consumers + 22 unit cases — _done 2026-05-20_
-  - [x] **PB.9.T4** Task form checkbox group + panel head chips + row chip helper — _done 2026-05-20_
-  - [x] **PB.9.T5** Group-by-assignee labels render "Joint" for canonical pair + comma-joined for other multi-ID keys (row chip, filter, My Tasks already done by T3+T4) — _done 2026-05-20_
-  - [x] **PB.9.T6** taskPatchEvents arrays + notifications.js readAssignees + audit render Joint label + dropped dual-write + `pb9-joint-assignee` E2E + 10 new unit cases — _done 2026-05-20_
-  - [ ] **Polish Checkpoint 2**: `git grep .assignee` triage + two-tab smoke + user review
-- [ ] **PB.8** Dashboard cards drill down to filtered task list — **`dashboardView` filter primitive** — [plan-polish §Phase 3](plan-polish.md#phase-3--pb8-dashboard-card-drill-down)
-  - [x] **PB.8.T7** `dashboardView` enum on `filterTasks` + `DASHBOARD_CARD_VIEWS` map + 11 unit cases — _done 2026-05-20_
-  - [x] **PB.8.T8** Clickable cards + keyboard nav + inline drill list + `pb8-drill-down` E2E (5 scenarios) — _done 2026-05-21_
-  - [ ] **Polish Checkpoint 3**: user review
-- [ ] **PB Wrap.T9** Update todo.md, HANDOVER.md, CHANGELOG.md — XS (docs only)
-  - [ ] **Polish Checkpoint DONE**: 9 of 9 PB items resolved, ready for Phase 6
+- [x] **PB.7** Project status — hybrid derived default + `statusOverride` flag — _done 2026-05-20, `a152f59` + `b3cc3e5`_
+  - [x] **PB.7.T1** Data layer — `statusOverride` field + `effectiveProjectStatus()` + 14 unit cases — _done 2026-05-19, `a152f59`_
+  - [x] **PB.7.T2** UI toggle + read-path migration + `pb7-status-derive` E2E block (3 scenarios) — _done 2026-05-20, `b3cc3e5`_
+- [x] **PB.9** Joint-assignee — multi-select `task.assignees` array, "Joint" chip for canonical Brad+Diana — _done 2026-05-20, `d40aa93` → `f69a85c`_
+  - [x] **PB.9.T3** Data layer — `assignees` array + `readAssignees()` + intersection filter + joint-key group + MyTasks/options consumers + 22 unit cases — _done 2026-05-20, `d40aa93`_
+  - [x] **PB.9.T4** Task form checkbox group + panel head chips + row chip helper — _done 2026-05-20, `41012fc`_
+  - [x] **PB.9.T5** Group-by-assignee labels: canonical "Joint" + multi-ID comma-joined — _done 2026-05-20, `61acc36`_
+  - [x] **PB.9.T6** taskPatchEvents arrays + notifications.js readAssignees + audit render Joint + dropped dual-write + `pb9-joint-assignee` E2E + 10 unit cases — _done 2026-05-20, `f69a85c`_
+- [x] **PB.8** Dashboard cards drill down — `dashboardView` filter + inline list — _done 2026-05-21, `babb18f` + `f1b5836`_
+  - [x] **PB.8.T7** `dashboardView` enum on `filterTasks` + `DASHBOARD_CARD_VIEWS` map + 11 unit cases — _done 2026-05-20, `babb18f`_
+  - [x] **PB.8.T8** Clickable cards + keyboard nav + inline drill list + `pb8-drill-down` E2E (5 scenarios) — _done 2026-05-21, `f1b5836`_
+- [x] **PB Wrap.T9** todo.md / HANDOVER.md / CHANGELOG.md refreshed for the polish round — _done 2026-05-21_
+- [ ] **Polish Checkpoint DONE**: 9 of 9 PB items resolved. Manual two-tab Firebase smoke still owed (deferred by user during the round); run before declaring Phase 6 ready to start.
 
 ## Phase 6 — Email Notifications via n8n + In-App Bell
 
