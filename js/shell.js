@@ -32,7 +32,7 @@ import { renderAccountsTab } from './modules/finance/accounts.js';
 import { loadPM } from './modules/pm-legacy/pm.js';
 import { renderPMTab } from './modules/pm-legacy/pm.js';
 import { loadProjects } from './modules/projects/data.js';
-import { renderProjectsTab } from './modules/projects/index.js';
+import { renderProjectsTab, mountBell } from './modules/projects/index.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
@@ -122,6 +122,17 @@ function bootModules() {
         }
         nav.querySelectorAll('.top-nav-btn').forEach(b => {
             b.classList.toggle('active', b.dataset.module === id);
+        });
+    }
+
+    // Notification bell lives in the shell header but is owned by the
+    // projects module (data + UI). Pass an activator so notification clicks
+    // can flip to the Projects tab from any module.
+    const bellHost = document.getElementById('notif-bell-host');
+    if (bellHost) {
+        mountBell({
+            host: bellHost,
+            onActivateProjects: () => activateModule('projects'),
         });
     }
 }

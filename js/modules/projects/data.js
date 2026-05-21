@@ -18,7 +18,7 @@ export const PROJECT_STATUSES = ['planning', 'active', 'on-hold', 'completed', '
 export const TASK_STATUSES = ['not-started', 'in-progress', 'review', 'done', 'blocked'];
 export const TASK_PRIORITIES = ['low', 'normal', 'high'];
 export const DEFAULT_PARTICIPANTS = ['brad', 'diana'];
-export const DEFAULT_PROJECTS = { items: [], tasks: [], notifications: {} };
+export const DEFAULT_PROJECTS = { items: [], tasks: [], notifications: {}, prefs: {} };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
 const TASK_STATUS_SET = new Set(TASK_STATUSES);
@@ -1413,6 +1413,9 @@ export function loadProjects() {
             tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(sanitiseTask).filter(Boolean) : [],
             notifications: (parsed.notifications && typeof parsed.notifications === 'object' && !Array.isArray(parsed.notifications))
                 ? parsed.notifications
+                : {},
+            prefs: (parsed.prefs && typeof parsed.prefs === 'object' && !Array.isArray(parsed.prefs))
+                ? parsed.prefs
                 : {},
         };
     } catch (e) {

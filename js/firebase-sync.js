@@ -189,6 +189,12 @@ export function setupRealtimeListeners() {
                 ...data,
                 items: data.items.map(sanitiseProject).filter(Boolean),
                 tasks: Array.isArray(data.tasks) ? data.tasks.map(sanitiseTask).filter(Boolean) : [],
+                notifications: (data.notifications && typeof data.notifications === 'object' && !Array.isArray(data.notifications))
+                    ? data.notifications
+                    : {},
+                prefs: (data.prefs && typeof data.prefs === 'object' && !Array.isArray(data.prefs))
+                    ? data.prefs
+                    : {},
             };
             if (renderProjectsTab) renderProjectsTab();
         }
@@ -227,6 +233,12 @@ export async function initialSync() {
                 ...fbProjects,
                 items: fbProjects.items.map(sanitiseProject).filter(Boolean),
                 tasks: Array.isArray(fbProjects.tasks) ? fbProjects.tasks.map(sanitiseTask).filter(Boolean) : [],
+                notifications: (fbProjects.notifications && typeof fbProjects.notifications === 'object' && !Array.isArray(fbProjects.notifications))
+                    ? fbProjects.notifications
+                    : {},
+                prefs: (fbProjects.prefs && typeof fbProjects.prefs === 'object' && !Array.isArray(fbProjects.prefs))
+                    ? fbProjects.prefs
+                    : {},
             };
         }
 

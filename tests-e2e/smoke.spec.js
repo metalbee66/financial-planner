@@ -2150,6 +2150,193 @@ test.describe('PB.9 — Joint assignee', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 6.2 — Notification bell + preferences', () => {
+
+    // Seed localStorage with a project, a task, and a couple of brad-bound
+    // notifications. Without Firebase the implicit current user is 'brad'
+    // (defaultMyTasksUser('') → 'brad'), so notifications addressed to brad
+    // are what the bell will render in the test environment.
+    async function seedProjectsWithNotifications(page, { unread = 2, read = 0 } = {}) {
+        const notifs = [];
+        for (let i = 0; i < read; i++) {
+            notifs.push({
+                id: `nr${i}`, kind: 'task_assigned', to: 'brad', by: 'diana',
+                taskId: 'task1', projectId: 'proj1',
+                title: `Old assignment ${i}`, summary: 'Already-read summary',
+                at: '2026-05-01T00:00:00.000Z', read: true,
+            });
+        }
+        for (let i = 0; i < unread; i++) {
+            notifs.push({
+                id: `nu${i}`, kind: 'task_assigned', to: 'brad', by: 'diana',
+                taskId: 'task1', projectId: 'proj1',
+                title: `New assignment ${i}`, summary: 'Diana assigned this to you.',
+                at: '2026-05-10T00:00:00.000Z', read: false,
+            });
+        }
+        await page.evaluate((seed) => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [{
+                    id: 'proj1', name: 'Seeded Project', status: 'active', statusOverride: false,
+                    startDate: '2026-05-01', endDate: '2026-06-01',
+                    participants: ['brad', 'diana'], description: '',
+                    createdAt: '2026-05-01T00:00:00.000Z', updatedAt: '2026-05-01T00:00:00.000Z',
+                    archivedAt: null,
+                }],
+                tasks: [{
+                    id: 'task1', projectId: 'proj1', name: 'Seeded Task',
+                    description: '', status: 'not-started', assignees: ['brad'],
+                    startDate: null, dueDate: '2026-06-01', priority: 'normal',
+                    parentTaskId: null, dependsOn: [], comments: [], events: [], attachments: [],
+                    isMilestone: false,
+                    createdAt: '2026-05-01T00:00:00.000Z', updatedAt: '2026-05-01T00:00:00.000Z',
+                    completedAt: null,
+                }],
+                notifications: { brad: seed },
+                prefs: {},
+            }));
+        }, notifs);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+    }
+
+    test('bell renders with an unread badge counting brad-bound entries', async ({ page }) => {
+        await seedProjectsWithNotifications(page, { unread: 3, read: 1 });
+        const bell = page.locator('#notif-bell-btn');
+        await expect(bell).toBeVisible();
+        await expect(bell.locator('.notif-bell-badge')).toHaveText('3');
+    });
+
+    test('bell renders without a badge when there are zero unread', async ({ page }) => {
+        await seedProjectsWithNotifications(page, { unread: 0, read: 2 });
+        const bell = page.locator('#notif-bell-btn');
+        await expect(bell).toBeVisible();
+        await expect(bell.locator('.notif-bell-badge')).toHaveCount(0);
+    });
+
+    test('bell shows the empty state in the dropdown when no notifications exist', async ({ page }) => {
+        // Default load — no notifications, no prefs.
+        await page.locator('#notif-bell-btn').click();
+        await expect(page.locator('#notif-bell-dropdown')).toBeVisible();
+        await expect(page.locator('.notif-empty')).toContainText('No notifications yet.');
+    });
+
+    test('bell is visible across all modules, not just Projects', async ({ page }) => {
+        // Switch back to Finance and confirm the bell is still in the header.
+        await page.locator('.top-nav-btn[data-module="finance"]').click();
+        await expect(page.locator('#notif-bell-btn')).toBeVisible();
+        await page.locator('.top-nav-btn[data-module="pm-legacy"]').click();
+        await expect(page.locator('#notif-bell-btn')).toBeVisible();
+    });
+
+    test('dropdown lists notifications newest-first and marks unread visually', async ({ page }) => {
+        await seedProjectsWithNotifications(page, { unread: 2, read: 1 });
+        await page.locator('#notif-bell-btn').click();
+        const items = page.locator('.notif-item');
+        await expect(items).toHaveCount(3);
+        // Newest unread items render first; the dropdown order is descending by at.
+        await expect(items.first()).toHaveClass(/notif-item-unread/);
+    });
+
+    test('clicking an unread item marks it read, decrements the badge, and opens the task panel', async ({ page }) => {
+        await seedProjectsWithNotifications(page, { unread: 2, read: 0 });
+        const bell = page.locator('#notif-bell-btn');
+        await expect(bell.locator('.notif-bell-badge')).toHaveText('2');
+
+        await bell.click();
+        await page.locator('.notif-item').first().click();
+
+        // Dropdown closes, panel opens on Seeded Task
+        await expect(page.locator('#notif-bell-dropdown')).toHaveCount(0);
+        await expect(page.locator('#task-panel')).toBeVisible();
+        await expect(page.locator('#tp-name')).toHaveValue('Seeded Task');
+        // Badge decrements
+        await expect(bell.locator('.notif-bell-badge')).toHaveText('1');
+    });
+
+    test('bell click from Finance routes back to Projects when a notification has a project', async ({ page }) => {
+        await seedProjectsWithNotifications(page, { unread: 1, read: 0 });
+        await page.locator('.top-nav-btn[data-module="finance"]').click();
+        await expect(page.locator('#module-finance')).toBeVisible();
+
+        await page.locator('#notif-bell-btn').click();
+        await page.locator('.notif-item').first().click();
+
+        await expect(page.locator('.top-nav-btn[data-module="projects"]')).toHaveClass(/active/);
+        await expect(page.locator('#task-panel')).toBeVisible();
+    });
+
+    test('"Mark all read" clears the badge and disables itself', async ({ page }) => {
+        await seedProjectsWithNotifications(page, { unread: 3, read: 0 });
+        const bell = page.locator('#notif-bell-btn');
+        await expect(bell.locator('.notif-bell-badge')).toHaveText('3');
+
+        await bell.click();
+        await page.locator('#notif-mark-all').click();
+        await expect(bell.locator('.notif-bell-badge')).toHaveCount(0);
+        await expect(page.locator('#notif-mark-all')).toBeDisabled();
+    });
+
+    test('preferences modal opens, saves, and persists prefs across reload', async ({ page }) => {
+        await page.locator('#notif-bell-btn').click();
+        await page.locator('#notif-prefs-btn').click();
+        await expect(page.locator('#notif-prefs-modal')).toBeVisible();
+
+        // Flip master off and toggle one event kind.
+        await page.locator('#np-master').uncheck();
+        await page.locator('input[data-kind="task_assigned"]').uncheck();
+        await page.locator('input[name="np-mode"][value="digest"]').check();
+        await page.locator('#np-save').click();
+
+        // Modal closes
+        await expect(page.locator('#notif-prefs-modal')).toHaveCount(0);
+
+        // Persisted to localStorage (brad is the implicit current user)
+        const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('projects')));
+        expect(stored.prefs.brad.master).toBe(false);
+        expect(stored.prefs.brad.mode).toBe('digest');
+        expect(stored.prefs.brad.kinds.task_assigned).toBe(false);
+        // Untouched kinds remain on
+        expect(stored.prefs.brad.kinds.task_overdue).toBe(true);
+
+        // Reload — re-open modal and confirm fields are restored
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('#notif-bell-btn').click();
+        await page.locator('#notif-prefs-btn').click();
+        await expect(page.locator('#np-master')).not.toBeChecked();
+        await expect(page.locator('input[name="np-mode"][value="digest"]')).toBeChecked();
+        await expect(page.locator('input[data-kind="task_assigned"]')).not.toBeChecked();
+    });
+
+    test('prefs filter — kind toggle off prevents future bell entries of that kind', async ({ page }) => {
+        // Seed prefs with task_assigned disabled, then run a real assignment flow.
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {},
+                prefs: { brad: { master: true, mode: 'instant', kinds: { task_assigned: false } } },
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+
+        // Create a project and add a task assigned to Brad. Without the
+        // prefs filter, this would emit a brad-bound task_assigned notification.
+        await createProject(page, { name: 'Prefs filter' });
+        await page.locator('#task-add-name').fill('Should-be-silent');
+        await page.locator('#task-add-name').press('Enter');
+        // Open panel, assign to brad (toggling the assignee array fires assignee_changed)
+        await page.locator('.task-row', { hasText: 'Should-be-silent' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'brad');
+        await page.locator('#tp-save').click();
+
+        // Bell still shows no badge — the kind was disabled in prefs.
+        await expect(page.locator('#notif-bell-btn .notif-bell-badge')).toHaveCount(0);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

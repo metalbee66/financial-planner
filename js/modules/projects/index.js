@@ -82,10 +82,19 @@ import {
     saveProjects,
 } from './data.js';
 import {
+    NOTIFICATION_KINDS,
+    NOTIFICATION_MODES,
     eventToNotificationsForRecipients,
     candidateRecipientsForEvent,
     addNotificationToBucket,
     deriveDependencyUnblockedTriggers,
+    createDefaultPrefs,
+    sanitiseNotificationPrefs,
+    shouldNotifyUser,
+    markNotificationRead,
+    markAllNotificationsRead,
+    unreadCount,
+    getUserNotifications,
 } from './notifications.js';
 
 const STATUS_LABELS = {
@@ -158,6 +167,7 @@ export function mount(hostEl) {
 /** External entry — called by firebase-sync's realtime listener after a remote update. */
 export function renderProjectsTab() {
     render();
+    refreshBell();
 }
 
 function ensureProjectsData() {
@@ -169,6 +179,9 @@ function ensureProjectsData() {
     }
     if (!state.projectsData.notifications || typeof state.projectsData.notifications !== 'object' || Array.isArray(state.projectsData.notifications)) {
         state.projectsData.notifications = {};
+    }
+    if (!state.projectsData.prefs || typeof state.projectsData.prefs !== 'object' || Array.isArray(state.projectsData.prefs)) {
+        state.projectsData.prefs = {};
     }
 }
 
@@ -206,6 +219,41 @@ function getNotifications() {
     return state.projectsData.notifications;
 }
 
+function getPrefsMap() {
+    ensureProjectsData();
+    return state.projectsData.prefs;
+}
+
+/** Resolve the current Family Planner participant id from the auth user. */
+function currentUserId() {
+    return defaultMyTasksUser(currentUserEmail());
+}
+
+/** Resolved prefs for the current user (defaults when nothing's saved yet). */
+function currentUserPrefs() {
+    const id = currentUserId();
+    const map = getPrefsMap();
+    return sanitiseNotificationPrefs(map[id] || null);
+}
+
+/** Persist prefs for one user into state + Firebase. */
+function saveUserPrefs(userId, prefs) {
+    ensureProjectsData();
+    const nextPrefs = { ...getPrefsMap(), [userId]: sanitiseNotificationPrefs(prefs) };
+    state.projectsData = { ...state.projectsData, prefs: nextPrefs };
+    saveProjects(state.projectsData);
+    refreshBell();
+}
+
+/** Persist the notifications bucket map (after mark-as-read mutations). */
+function saveNotifications(nextMap) {
+    ensureProjectsData();
+    if (nextMap === getNotifications()) return;
+    state.projectsData = { ...state.projectsData, notifications: nextMap };
+    saveProjects(state.projectsData);
+    refreshBell();
+}
+
 /**
  * Fold one or more trigger events into the per-user notification bucket
  * map without saving. Returns the new map. Caller is responsible for
@@ -216,11 +264,19 @@ function getNotifications() {
  */
 function foldTriggersIntoBucket(triggers, startMap) {
     let map = (startMap && typeof startMap === 'object') ? startMap : {};
+    const prefsMap = getPrefsMap();
     for (const t of triggers) {
         if (!t || !t.event || !t.task || !t.project) continue;
         const recipients = candidateRecipientsForEvent(t.event, t.task, t.project);
         const notifs = eventToNotificationsForRecipients(t.event, t.task, t.project, recipients);
-        for (const n of notifs) map = addNotificationToBucket(map, n);
+        for (const n of notifs) {
+            // Per-recipient prefs gate the bell entry. A user who turned the
+            // kind off (or master off) doesn't see future events of that kind.
+            // Prior-recorded notifications stay in their bucket — this is an
+            // emission filter, not a retroactive purge.
+            if (!shouldNotifyUser(prefsMap[n.to], n.kind)) continue;
+            map = addNotificationToBucket(map, n);
+        }
     }
     return map;
 }
@@ -2657,6 +2713,294 @@ function getParticipantEditorValue(root) {
  */
 function isParticipantAssignedToTasks(_participant) {
     return false;
+}
+
+// ── Notification bell + preferences modal (Task 6.2) ──
+
+/**
+ * The bell lives in the shell header (visible across all modules). It surfaces
+ * the current user's unread count and the last MAX_NOTIFICATIONS_PER_USER
+ * entries from `state.projectsData.notifications[userId]`. Clicking an entry
+ * marks it read and asks the shell to navigate to the source task; the
+ * settings cog opens a prefs modal that writes to `state.projectsData.prefs`.
+ *
+ * The shell mounts the bell once at boot; data-sync renders (firebase-sync
+ * realtime listener → renderProjectsTab → refreshBell) keep it current.
+ */
+let bellHost = null;
+let bellNavigateCallback = null;
+
+const BELL_KIND_LABELS = {
+    task_assigned: 'Task assigned to me',
+    comment_added: 'New comment',
+    dependency_unblocked: 'Dependency unblocked',
+    task_due_soon: 'Due soon',
+    task_overdue: 'Overdue',
+    milestone_completed: 'Milestone completed',
+    project_completed: 'Project completed',
+};
+
+const BELL_MODE_LABELS = { instant: 'Instant', digest: 'Daily digest' };
+
+export function mountBell(opts) {
+    const o = opts || {};
+    if (!o.host) return;
+    bellHost = o.host;
+    bellNavigateCallback = typeof o.onActivateProjects === 'function' ? o.onActivateProjects : null;
+    refreshBell();
+}
+
+/**
+ * Public — called by firebase-sync on remote updates and after any local
+ * write that touches notifications/prefs. Updates the button + badge in
+ * place (so the dropdown stays open across mark-as-read clicks) and, if
+ * the dropdown is open, re-renders its body too.
+ */
+export function refreshBell() {
+    if (!bellHost) return;
+    renderBellButton();
+    if (bellDropdownOpen()) renderDropdownContent(document.getElementById('notif-bell-dropdown'));
+}
+
+function renderBellButton() {
+    let btn = bellHost.querySelector('#notif-bell-btn');
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.type = 'button';
+        btn.id = 'notif-bell-btn';
+        btn.className = 'notif-bell-btn';
+        btn.setAttribute('aria-haspopup', 'true');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.addEventListener('click', toggleBellDropdown);
+        bellHost.appendChild(btn);
+    }
+    const unread = unreadCount(getNotifications(), currentUserId());
+    const label = unread > 0 ? `Notifications (${unread} unread)` : 'Notifications';
+    const badgeHtml = unread > 0
+        ? `<span class="notif-bell-badge" aria-label="${unread} unread">${unread > 99 ? '99+' : unread}</span>`
+        : '';
+    btn.setAttribute('aria-label', label);
+    btn.innerHTML = `<span class="notif-bell-icon" aria-hidden="true">🔔</span>${badgeHtml}`;
+}
+
+function bellDropdownOpen() {
+    return !!document.getElementById('notif-bell-dropdown');
+}
+
+function toggleBellDropdown() {
+    if (bellDropdownOpen()) {
+        closeBellDropdown();
+    } else {
+        openBellDropdown();
+    }
+}
+
+function openBellDropdown() {
+    if (bellDropdownOpen()) return;
+    const btn = bellHost && bellHost.querySelector('#notif-bell-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+
+    const dropdown = document.createElement('div');
+    dropdown.id = 'notif-bell-dropdown';
+    dropdown.className = 'notif-bell-dropdown';
+    dropdown.setAttribute('role', 'dialog');
+    dropdown.setAttribute('aria-label', 'Notifications');
+    bellHost.appendChild(dropdown);
+    renderDropdownContent(dropdown);
+
+    setTimeout(() => {
+        document.addEventListener('click', onDocClickToCloseBell);
+        document.addEventListener('keydown', onDocKeyToCloseBell);
+    }, 0);
+}
+
+function renderDropdownContent(dropdown) {
+    if (!dropdown) return;
+    const userId = currentUserId();
+    const list = getUserNotifications(getNotifications(), userId);
+    const itemsHtml = list.length === 0
+        ? `<div class="notif-empty">No notifications yet.</div>`
+        : list.map(n => renderBellItemHtml(n)).join('');
+    const allRead = list.length === 0 || list.every(n => n.read);
+    dropdown.innerHTML = `
+        <div class="notif-head">
+            <span class="notif-head-title">Notifications</span>
+            <button type="button" id="notif-mark-all" class="notif-mark-all" ${allRead ? 'disabled' : ''}>Mark all read</button>
+            <button type="button" id="notif-prefs-btn" class="notif-prefs-btn" aria-label="Notification preferences" title="Preferences">⚙</button>
+        </div>
+        <div class="notif-list" id="notif-list">${itemsHtml}</div>
+    `;
+    dropdown.querySelector('#notif-mark-all').addEventListener('click', onBellMarkAllRead);
+    dropdown.querySelector('#notif-prefs-btn').addEventListener('click', openPrefsModal);
+    dropdown.querySelectorAll('.notif-item').forEach(el => {
+        el.addEventListener('click', () => onBellItemClick(el.dataset.id));
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onBellItemClick(el.dataset.id);
+            }
+        });
+    });
+}
+
+function closeBellDropdown() {
+    const existing = document.getElementById('notif-bell-dropdown');
+    if (existing) existing.remove();
+    const btn = bellHost && bellHost.querySelector('#notif-bell-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', onDocClickToCloseBell);
+    document.removeEventListener('keydown', onDocKeyToCloseBell);
+}
+
+function onDocClickToCloseBell(e) {
+    if (!bellHost) return;
+    // composedPath captures the original event path — robust to mid-bubble
+    // DOM mutations (e.g. "Mark all read" re-renders the dropdown body).
+    const path = (typeof e.composedPath === 'function') ? e.composedPath() : [e.target];
+    if (path.includes(bellHost)) return;
+    // Ignore clicks inside the prefs modal — it sits at document.body level.
+    const modal = document.getElementById('notif-prefs-modal');
+    if (modal && path.includes(modal)) return;
+    closeBellDropdown();
+}
+
+function onDocKeyToCloseBell(e) {
+    if (e.key === 'Escape') closeBellDropdown();
+}
+
+function renderBellItemHtml(n) {
+    const cls = n.read ? 'notif-item' : 'notif-item notif-item-unread';
+    return `
+        <div class="${cls}" data-id="${escapeAttr(n.id)}" role="button" tabindex="0">
+            <div class="notif-item-title">${escapeHtml(n.title || '')}</div>
+            <div class="notif-item-summary">${escapeHtml(n.summary || '')}</div>
+            <div class="notif-item-meta">
+                <span class="notif-item-kind">${escapeHtml(BELL_KIND_LABELS[n.kind] || n.kind)}</span>
+                <span class="notif-item-at">${escapeHtml(formatRelativeTime(n.at))}</span>
+            </div>
+        </div>
+    `;
+}
+
+function onBellItemClick(id) {
+    const userId = currentUserId();
+    const map = getNotifications();
+    const list = Array.isArray(map[userId]) ? map[userId] : [];
+    const notif = list.find(n => n && n.id === id);
+    if (!notif) return;
+    const nextMap = markNotificationRead(map, userId, id);
+    if (nextMap !== map) saveNotifications(nextMap);
+    closeBellDropdown();
+    if (notif.projectId) {
+        if (typeof bellNavigateCallback === 'function') bellNavigateCallback();
+        openTaskByIds(notif.projectId, notif.taskId);
+    }
+}
+
+function onBellMarkAllRead() {
+    const userId = currentUserId();
+    const next = markAllNotificationsRead(getNotifications(), userId);
+    if (next !== getNotifications()) saveNotifications(next);
+}
+
+/**
+ * Cross-module navigation hook exposed to the shell. Activates the Projects
+ * detail view and slides the task panel open. Safe to call with an unknown
+ * id — falls back to the projects list.
+ */
+export function openTaskByIds(projectId, taskId) {
+    if (!projectId) return;
+    const project = findProject(getProjects(), projectId);
+    if (!project) {
+        goList();
+        return;
+    }
+    goDetail(projectId);
+    if (taskId && findTask(getTasks(), taskId)) {
+        openTaskPanel(taskId);
+    }
+}
+
+// ── Preferences modal ──
+
+function openPrefsModal() {
+    closePrefsModal();
+    const userId = currentUserId();
+    const prefs = currentUserPrefs();
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'notif-prefs-backdrop';
+    backdrop.className = 'notif-prefs-backdrop';
+    backdrop.addEventListener('click', closePrefsModal);
+    document.body.appendChild(backdrop);
+
+    const modal = document.createElement('div');
+    modal.id = 'notif-prefs-modal';
+    modal.className = 'notif-prefs-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Notification preferences');
+    modal.innerHTML = `
+        <div class="notif-prefs-head">
+            <h2>Notification preferences</h2>
+            <button type="button" class="notif-prefs-close" aria-label="Close">×</button>
+        </div>
+        <div class="notif-prefs-body">
+            <label class="notif-prefs-row">
+                <input type="checkbox" id="np-master" ${prefs.master ? 'checked' : ''}/>
+                <span>Master switch — receive notifications</span>
+            </label>
+            <fieldset class="notif-prefs-fieldset">
+                <legend>Delivery mode</legend>
+                ${NOTIFICATION_MODES.map(m => `
+                    <label class="notif-prefs-row notif-prefs-radio">
+                        <input type="radio" name="np-mode" value="${escapeAttr(m)}" ${prefs.mode === m ? 'checked' : ''}/>
+                        <span>${escapeHtml(BELL_MODE_LABELS[m] || m)}</span>
+                    </label>
+                `).join('')}
+            </fieldset>
+            <fieldset class="notif-prefs-fieldset">
+                <legend>Events</legend>
+                ${NOTIFICATION_KINDS.map(k => `
+                    <label class="notif-prefs-row">
+                        <input type="checkbox" data-kind="${escapeAttr(k)}" ${prefs.kinds[k] ? 'checked' : ''}/>
+                        <span>${escapeHtml(BELL_KIND_LABELS[k] || k)}</span>
+                    </label>
+                `).join('')}
+            </fieldset>
+        </div>
+        <div class="notif-prefs-foot">
+            <button type="button" id="np-cancel" class="notif-prefs-cancel">Cancel</button>
+            <button type="button" id="np-save" class="notif-prefs-save">Save</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('.notif-prefs-close').addEventListener('click', closePrefsModal);
+    modal.querySelector('#np-cancel').addEventListener('click', closePrefsModal);
+    modal.querySelector('#np-save').addEventListener('click', () => {
+        const master = modal.querySelector('#np-master').checked;
+        const mode = (modal.querySelector('input[name="np-mode"]:checked') || {}).value || 'instant';
+        const kinds = {};
+        modal.querySelectorAll('input[type="checkbox"][data-kind]').forEach(el => {
+            kinds[el.dataset.kind] = el.checked;
+        });
+        saveUserPrefs(userId, { master, mode, kinds });
+        closePrefsModal();
+    });
+
+    document.addEventListener('keydown', onPrefsKey);
+}
+
+function onPrefsKey(e) {
+    if (e.key === 'Escape') closePrefsModal();
+}
+
+function closePrefsModal() {
+    const m = document.getElementById('notif-prefs-modal');
+    if (m) m.remove();
+    const b = document.getElementById('notif-prefs-backdrop');
+    if (b) b.remove();
+    document.removeEventListener('keydown', onPrefsKey);
 }
 
 // ── Helpers ──

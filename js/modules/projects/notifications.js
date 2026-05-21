@@ -32,6 +32,62 @@ export const NOTIFICATION_KINDS = [
 /** Per §6.2 the bell shows last 30 — cap each user's bucket at that size. */
 export const MAX_NOTIFICATIONS_PER_USER = 30;
 
+/** Delivery modes — `instant` enqueues each event; `digest` accumulates for the daily 8am roll-up (Phase 6.4). */
+export const NOTIFICATION_MODES = ['instant', 'digest'];
+const NOTIFICATION_MODES_SET = new Set(NOTIFICATION_MODES);
+
+/** Reusable shape for "all kinds on" — callers should clone, never mutate. */
+function freshKindsOn() {
+    const out = {};
+    for (const k of NOTIFICATION_KINDS) out[k] = true;
+    return out;
+}
+
+/** Build a fresh, fully-enabled prefs record. */
+export function createDefaultPrefs() {
+    return { master: true, mode: 'instant', kinds: freshKindsOn() };
+}
+
+/**
+ * Normalise a prefs record loaded from storage / a form submit. Missing or
+ * malformed fields fall back to enabled-everything defaults, which keeps the
+ * "no prefs saved yet" case behaving the same as "all opted in".
+ *
+ * Unknown kinds in the input are dropped — the prefs surface only exposes
+ * the kinds advertised by `NOTIFICATION_KINDS`.
+ */
+export function sanitiseNotificationPrefs(input) {
+    const src = (input && typeof input === 'object') ? input : {};
+    const kinds = freshKindsOn();
+    if (src.kinds && typeof src.kinds === 'object') {
+        for (const k of NOTIFICATION_KINDS) {
+            if (Object.prototype.hasOwnProperty.call(src.kinds, k) && typeof src.kinds[k] === 'boolean') {
+                kinds[k] = src.kinds[k];
+            }
+        }
+    }
+    return {
+        master: typeof src.master === 'boolean' ? src.master : true,
+        mode: NOTIFICATION_MODES_SET.has(src.mode) ? src.mode : 'instant',
+        kinds,
+    };
+}
+
+/**
+ * Should this user receive a notification of `kind`? Null prefs default to
+ * fully enabled so users without saved prefs still get the bell. Unknown
+ * kinds default-allow when master is on so adding a new kind in a future
+ * phase doesn't silently mute existing users.
+ */
+export function shouldNotifyUser(prefs, kind) {
+    if (!prefs) return true;
+    if (prefs.master === false) return false;
+    if (prefs.kinds && Object.prototype.hasOwnProperty.call(prefs.kinds, kind)) {
+        return prefs.kinds[kind] !== false;
+    }
+    return true;
+}
+
 function generateNotificationId() {
     return 'n_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
 }
@@ -350,4 +406,56 @@ export function processTrigger(event, task, project, bucketMap) {
     let map = bucketMap;
     for (const n of notifications) map = addNotificationToBucket(map, n);
     return { bucketMap: map, notifications };
+}
+
+/**
+ * Immutably flip one notification's `read` flag to true. Same-ref no-op
+ * when the user/id isn't present or the entry was already read — callers
+ * use the identity check to skip a redundant save.
+ */
+export function markNotificationRead(bucketMap, user, id) {
+    if (!bucketMap || !user || !id) return bucketMap;
+    const list = bucketMap[user];
+    if (!Array.isArray(list)) return bucketMap;
+    const idx = list.findIndex(n => n && n.id === id);
+    if (idx < 0) return bucketMap;
+    if (list[idx].read) return bucketMap;
+    const nextList = list.slice();
+    nextList[idx] = { ...list[idx], read: true };
+    return { ...bucketMap, [user]: nextList };
+}
+
+/** Mark every entry for one user read. Same-ref no-op when nothing is unread. */
+export function markAllNotificationsRead(bucketMap, user) {
+    if (!bucketMap || !user) return bucketMap;
+    const list = bucketMap[user];
+    if (!Array.isArray(list) || list.length === 0) return bucketMap;
+    if (list.every(n => n && n.read)) return bucketMap;
+    const nextList = list.map(n => (n && !n.read) ? { ...n, read: true } : n);
+    return { ...bucketMap, [user]: nextList };
+}
+
+/** Number of unread notifications for one user; 0 for missing buckets. */
+export function unreadCount(bucketMap, user) {
+    if (!bucketMap || !user) return 0;
+    const list = bucketMap[user];
+    if (!Array.isArray(list)) return 0;
+    let n = 0;
+    for (const entry of list) if (entry && !entry.read) n++;
+    return n;
+}
+
+/**
+ * Newest-first slice (up to MAX_NOTIFICATIONS_PER_USER) for the bell dropdown.
+ * Storage order is oldest → newest (append-only), so we reverse for display.
+ * The cap is defensive — addNotificationToBucket already trims at write time.
+ */
+export function getUserNotifications(bucketMap, user) {
+    if (!bucketMap || !user) return [];
+    const list = bucketMap[user];
+    if (!Array.isArray(list) || list.length === 0) return [];
+    const reversed = list.slice().reverse();
+    return reversed.length > MAX_NOTIFICATIONS_PER_USER
+        ? reversed.slice(0, MAX_NOTIFICATIONS_PER_USER)
+        : reversed;
 }

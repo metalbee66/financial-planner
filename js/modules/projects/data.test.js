@@ -79,6 +79,7 @@ import {
 import {
     NOTIFICATION_KINDS,
     MAX_NOTIFICATIONS_PER_USER,
+    NOTIFICATION_MODES,
     eventToNotification,
     eventToNotificationsForRecipients,
     candidateRecipientsForEvent,
@@ -86,6 +87,13 @@ import {
     computeTimeBasedTriggers,
     addNotificationToBucket,
     processTrigger,
+    createDefaultPrefs,
+    sanitiseNotificationPrefs,
+    shouldNotifyUser,
+    markNotificationRead,
+    markAllNotificationsRead,
+    unreadCount,
+    getUserNotifications,
 } from './notifications.js';
 
 const tests = [];
@@ -2734,6 +2742,188 @@ test('processTrigger writes one notification per resolved recipient and returns 
     eq(notifications[0].to, 'diana');
     eq(bucketMap.diana.length, 1);
     truthy(!bucketMap.brad, 'brad bucket not created (he was the actor)');
+});
+
+// ── Notification preferences (Task 6.2) ──
+
+test('createDefaultPrefs returns master on, every kind on, instant mode', () => {
+    const prefs = createDefaultPrefs();
+    eq(prefs.master, true);
+    eq(prefs.mode, 'instant');
+    // Every advertised kind is explicitly enabled, not relying on implicit truthy.
+    for (const k of NOTIFICATION_KINDS) eq(prefs.kinds[k], true, `kind ${k} default-on`);
+});
+
+test('createDefaultPrefs returns fresh objects each call (no shared refs)', () => {
+    const a = createDefaultPrefs();
+    const b = createDefaultPrefs();
+    truthy(a !== b, 'top-level distinct');
+    truthy(a.kinds !== b.kinds, 'kinds map distinct');
+});
+
+test('NOTIFICATION_MODES advertises instant + digest', () => {
+    eq(NOTIFICATION_MODES.includes('instant'), true);
+    eq(NOTIFICATION_MODES.includes('digest'), true);
+});
+
+test('sanitiseNotificationPrefs backfills missing fields with defaults', () => {
+    const sanitised = sanitiseNotificationPrefs({});
+    eq(sanitised.master, true);
+    eq(sanitised.mode, 'instant');
+    for (const k of NOTIFICATION_KINDS) eq(sanitised.kinds[k], true);
+});
+
+test('sanitiseNotificationPrefs preserves explicit toggles', () => {
+    const sanitised = sanitiseNotificationPrefs({
+        master: false,
+        mode: 'digest',
+        kinds: { task_assigned: false },
+    });
+    eq(sanitised.master, false);
+    eq(sanitised.mode, 'digest');
+    eq(sanitised.kinds.task_assigned, false);
+    // Untouched kinds still default-on
+    eq(sanitised.kinds.task_overdue, true);
+});
+
+test('sanitiseNotificationPrefs coerces invalid mode to instant', () => {
+    eq(sanitiseNotificationPrefs({ mode: 'nope' }).mode, 'instant');
+    eq(sanitiseNotificationPrefs({ mode: null }).mode, 'instant');
+});
+
+test('sanitiseNotificationPrefs handles null / non-object input', () => {
+    const a = sanitiseNotificationPrefs(null);
+    eq(a.master, true);
+    eq(a.mode, 'instant');
+    const b = sanitiseNotificationPrefs('garbage');
+    eq(b.master, true);
+});
+
+test('shouldNotifyUser returns false when master is off', () => {
+    const prefs = sanitiseNotificationPrefs({ master: false });
+    eq(shouldNotifyUser(prefs, 'task_assigned'), false);
+});
+
+test('shouldNotifyUser returns false when the kind toggle is off', () => {
+    const prefs = sanitiseNotificationPrefs({ kinds: { task_assigned: false } });
+    eq(shouldNotifyUser(prefs, 'task_assigned'), false);
+    eq(shouldNotifyUser(prefs, 'task_overdue'), true);
+});
+
+test('shouldNotifyUser default-allows an unknown kind when master is on', () => {
+    // New kinds added in future shouldn't be silently muted for users with stored prefs.
+    const prefs = sanitiseNotificationPrefs({});
+    eq(shouldNotifyUser(prefs, 'never_seen_before_kind'), true);
+});
+
+test('shouldNotifyUser treats null prefs as fully enabled', () => {
+    eq(shouldNotifyUser(null, 'task_assigned'), true);
+    eq(shouldNotifyUser(undefined, 'task_overdue'), true);
+});
+
+// ── markNotificationRead / markAllNotificationsRead / unreadCount / getUserNotifications ──
+
+function mkNotif(id, to, opts) {
+    return {
+        id,
+        kind: (opts && opts.kind) || 'task_assigned',
+        to,
+        by: null,
+        taskId: null,
+        projectId: null,
+        title: 'T',
+        summary: 'S',
+        at: (opts && opts.at) || '2026-05-01T00:00:00.000Z',
+        read: !!(opts && opts.read),
+    };
+}
+
+test('markNotificationRead flips read=true on the matching id immutably', () => {
+    const map = { brad: [mkNotif('a', 'brad'), mkNotif('b', 'brad')] };
+    const next = markNotificationRead(map, 'brad', 'b');
+    eq(next.brad[0].read, false);
+    eq(next.brad[1].read, true);
+    eq(map.brad[1].read, false, 'original map untouched');
+    truthy(next !== map, 'fresh map ref');
+});
+
+test('markNotificationRead is a same-ref no-op for unknown user / id', () => {
+    const map = { brad: [mkNotif('a', 'brad')] };
+    eq(markNotificationRead(map, 'diana', 'a'), map);
+    eq(markNotificationRead(map, 'brad', 'missing'), map);
+});
+
+test('markNotificationRead is a same-ref no-op when already read', () => {
+    const map = { brad: [mkNotif('a', 'brad', { read: true })] };
+    eq(markNotificationRead(map, 'brad', 'a'), map);
+});
+
+test('markAllNotificationsRead flips every unread entry for one user', () => {
+    const map = {
+        brad: [mkNotif('a', 'brad'), mkNotif('b', 'brad', { read: true }), mkNotif('c', 'brad')],
+        diana: [mkNotif('d', 'diana')],
+    };
+    const next = markAllNotificationsRead(map, 'brad');
+    eq(next.brad.every(n => n.read), true);
+    eq(next.diana[0].read, false, 'other users untouched');
+    truthy(next !== map, 'fresh map ref');
+});
+
+test('markAllNotificationsRead is a same-ref no-op when nothing is unread', () => {
+    const map = { brad: [mkNotif('a', 'brad', { read: true })] };
+    eq(markAllNotificationsRead(map, 'brad'), map);
+});
+
+test('markAllNotificationsRead is a same-ref no-op for an unknown user', () => {
+    const map = { brad: [mkNotif('a', 'brad')] };
+    eq(markAllNotificationsRead(map, 'ghost'), map);
+});
+
+test('unreadCount counts only unread notifications for the given user', () => {
+    const map = {
+        brad: [mkNotif('a', 'brad'), mkNotif('b', 'brad', { read: true }), mkNotif('c', 'brad')],
+        diana: [mkNotif('d', 'diana')],
+    };
+    eq(unreadCount(map, 'brad'), 2);
+    eq(unreadCount(map, 'diana'), 1);
+});
+
+test('unreadCount returns 0 for a missing user or empty map', () => {
+    eq(unreadCount({}, 'brad'), 0);
+    eq(unreadCount(null, 'brad'), 0);
+});
+
+test('getUserNotifications returns newest-first within MAX_NOTIFICATIONS_PER_USER', () => {
+    // Storage order is oldest → newest (addNotificationToBucket appends).
+    // The bell wants newest first, so getUserNotifications reverses.
+    const map = {
+        brad: [
+            mkNotif('old', 'brad', { at: '2026-05-01T00:00:00.000Z' }),
+            mkNotif('mid', 'brad', { at: '2026-05-02T00:00:00.000Z' }),
+            mkNotif('new', 'brad', { at: '2026-05-03T00:00:00.000Z' }),
+        ],
+    };
+    const out = getUserNotifications(map, 'brad');
+    eq(out.length, 3);
+    eq(out[0].id, 'new');
+    eq(out[2].id, 'old');
+});
+
+test('getUserNotifications returns an empty array for missing user / map', () => {
+    eq(getUserNotifications({}, 'brad'), []);
+    eq(getUserNotifications(null, 'brad'), []);
+    eq(getUserNotifications({ brad: [] }, 'brad'), []);
+});
+
+test('getUserNotifications never returns more than MAX_NOTIFICATIONS_PER_USER even if storage somehow exceeds it', () => {
+    // Defensive cap — addNotificationToBucket already trims, but the bell shouldn't render
+    // an unbounded list if a future code path or remote race produced a larger bucket.
+    const arr = [];
+    for (let i = 0; i < MAX_NOTIFICATIONS_PER_USER + 10; i++) {
+        arr.push(mkNotif('n' + i, 'brad'));
+    }
+    const out = getUserNotifications({ brad: arr }, 'brad');
+    eq(out.length, MAX_NOTIFICATIONS_PER_USER);
 });
 
 // ── runner ──
