@@ -2692,6 +2692,86 @@ select.editable { width: 100px; cursor: pointer; }
     border-color: rgba(255, 82, 82, 0.4);
     background: linear-gradient(180deg, rgba(255,82,82,0.06), var(--surface) 60%);
 }
+.dashboard-card-clickable {
+    cursor: pointer;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.dashboard-card-clickable:hover,
+.dashboard-card-clickable:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+}
+.dashboard-card-active {
+    border-color: var(--accent);
+    background: linear-gradient(180deg, rgba(76, 175, 80, 0.08), var(--surface) 60%);
+}
+
+.dashboard-drill {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+}
+.dashboard-drill-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.dashboard-drill-title {
+    color: var(--accent);
+    font-size: 1rem;
+    margin: 0;
+}
+.dashboard-drill-close {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0 6px;
+}
+.dashboard-drill-close:hover { color: var(--text); }
+.dashboard-drill-list {
+    display: flex;
+    flex-direction: column;
+}
+.dashboard-drill-empty {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    padding: 12px 0;
+}
+.dashboard-drill-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.8fr) 2fr minmax(80px, 110px) minmax(90px, 120px);
+    gap: 12px;
+    align-items: center;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 0.88rem;
+}
+.dashboard-drill-row:last-child { border-bottom: none; }
+.dashboard-drill-row:hover,
+.dashboard-drill-row:focus-visible {
+    background: rgba(76, 175, 80, 0.06);
+    outline: none;
+}
+.dashboard-drill-project {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dashboard-drill-name {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dashboard-drill-due { color: var(--text-dim); }
+.dashboard-drill-status { justify-self: start; }
 
 .dashboard-chart-card {
     background: var(--surface);

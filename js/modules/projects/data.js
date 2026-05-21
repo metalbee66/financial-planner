@@ -751,6 +751,10 @@ export function filterTasks(list, filters) {
     const matched = new Set();
     for (const t of list) if (passes(t)) matched.add(t.id);
 
+    // PB.8: dashboard drill needs a flat predicate filter so list-row count
+    // matches the headline card count. `flat: true` skips the scaffold-keep.
+    if (f.flat) return list.filter(t => matched.has(t.id));
+
     const scaffolded = new Set();
     for (const t of list) {
         if (matched.has(t.id) && t.parentTaskId) scaffolded.add(t.parentTaskId);

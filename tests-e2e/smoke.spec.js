@@ -2039,6 +2039,88 @@ test.describe('PB.7 — Project status derivation', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('PB.8 — Dashboard drill-down', () => {
+
+    async function gotoDashboard(page) {
+        await page.locator('.projects-subtab[data-subtab="dashboard"]').click();
+        await expect(page.locator('.dashboard-cards')).toBeVisible();
+    }
+
+    test('activeProjects card is not clickable (Resolved Decision 1)', async ({ page }) => {
+        await createProject(page, { name: 'P', status: 'active' });
+        await backToList(page);
+        await gotoDashboard(page);
+        const card = page.locator('.dashboard-card[data-metric="activeProjects"]');
+        await expect(card).not.toHaveAttribute('role', 'button');
+        await expect(card).not.toHaveClass(/dashboard-card-clickable/);
+    });
+
+    test('clicking openTasks opens an inline list whose row count matches the card', async ({ page }) => {
+        await createProject(page, { name: 'Drill' });
+        await page.locator('#task-add-name').fill('t1');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#task-add-name').fill('t2');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#task-add-name').fill('done one');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'done one' }).locator('.task-row-status').selectOption('done');
+        await backToList(page);
+
+        await gotoDashboard(page);
+        const card = page.locator('.dashboard-card[data-metric="openTasks"]');
+        await expect(card.locator('.dashboard-card-value')).toHaveText('2');
+
+        await card.click();
+        await expect(page.locator('.dashboard-drill')).toBeVisible();
+        await expect(page.locator('.dashboard-drill-title')).toHaveText('Open tasks');
+        await expect(page.locator('.dashboard-drill-row')).toHaveCount(2);
+        // Card receives the active state
+        await expect(card).toHaveClass(/dashboard-card-active/);
+    });
+
+    test('keyboard activation opens the drill via Enter on a focused card', async ({ page }) => {
+        await createProject(page, { name: 'Drill kb' });
+        await page.locator('#task-add-name').fill('t1');
+        await page.locator('#task-add-name').press('Enter');
+        await backToList(page);
+        await gotoDashboard(page);
+
+        await page.locator('.dashboard-card[data-metric="openTasks"]').focus();
+        await page.keyboard.press('Enter');
+        await expect(page.locator('.dashboard-drill')).toBeVisible();
+    });
+
+    test('clicking the active card again closes the drill', async ({ page }) => {
+        await createProject(page, { name: 'Toggle' });
+        await page.locator('#task-add-name').fill('t1');
+        await page.locator('#task-add-name').press('Enter');
+        await backToList(page);
+        await gotoDashboard(page);
+
+        const card = page.locator('.dashboard-card[data-metric="openTasks"]');
+        await card.click();
+        await expect(page.locator('.dashboard-drill')).toBeVisible();
+        await card.click();
+        await expect(page.locator('.dashboard-drill')).toHaveCount(0);
+        // Chart re-appears
+        await expect(page.locator('.dashboard-chart-card')).toBeVisible();
+    });
+
+    test('drill row click opens the task panel', async ({ page }) => {
+        await createProject(page, { name: 'Open panel' });
+        await page.locator('#task-add-name').fill('Findme');
+        await page.locator('#task-add-name').press('Enter');
+        await backToList(page);
+        await gotoDashboard(page);
+
+        await page.locator('.dashboard-card[data-metric="openTasks"]').click();
+        await page.locator('.dashboard-drill-row').click();
+        await expect(page.locator('#task-panel')).toBeVisible();
+        await expect(page.locator('#tp-name')).toHaveValue('Findme');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('PB.9 — Joint assignee', () => {
 
     test('joint task renders Joint chip and matches each individual assignee filter', async ({ page }) => {

@@ -1430,6 +1430,15 @@ test('filterTasks dashboardView keeps the non-matching parent of a matching subt
     );
 });
 
+test('filterTasks flat:true drops scaffolded parents (PB.8 dashboard drill)', () => {
+    const parent = mkTask({ name: 'parent', status: 'done' });
+    const child = mkTask({ name: 'child', parentTaskId: parent.id, status: 'in-progress' });
+    eq(
+        filterTasks([parent, child], { dashboardView: 'open', today: '2026-05-15', flat: true }).map(t => t.name),
+        ['child']
+    );
+});
+
 // PB.9 — filterTasks assignee uses intersection semantics
 
 test('filterTasks by assignee matches joint tasks (intersection)', () => {

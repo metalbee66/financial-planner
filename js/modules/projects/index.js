@@ -77,6 +77,7 @@ import {
     computeDashboardMetrics,
     computeWeeklyCompletionBars,
     DASHBOARD_WEEKS,
+    DASHBOARD_CARD_VIEWS,
     collectAttachmentsByProject,
     saveProjects,
 } from './data.js';
@@ -598,29 +599,122 @@ function renderDashboardBody(root) {
     const resolvedProjects = resolveProjectStatuses(allProjects, allTasks);
     const metrics = computeDashboardMetrics(resolvedProjects, allTasks, today);
     const bars = computeWeeklyCompletionBars(allTasks, today, DASHBOARD_WEEKS);
+    const drillView = mode.dashboardDrill || null;
 
     const cardsHtml = DASHBOARD_CARDS.map(card => {
         const value = metrics[card.key] || 0;
         const flagClass = card.flag === 'overdue' && value > 0 ? ' dashboard-card-flag' : '';
+        const view = DASHBOARD_CARD_VIEWS[card.key];
+        const clickable = !!view;
+        const clickableClass = clickable ? ' dashboard-card-clickable' : '';
+        const activeClass = clickable && view === drillView ? ' dashboard-card-active' : '';
+        const buttonAttrs = clickable ? ' role="button" tabindex="0"' : '';
         return `
-            <div class="dashboard-card${flagClass}" data-metric="${card.key}">
+            <div class="dashboard-card${flagClass}${clickableClass}${activeClass}" data-metric="${card.key}"${buttonAttrs}>
                 <div class="dashboard-card-value">${value}</div>
                 <div class="dashboard-card-label">${escapeHtml(card.label)}</div>
             </div>
         `;
     }).join('');
 
+    let bodyHtml;
+    if (drillView) {
+        const drillTasks = filterTasks(allTasks, { dashboardView: drillView, today, flat: true });
+        bodyHtml = renderDashboardDrillHtml(drillView, drillTasks, allProjects);
+    } else {
+        bodyHtml = `
+            <div class="dashboard-chart-card">
+                <div class="dashboard-chart-head">
+                    <h3 class="dashboard-chart-title">Tasks completed per week</h3>
+                    <span class="dashboard-chart-sub">Last ${DASHBOARD_WEEKS} weeks</span>
+                </div>
+                ${renderWeeklyBarChart(bars)}
+            </div>
+        `;
+    }
+
     root.innerHTML = `
         <div class="projects-toolbar">
             <h2 class="projects-title">Dashboard</h2>
         </div>
         <div class="dashboard-cards" id="dashboard-cards">${cardsHtml}</div>
-        <div class="dashboard-chart-card">
-            <div class="dashboard-chart-head">
-                <h3 class="dashboard-chart-title">Tasks completed per week</h3>
-                <span class="dashboard-chart-sub">Last ${DASHBOARD_WEEKS} weeks</span>
+        ${bodyHtml}
+    `;
+
+    // PB.8: clickable cards toggle the drill — re-click the active card to close.
+    root.querySelectorAll('.dashboard-card-clickable').forEach(el => {
+        const view = DASHBOARD_CARD_VIEWS[el.dataset.metric];
+        if (!view) return;
+        const toggle = () => {
+            mode.dashboardDrill = mode.dashboardDrill === view ? null : view;
+            render();
+        };
+        el.addEventListener('click', toggle);
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggle();
+            }
+        });
+    });
+
+    const closeBtn = root.querySelector('#dashboard-drill-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            mode.dashboardDrill = null;
+            render();
+        });
+    }
+
+    root.querySelectorAll('.dashboard-drill-row').forEach(el => {
+        const taskId = el.dataset.taskId;
+        if (!taskId) return;
+        const open = () => openTaskPanel(taskId);
+        el.addEventListener('click', open);
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                open();
+            }
+        });
+    });
+}
+
+const DASHBOARD_DRILL_LABELS = {
+    open: 'Open tasks',
+    overdue: 'Overdue',
+    dueThisWeek: 'Due this week',
+    completedLast30Days: 'Completed (last 30d)',
+    upcomingMilestones: 'Upcoming milestones',
+};
+
+function renderDashboardDrillHtml(view, tasks, projects) {
+    const projectNameFor = (pid) => {
+        const p = projects.find(p => p.id === pid);
+        return p ? p.name : '—';
+    };
+    const heading = DASHBOARD_DRILL_LABELS[view] || view;
+    const rowsHtml = tasks.length === 0
+        ? `<div class="dashboard-drill-empty">No tasks match.</div>`
+        : tasks.map(t => {
+            const due = t.dueDate ? formatDateOnly(t.dueDate) : '—';
+            const statusLabel = TASK_STATUS_LABELS[t.status] || t.status;
+            return `
+                <div class="dashboard-drill-row" role="button" tabindex="0" data-task-id="${escapeAttr(t.id)}">
+                    <span class="dashboard-drill-project" title="${escapeAttr(projectNameFor(t.projectId))}">${escapeHtml(projectNameFor(t.projectId))}</span>
+                    <span class="dashboard-drill-name">${escapeHtml(t.name)}</span>
+                    <span class="dashboard-drill-due">${escapeHtml(due)}</span>
+                    <span class="dashboard-drill-status status-badge status-${t.status}">${escapeHtml(statusLabel)}</span>
+                </div>
+            `;
+        }).join('');
+    return `
+        <div class="dashboard-drill">
+            <div class="dashboard-drill-head">
+                <h3 class="dashboard-drill-title">${escapeHtml(heading)}</h3>
+                <button type="button" class="dashboard-drill-close" id="dashboard-drill-close" aria-label="Close drill-down">×</button>
             </div>
-            ${renderWeeklyBarChart(bars)}
+            <div class="dashboard-drill-list">${rowsHtml}</div>
         </div>
     `;
 }
@@ -1642,6 +1736,7 @@ function freshListMode() {
         listSubtab: 'overview',
         myTasksUser: null,
         myTasksCollapsed: { completed: true },
+        dashboardDrill: null,
         taskFilters: {},
         taskSort: { ...DEFAULT_TASK_SORT },
         taskGroup: DEFAULT_TASK_GROUP,
