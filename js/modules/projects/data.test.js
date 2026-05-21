@@ -76,6 +76,8 @@ import {
     collectAttachmentsByProject,
     emailToParticipantId,
     participantEmail,
+    ADMIN_USER_IDS,
+    isAdminUser,
 } from './data.js';
 import {
     NOTIFICATION_KINDS,
@@ -103,6 +105,13 @@ import {
     clearDigestForUser,
     composeDigestSummary,
     buildDigestEmail,
+    EMAIL_QUEUE_STATUSES,
+    ADMIN_QUEUE_PAGE_SIZE,
+    classifyQueueEntry,
+    countQueueByStatus,
+    getQueueEntriesForAdmin,
+    retryQueueEntry,
+    clearSentOlderThan,
 } from './notifications.js';
 
 const tests = [];
@@ -3167,6 +3176,162 @@ test('buildDigestEmail returns null for unknown recipient or empty entries', () 
     eq(buildDigestEmail('external_consultant', [{ kind: 'task_assigned', title: 'T', summary: 'S', at: '' }]), null);
     eq(buildDigestEmail('brad', []), null);
     eq(buildDigestEmail('brad', null), null);
+});
+
+// ── Email-queue admin panel (Task 6.5) ──
+
+test('ADMIN_USER_IDS lists brad as the default admin', () => {
+    truthy(Array.isArray(ADMIN_USER_IDS));
+    eq(ADMIN_USER_IDS.includes('brad'), true);
+});
+
+test('isAdminUser is true for brad, false for non-admins', () => {
+    eq(isAdminUser('brad'), true);
+    eq(isAdminUser('diana'), false);
+    eq(isAdminUser('external'), false);
+    eq(isAdminUser(null), false);
+    eq(isAdminUser(''), false);
+});
+
+test('EMAIL_QUEUE_STATUSES advertises pending / sent / failed', () => {
+    eq(EMAIL_QUEUE_STATUSES, ['pending', 'sent', 'failed']);
+});
+
+function mkQueueEntry(id, opts) {
+    opts = opts || {};
+    return {
+        id,
+        to: opts.to || 'metalbee66@gmail.com',
+        subject: opts.subject || '[Family Planner] Task assigned: X',
+        bodyHtml: '<p>...</p>',
+        kind: opts.kind || 'task_assigned',
+        notificationId: null,
+        taskId: opts.taskId || null,
+        projectId: opts.projectId || null,
+        sourceUrl: '',
+        queuedAt: opts.queuedAt || '2026-05-21T10:00:00.000Z',
+        sent: !!opts.sent,
+        sentAt: opts.sentAt || null,
+        attempts: opts.attempts == null ? 0 : opts.attempts,
+        failed: !!opts.failed,
+    };
+}
+
+test('classifyQueueEntry returns sent / failed / pending based on the entry flags', () => {
+    eq(classifyQueueEntry(mkQueueEntry('a', { sent: true, sentAt: '2026-05-21T11:00:00.000Z' })), 'sent');
+    eq(classifyQueueEntry(mkQueueEntry('b', { failed: true, attempts: 3 })), 'failed');
+    eq(classifyQueueEntry(mkQueueEntry('c')), 'pending');
+});
+
+test('classifyQueueEntry: sent wins over failed (delivered overrides any retry history)', () => {
+    // n8n could conceivably set sent=true on a retry that previously hit failed=true.
+    // Once delivered, the entry is sent regardless of historical failure flags.
+    eq(classifyQueueEntry(mkQueueEntry('a', { sent: true, failed: true })), 'sent');
+});
+
+test('classifyQueueEntry returns null for null / non-object input', () => {
+    eq(classifyQueueEntry(null), null);
+    eq(classifyQueueEntry('not an entry'), null);
+});
+
+test('countQueueByStatus tallies pending / sent / failed across the map', () => {
+    const map = {
+        a: mkQueueEntry('a', { sent: true }),
+        b: mkQueueEntry('b', { failed: true }),
+        c: mkQueueEntry('c'),
+        d: mkQueueEntry('d', { failed: true }),
+        e: mkQueueEntry('e'),
+    };
+    eq(countQueueByStatus(map), { pending: 2, sent: 1, failed: 2, total: 5 });
+});
+
+test('countQueueByStatus handles empty / null input', () => {
+    eq(countQueueByStatus({}), { pending: 0, sent: 0, failed: 0, total: 0 });
+    eq(countQueueByStatus(null), { pending: 0, sent: 0, failed: 0, total: 0 });
+});
+
+test('getQueueEntriesForAdmin returns entries newest-first', () => {
+    const map = {
+        a: mkQueueEntry('a', { queuedAt: '2026-05-20T10:00:00.000Z' }),
+        b: mkQueueEntry('b', { queuedAt: '2026-05-22T10:00:00.000Z' }),
+        c: mkQueueEntry('c', { queuedAt: '2026-05-21T10:00:00.000Z' }),
+    };
+    const out = getQueueEntriesForAdmin(map, {});
+    eq(out.map(e => e.id), ['b', 'c', 'a']);
+});
+
+test('getQueueEntriesForAdmin caps at ADMIN_QUEUE_PAGE_SIZE (50)', () => {
+    truthy(ADMIN_QUEUE_PAGE_SIZE === 50);
+    const map = {};
+    for (let i = 0; i < ADMIN_QUEUE_PAGE_SIZE + 12; i++) {
+        const t = `2026-05-21T${String(i).padStart(2, '0')}:00:00.000Z`;
+        map['e' + i] = mkQueueEntry('e' + i, { queuedAt: t });
+    }
+    const out = getQueueEntriesForAdmin(map, {});
+    eq(out.length, ADMIN_QUEUE_PAGE_SIZE);
+});
+
+test('getQueueEntriesForAdmin filters by status when provided', () => {
+    const map = {
+        a: mkQueueEntry('a', { sent: true, queuedAt: '2026-05-22T10:00:00.000Z' }),
+        b: mkQueueEntry('b', { failed: true, queuedAt: '2026-05-21T10:00:00.000Z' }),
+        c: mkQueueEntry('c', { queuedAt: '2026-05-20T10:00:00.000Z' }),
+    };
+    eq(getQueueEntriesForAdmin(map, { status: 'failed' }).map(e => e.id), ['b']);
+    eq(getQueueEntriesForAdmin(map, { status: 'sent' }).map(e => e.id), ['a']);
+    eq(getQueueEntriesForAdmin(map, { status: 'pending' }).map(e => e.id), ['c']);
+    eq(getQueueEntriesForAdmin(map, { status: null }).map(e => e.id), ['a', 'b', 'c']);
+});
+
+test('getQueueEntriesForAdmin returns an empty array for null / empty map', () => {
+    eq(getQueueEntriesForAdmin({}, {}), []);
+    eq(getQueueEntriesForAdmin(null, {}), []);
+});
+
+test('retryQueueEntry resets sent / sentAt / attempts / failed on the matching entry, immutably', () => {
+    const entry = mkQueueEntry('a', { sent: false, failed: true, attempts: 3, sentAt: null });
+    const next = retryQueueEntry(entry);
+    truthy(next !== entry, 'fresh ref');
+    eq(next.sent, false);
+    eq(next.sentAt, null);
+    eq(next.attempts, 0);
+    eq(next.failed, false);
+    // Original untouched
+    eq(entry.failed, true);
+    eq(entry.attempts, 3);
+});
+
+test('retryQueueEntry returns the same ref for null input', () => {
+    eq(retryQueueEntry(null), null);
+});
+
+test('clearSentOlderThan removes sent entries with sentAt < threshold, keeps newer + non-sent', () => {
+    const map = {
+        oldSent: mkQueueEntry('oldSent', { sent: true, sentAt: '2026-05-01T10:00:00.000Z' }),
+        recentSent: mkQueueEntry('recentSent', { sent: true, sentAt: '2026-05-21T10:00:00.000Z' }),
+        pending: mkQueueEntry('pending', { sent: false }),
+        failed: mkQueueEntry('failed', { failed: true }),
+    };
+    // Threshold: anything sent before 2026-05-15 goes
+    const next = clearSentOlderThan(map, '2026-05-15T00:00:00.000Z');
+    truthy(!next.oldSent, 'old sent removed');
+    truthy(next.recentSent, 'recent sent kept');
+    truthy(next.pending, 'pending kept (never affected by clearSent)');
+    truthy(next.failed, 'failed kept (never affected by clearSent)');
+    // Original untouched
+    truthy(map.oldSent, 'original map untouched');
+});
+
+test('clearSentOlderThan is a same-ref no-op when nothing qualifies', () => {
+    const map = {
+        a: mkQueueEntry('a', { sent: true, sentAt: '2026-05-21T10:00:00.000Z' }),
+        b: mkQueueEntry('b'),
+    };
+    eq(clearSentOlderThan(map, '2026-05-15T00:00:00.000Z'), map);
+});
+
+test('clearSentOlderThan returns the input unchanged for null / non-object input', () => {
+    eq(clearSentOlderThan(null, '2026-05-15T00:00:00.000Z'), null);
 });
 
 // ── runner ──

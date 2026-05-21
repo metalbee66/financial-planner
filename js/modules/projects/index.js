@@ -13,12 +13,13 @@
  */
 
 import { state } from '../../state.js';
-import { currentUser, enqueueEmail } from '../../firebase-sync.js';
+import { currentUser, enqueueEmail, removeEmailQueueEntries } from '../../firebase-sync.js';
 import {
     PROJECT_STATUSES,
     TASK_STATUSES,
     TASK_PRIORITIES,
     DEFAULT_PARTICIPANTS,
+    isAdminUser,
     createProject,
     sanitiseProject,
     validateProject,
@@ -100,6 +101,13 @@ import {
     markAllNotificationsRead,
     unreadCount,
     getUserNotifications,
+    EMAIL_QUEUE_STATUSES,
+    ADMIN_QUEUE_PAGE_SIZE,
+    classifyQueueEntry,
+    countQueueByStatus,
+    getQueueEntriesForAdmin,
+    retryQueueEntry,
+    clearSentOlderThan,
 } from './notifications.js';
 
 const STATUS_LABELS = {
@@ -448,14 +456,26 @@ function render() {
 
 // ── List view (sub-tabs: Overview / My Tasks) ──
 
-const LIST_SUBTABS = ['overview', 'mytasks', 'dashboard', 'files'];
-const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard', files: 'Files' };
+const LIST_SUBTABS_BASE = ['overview', 'mytasks', 'dashboard', 'files'];
+const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard', files: 'Files', admin: 'Admin' };
+
+/**
+ * Available sub-tabs for the current user. Admin is the only role-gated one;
+ * everyone else sees a hidden tab. The shell calls this fresh on every render
+ * so flipping admin status (e.g. via ADMIN_USER_IDS) takes effect immediately.
+ */
+function visibleListSubtabs() {
+    return isAdminUser(currentUserId())
+        ? LIST_SUBTABS_BASE.concat(['admin'])
+        : LIST_SUBTABS_BASE;
+}
 
 function renderList() {
-    const subtab = LIST_SUBTABS.includes(mode.listSubtab) ? mode.listSubtab : 'overview';
+    const subtabs = visibleListSubtabs();
+    const subtab = subtabs.includes(mode.listSubtab) ? mode.listSubtab : 'overview';
     host.innerHTML = `
         <div class="projects-subtabs" role="tablist" aria-label="Projects views">
-            ${LIST_SUBTABS.map(id => `
+            ${subtabs.map(id => `
                 <button type="button" class="projects-subtab${subtab === id ? ' active' : ''}"
                     role="tab" aria-selected="${subtab === id}" data-subtab="${id}">${SUBTAB_LABELS[id]}</button>
             `).join('')}
@@ -479,6 +499,8 @@ function renderList() {
         renderDashboardBody(body);
     } else if (subtab === 'files') {
         renderFilesBody(body);
+    } else if (subtab === 'admin') {
+        renderAdminBody(body);
     } else {
         renderOverviewBody(body);
     }
@@ -3031,6 +3053,178 @@ function closePrefsModal() {
     const b = document.getElementById('notif-prefs-backdrop');
     if (b) b.remove();
     document.removeEventListener('keydown', onPrefsKey);
+}
+
+// ── Email-queue admin (Task 6.5) ──
+
+/**
+ * Days-ago threshold for the "Clear sent" sweep. Matches plan §6.5: "purges
+ * items where sent=true and older than 7 days".
+ */
+const CLEAR_SENT_DAYS = 7;
+
+const QUEUE_KIND_LABELS = {
+    task_assigned: 'Task assigned',
+    comment_added: 'New comment',
+    dependency_unblocked: 'Unblocked',
+    task_due_soon: 'Due soon',
+    task_overdue: 'Overdue',
+    milestone_completed: 'Milestone',
+    project_completed: 'Project complete',
+};
+
+function loadEmailQueueMap() {
+    try {
+        const raw = localStorage.getItem('email_queue');
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch (e) {
+        console.error('admin loadEmailQueueMap parse error:', e);
+    }
+    return {};
+}
+
+/**
+ * Render the admin sub-tab inside Projects. Lists the last 50 queue entries,
+ * status-filterable, with a Retry button on failed items and a "Clear sent
+ * older than N days" sweep button at the bottom.
+ */
+function renderAdminBody(root) {
+    const map = loadEmailQueueMap();
+    const counts = countQueueByStatus(map);
+    const filter = mode.emailQueueFilter && EMAIL_QUEUE_STATUSES.includes(mode.emailQueueFilter)
+        ? mode.emailQueueFilter
+        : null;
+    const entries = getQueueEntriesForAdmin(map, { status: filter });
+
+    const pillsHtml = ['all'].concat(EMAIL_QUEUE_STATUSES).map(s => {
+        const count = s === 'all' ? counts.total : counts[s];
+        const label = s === 'all' ? 'All' : s[0].toUpperCase() + s.slice(1);
+        const active = (filter === null && s === 'all') || (filter === s);
+        return `<button type="button" class="admin-filter-pill${active ? ' active' : ''}" data-status="${escapeAttr(s)}">${escapeHtml(label)} (${count})</button>`;
+    }).join('');
+
+    const tableBodyHtml = entries.length === 0
+        ? `<tr class="admin-empty-row"><td colspan="7">${counts.total === 0 ? 'Email queue is empty.' : 'No entries match this filter.'}</td></tr>`
+        : entries.map(renderAdminRowHtml).join('');
+
+    const sevenDaysAgo = isoDaysAgo(CLEAR_SENT_DAYS);
+    const sentToClear = countSentOlderThan(map, sevenDaysAgo);
+
+    root.innerHTML = `
+        <div class="admin-toolbar">
+            <h2 class="admin-title">Email queue</h2>
+            <button type="button" id="admin-refresh-btn" class="btn-secondary" title="Refresh from storage">Refresh</button>
+        </div>
+        <div class="admin-filter-pills" role="tablist" aria-label="Filter by status">${pillsHtml}</div>
+        <div class="admin-table-wrap">
+            <table class="admin-table" aria-label="Email queue">
+                <thead>
+                    <tr>
+                        <th>Queued</th>
+                        <th>To</th>
+                        <th>Kind</th>
+                        <th>Subject</th>
+                        <th>Status</th>
+                        <th>Attempts</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-table-body">${tableBodyHtml}</tbody>
+            </table>
+        </div>
+        <div class="admin-foot">
+            <button type="button" id="admin-clear-sent-btn" class="btn-secondary"${sentToClear === 0 ? ' disabled' : ''}>
+                Clear ${sentToClear} sent ${sentToClear === 1 ? 'entry' : 'entries'} older than ${CLEAR_SENT_DAYS} days
+            </button>
+            <span class="admin-hint">Capped at last ${ADMIN_QUEUE_PAGE_SIZE} entries.</span>
+        </div>
+    `;
+
+    root.querySelectorAll('.admin-filter-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const v = btn.dataset.status;
+            mode.emailQueueFilter = (v === 'all') ? null : v;
+            renderAdminBody(root);
+        });
+    });
+    root.querySelector('#admin-refresh-btn').addEventListener('click', () => renderAdminBody(root));
+    root.querySelectorAll('.admin-retry-btn').forEach(btn => {
+        btn.addEventListener('click', () => onAdminRetry(btn.dataset.id));
+    });
+    const clearBtn = root.querySelector('#admin-clear-sent-btn');
+    if (clearBtn) clearBtn.addEventListener('click', () => onAdminClearSent());
+}
+
+function renderAdminRowHtml(entry) {
+    const status = classifyQueueEntry(entry);
+    const kindLabel = QUEUE_KIND_LABELS[entry.kind] || entry.kind || '';
+    const sentAt = entry.sentAt ? formatRelativeTime(entry.sentAt) : '';
+    const actions = status === 'failed'
+        ? `<button type="button" class="btn-secondary admin-retry-btn" data-id="${escapeAttr(entry.id)}">Retry</button>`
+        : (status === 'sent' && sentAt ? `<span class="admin-sent-at" title="Sent">${escapeHtml(sentAt)}</span>` : '');
+    return `
+        <tr class="admin-row" data-id="${escapeAttr(entry.id)}" data-status="${escapeAttr(status)}">
+            <td title="${escapeAttr(entry.queuedAt || '')}">${escapeHtml(formatRelativeTime(entry.queuedAt))}</td>
+            <td>${escapeHtml(entry.to || '')}</td>
+            <td>${escapeHtml(kindLabel)}</td>
+            <td class="admin-subject">${escapeHtml(entry.subject || '')}</td>
+            <td><span class="admin-status-pill admin-status-${status}">${escapeHtml(status)}</span></td>
+            <td>${entry.attempts == null ? 0 : entry.attempts}</td>
+            <td class="admin-actions">${actions}</td>
+        </tr>
+    `;
+}
+
+function onAdminRetry(id) {
+    if (!id) return;
+    const map = loadEmailQueueMap();
+    const entry = map[id];
+    if (!entry) return;
+    const retried = retryQueueEntry(entry);
+    enqueueEmail(retried);
+    refreshAdminView();
+}
+
+function onAdminClearSent() {
+    const sevenDaysAgo = isoDaysAgo(CLEAR_SENT_DAYS);
+    const map = loadEmailQueueMap();
+    const toRemove = Object.keys(map).filter(id => {
+        const e = map[id];
+        return e && e.sent && e.sentAt && e.sentAt < sevenDaysAgo;
+    });
+    if (toRemove.length === 0) return;
+    removeEmailQueueEntries(toRemove);
+    refreshAdminView();
+}
+
+/** Re-render the admin sub-tab if it's the active view. Idempotent + cheap. */
+export function renderEmailQueueAdmin() {
+    if (mode.view !== 'list' || mode.listSubtab !== 'admin') return;
+    const body = host && host.querySelector('#projects-list-body');
+    if (body) renderAdminBody(body);
+}
+
+function refreshAdminView() {
+    const body = host && host.querySelector('#projects-list-body');
+    if (body) renderAdminBody(body);
+}
+
+function countSentOlderThan(map, thresholdIso) {
+    if (!map || !thresholdIso) return 0;
+    let n = 0;
+    for (const id in map) {
+        const e = map[id];
+        if (e && e.sent && e.sentAt && e.sentAt < thresholdIso) n++;
+    }
+    return n;
+}
+
+function isoDaysAgo(days) {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString();
 }
 
 // ── Helpers ──

@@ -887,6 +887,106 @@ select.editable { width: 100px; cursor: pointer; }
 }
 .sign-out-btn:hover { color: var(--red); border-color: var(--red); }
 
+/* ── Email-queue admin (Task 6.5) ── */
+
+.admin-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 20px;
+}
+.admin-title { font-size: 1rem; color: var(--accent); flex: 1; }
+.admin-filter-pills {
+    display: flex;
+    gap: 6px;
+    padding: 0 20px 10px;
+    flex-wrap: wrap;
+}
+.admin-filter-pill {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+.admin-filter-pill:hover { color: var(--text); border-color: var(--text); }
+.admin-filter-pill.active {
+    background: var(--accent);
+    color: #001a2a;
+    border-color: var(--accent);
+    font-weight: 600;
+}
+.admin-table-wrap {
+    padding: 0 20px;
+    overflow-x: auto;
+}
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.admin-table thead th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+}
+.admin-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+.admin-table tbody tr:hover { background: var(--surface2); }
+.admin-subject {
+    max-width: 340px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.admin-status-pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.admin-status-pending { background: rgba(255,152,0,0.15); color: var(--orange); border: 1px solid var(--orange); }
+.admin-status-sent { background: rgba(0,200,83,0.15); color: var(--green); border: 1px solid var(--green); }
+.admin-status-failed { background: rgba(255,82,82,0.15); color: var(--red); border: 1px solid var(--red); }
+.admin-actions { white-space: nowrap; }
+.admin-retry-btn {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    cursor: pointer;
+}
+.admin-retry-btn:hover { background: var(--accent); color: #001a2a; }
+.admin-empty-row td {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 24px 10px;
+}
+.admin-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px 20px;
+    gap: 12px;
+}
+.admin-hint { color: var(--text-dim); font-size: 0.78rem; }
+.admin-sent-at { color: var(--text-dim); font-size: 0.78rem; }
+
 /* ── Notification bell + dropdown (Task 6.2) ── */
 
 .notif-bell-host {

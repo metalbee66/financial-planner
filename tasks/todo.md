@@ -88,8 +88,8 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **6.2** In-app bell + per-user preferences UI — M — [plan §6.2](plan.md#task-62-in-app-bell--per-user-preferences-ui) — _done 2026-05-21, bell + badge in header, dropdown + cross-module nav + prefs modal; +19 unit cases / +10 E2E (now 130 E2E)_
 - [x] **6.3** Email queue write + n8n workflow — M — [plan §6.3](plan.md#task-63-email-queue-write--n8n-workflow) — _browser-side enqueue done 2026-05-21 (+9 unit cases / +4 E2E, now 134 E2E). **n8n workflow build deferred** until SEi14 / M365 infra is ready — surfaced in [user-actions.md](user-actions.md) with the full workflow shape._
 - [x] **6.4** Daily digest mode — M — [plan §6.4](plan.md#task-64-daily-digest-mode) — _browser-side accumulation done 2026-05-21 (+13 unit cases / +4 E2E, now 138 E2E). **Daily-8am n8n workflow build deferred** to [user-actions.md](user-actions.md) with the full workflow shape + concurrent-write caveat._
-- [ ] **6.5** Email queue admin panel — S — [plan §6.5](plan.md#task-65-email-queue-admin-panel)
-- [ ] **Checkpoint G**: two-user notification flow + daily digest tested end-to-end; user reviews
+- [x] **6.5** Email queue admin panel — S — [plan §6.5](plan.md#task-65-email-queue-admin-panel) — _done 2026-05-21, admin-only sub-tab with status filter pills + retry + clear-sent sweep (+15 unit cases / +6 E2E, now 144 E2E)_
+- [ ] **Checkpoint G**: two-user notification flow + daily digest tested end-to-end; user reviews (depends on Pre-Phase-6 n8n + M365 infra in [user-actions.md](user-actions.md))
 
 ## Phase 7 — Celebrations & Local AI
 

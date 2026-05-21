@@ -1163,6 +1163,18 @@ export function participantEmail(participantId) {
 }
 
 /**
+ * Participant ids allowed to see the Email-queue admin sub-tab (Task 6.5).
+ * Hard-coded — the app has exactly two real users, so a runtime config would
+ * be overkill. To grant Diana access, append 'diana' here.
+ */
+export const ADMIN_USER_IDS = Object.freeze(['brad']);
+const ADMIN_USER_SET = new Set(ADMIN_USER_IDS);
+export function isAdminUser(participantId) {
+    if (!participantId) return false;
+    return ADMIN_USER_SET.has(participantId);
+}
+
+/**
  * Selectable users for the My Tasks view: brad and diana always come first
  * (in canonical order), then any external assignees seen in the task list,
  * sorted alphabetically and deduped.

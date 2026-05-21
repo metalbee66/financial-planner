@@ -655,6 +655,99 @@ export function buildDigestEmail(user, entries, baseUrl) {
     return { to: recipient, subject, bodyHtml };
 }
 
+// ── Email-queue admin (Task 6.5) ──
+
+/** Statuses surfaced by the admin panel filter pills. Order matters: it drives the chip render. */
+export const EMAIL_QUEUE_STATUSES = ['pending', 'sent', 'failed'];
+
+/** Per plan §6.5 — last 50 queue items visible to the admin. */
+export const ADMIN_QUEUE_PAGE_SIZE = 50;
+
+/**
+ * Classify one queue entry. `sent` wins over `failed` so a previously-failed
+ * entry that eventually delivered renders as sent (n8n could PATCH sent=true
+ * on a retry without resetting the historical `failed` flag).
+ */
+export function classifyQueueEntry(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    if (entry.sent) return 'sent';
+    if (entry.failed) return 'failed';
+    return 'pending';
+}
+
+/**
+ * Single-pass tally of `{pending, sent, failed, total}` across the queue map.
+ * The admin panel uses this for the filter-pill counts.
+ */
+export function countQueueByStatus(map) {
+    const out = { pending: 0, sent: 0, failed: 0, total: 0 };
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+    for (const id in map) {
+        const status = classifyQueueEntry(map[id]);
+        if (!status) continue;
+        out[status]++;
+        out.total++;
+    }
+    return out;
+}
+
+/**
+ * Build the admin-table row list. Newest-queued-first, optionally filtered by
+ * status, capped at ADMIN_QUEUE_PAGE_SIZE. Entries with no `queuedAt` sort to
+ * the end so a malformed write doesn't bubble to the top.
+ */
+export function getQueueEntriesForAdmin(map, opts) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
+    const status = opts && opts.status ? opts.status : null;
+    const arr = [];
+    for (const id in map) {
+        const entry = map[id];
+        if (!entry || typeof entry !== 'object') continue;
+        if (status && classifyQueueEntry(entry) !== status) continue;
+        arr.push(entry);
+    }
+    arr.sort((a, b) => {
+        const aq = a.queuedAt || '';
+        const bq = b.queuedAt || '';
+        if (!aq && bq) return 1;
+        if (aq && !bq) return -1;
+        return bq.localeCompare(aq);
+    });
+    return arr.length > ADMIN_QUEUE_PAGE_SIZE ? arr.slice(0, ADMIN_QUEUE_PAGE_SIZE) : arr;
+}
+
+/**
+ * Reset one entry so the n8n drainer picks it up again on its next cycle.
+ * Wipes `sent` / `sentAt` / `failed` / `attempts`. Same-ref no-op for null
+ * input — callers use the identity check to skip a redundant Firebase write.
+ */
+export function retryQueueEntry(entry) {
+    if (!entry || typeof entry !== 'object') return entry;
+    return { ...entry, sent: false, sentAt: null, attempts: 0, failed: false };
+}
+
+/**
+ * Strip sent entries with `sentAt < threshold` from the map. Pending + failed
+ * entries are untouched regardless of age. Same-ref no-op when nothing
+ * qualifies so callers can skip a redundant save. The admin panel's
+ * "Clear sent older than 7 days" button calls this with a 7-day-ago threshold.
+ */
+export function clearSentOlderThan(map, thresholdIso) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return map;
+    if (!thresholdIso) return map;
+    const removed = [];
+    for (const id in map) {
+        const entry = map[id];
+        if (entry && entry.sent && entry.sentAt && entry.sentAt < thresholdIso) {
+            removed.push(id);
+        }
+    }
+    if (removed.length === 0) return map;
+    const next = { ...map };
+    for (const id of removed) delete next[id];
+    return next;
+}
+
 /**
  * Build a compact record for the digest bucket from one bell notification.
  * The bucket only needs enough context for composeDigestSummary +

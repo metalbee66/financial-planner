@@ -32,12 +32,14 @@ let renderBudgetTab = null;
 let renderAccountsTab = null;
 let renderPMTab = null;
 let renderProjectsTab = null;
+let renderEmailQueueAdmin = null;
 
 export function registerRenderHooks(hooks) {
     renderBudgetTab = hooks.renderBudgetTab;
     renderAccountsTab = hooks.renderAccountsTab;
     renderPMTab = hooks.renderPMTab;
     renderProjectsTab = hooks.renderProjectsTab;
+    renderEmailQueueAdmin = hooks.renderEmailQueueAdmin;
 }
 
 function isFirebaseConfigured() {
@@ -126,7 +128,9 @@ export function fbSave(key, data) {
  * Write one email-queue entry under /household/family/email_queue/{id} for the
  * n8n drainer (plan §6.3). Always mirrors to a localStorage `email_queue` map
  * keyed by entry id — gives E2E tests + offline-mode debugging visibility into
- * what would have been sent, even when Firebase isn't connected.
+ * what would have been sent, even when Firebase isn't connected. Re-used by
+ * the Phase 6.5 admin panel's Retry button, which overwrites the same id with
+ * `sent: false, attempts: 0, failed: false` so n8n picks it up again.
  */
 export function enqueueEmail(entry) {
     if (!entry || !entry.id) return;
@@ -134,18 +138,42 @@ export function enqueueEmail(entry) {
         dbRef(`email_queue/${entry.id}`).set(entry)
             .catch(e => console.error('Firebase enqueueEmail error:', entry.id, e));
     }
-    let map = {};
+    const map = readLocalEmailQueue();
+    map[entry.id] = entry;
+    localStorage.setItem('email_queue', JSON.stringify(map));
+}
+
+/**
+ * Remove one or more email-queue entries (admin "Clear sent older than 7
+ * days" button). Mirrors the remove across Firebase + localStorage.
+ */
+export function removeEmailQueueEntries(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    if (useFirebase && currentUser) {
+        for (const id of ids) {
+            dbRef(`email_queue/${id}`).remove()
+                .catch(e => console.error('Firebase removeEmailQueueEntries error:', id, e));
+        }
+    }
+    const map = readLocalEmailQueue();
+    let touched = false;
+    for (const id of ids) {
+        if (id in map) { delete map[id]; touched = true; }
+    }
+    if (touched) localStorage.setItem('email_queue', JSON.stringify(map));
+}
+
+function readLocalEmailQueue() {
     try {
         const raw = localStorage.getItem('email_queue');
         if (raw) {
             const parsed = JSON.parse(raw);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
         }
     } catch (e) {
         console.error('email_queue parse error:', e);
     }
-    map[entry.id] = entry;
-    localStorage.setItem('email_queue', JSON.stringify(map));
+    return {};
 }
 
 export async function fbLoad(key) {
@@ -209,6 +237,18 @@ export function setupRealtimeListeners() {
         }
     });
 
+    fbListen('email_queue', (data) => {
+        // n8n drains this key (PATCH sent/attempts/failed/sentAt on each entry,
+        // remove via the admin panel). Mirror the live tree into localStorage
+        // so the admin panel renders fresh status without a page reload.
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+            localStorage.setItem('email_queue', JSON.stringify(data));
+        } else {
+            localStorage.setItem('email_queue', '{}');
+        }
+        if (renderEmailQueueAdmin) renderEmailQueueAdmin();
+    });
+
     fbListen('projects', (data) => {
         if (data && Array.isArray(data.items)) {
             state.projectsData = {
@@ -255,6 +295,11 @@ export async function initialSync() {
 
         const fbPM = await fbLoad('pm_dlbooks');
         if (fbPM && (fbPM.macro || fbPM.customers)) state.pmData = fbPM;
+
+        const fbEq = await fbLoad('email_queue');
+        if (fbEq && typeof fbEq === 'object' && !Array.isArray(fbEq)) {
+            localStorage.setItem('email_queue', JSON.stringify(fbEq));
+        }
 
         const fbProjects = await fbLoad('projects');
         if (fbProjects && Array.isArray(fbProjects.items)) {

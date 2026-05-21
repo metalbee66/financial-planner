@@ -2575,6 +2575,143 @@ test.describe('Phase 6.4 — Daily digest accumulation', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 6.5 — Email-queue admin panel', () => {
+
+    // Helper: seed N queue entries in mixed states and reload.
+    async function seedQueue(page, entries) {
+        await page.evaluate((seed) => {
+            const map = {};
+            for (const e of seed) map[e.id] = e;
+            localStorage.setItem('email_queue', JSON.stringify(map));
+        }, entries);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+    }
+
+    function mkEntry(id, opts = {}) {
+        return {
+            id,
+            to: opts.to || 'metalbee66@gmail.com',
+            subject: opts.subject || '[Family Planner] Task assigned: ' + id,
+            bodyHtml: '<p>...</p>',
+            kind: opts.kind || 'task_assigned',
+            notificationId: null,
+            taskId: null,
+            projectId: null,
+            sourceUrl: '',
+            queuedAt: opts.queuedAt || '2026-05-21T10:00:00.000Z',
+            sent: !!opts.sent,
+            sentAt: opts.sentAt || null,
+            attempts: opts.attempts == null ? 0 : opts.attempts,
+            failed: !!opts.failed,
+        };
+    }
+
+    test('admin sub-tab is visible to brad (the default admin)', async ({ page }) => {
+        // No Firebase = no signed-in user, defaultMyTasksUser('') === 'brad' = admin.
+        await expect(page.locator('.projects-subtab[data-subtab="admin"]')).toBeVisible();
+    });
+
+    test('admin tab renders empty state when the queue is empty', async ({ page }) => {
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+        await expect(page.locator('.admin-title')).toHaveText('Email queue');
+        await expect(page.locator('.admin-empty-row')).toContainText('Email queue is empty.');
+    });
+
+    test('admin tab renders entries newest-first with status pills', async ({ page }) => {
+        await seedQueue(page, [
+            mkEntry('a', { sent: true, sentAt: '2026-05-21T11:00:00.000Z', queuedAt: '2026-05-19T10:00:00.000Z' }),
+            mkEntry('b', { failed: true, attempts: 3, queuedAt: '2026-05-21T10:00:00.000Z' }),
+            mkEntry('c', { queuedAt: '2026-05-20T10:00:00.000Z' }),
+        ]);
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+
+        const rows = page.locator('.admin-row');
+        await expect(rows).toHaveCount(3);
+        // Newest-queued first: b → c → a
+        await expect(rows.nth(0)).toHaveAttribute('data-id', 'b');
+        await expect(rows.nth(1)).toHaveAttribute('data-id', 'c');
+        await expect(rows.nth(2)).toHaveAttribute('data-id', 'a');
+        await expect(rows.nth(0).locator('.admin-status-pill')).toHaveText('failed');
+        await expect(rows.nth(1).locator('.admin-status-pill')).toHaveText('pending');
+        await expect(rows.nth(2).locator('.admin-status-pill')).toHaveText('sent');
+    });
+
+    test('filter pills narrow the visible entries and reflect the active state', async ({ page }) => {
+        await seedQueue(page, [
+            mkEntry('p1'), mkEntry('p2'),
+            mkEntry('s1', { sent: true, sentAt: '2026-05-21T11:00:00.000Z' }),
+            mkEntry('f1', { failed: true, attempts: 3 }),
+            mkEntry('f2', { failed: true, attempts: 3 }),
+        ]);
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+
+        // Default = All (5)
+        await expect(page.locator('.admin-row')).toHaveCount(5);
+        await expect(page.locator('.admin-filter-pill[data-status="all"]')).toHaveClass(/active/);
+
+        await page.locator('.admin-filter-pill[data-status="failed"]').click();
+        await expect(page.locator('.admin-row')).toHaveCount(2);
+        await expect(page.locator('.admin-filter-pill[data-status="failed"]')).toHaveClass(/active/);
+
+        await page.locator('.admin-filter-pill[data-status="sent"]').click();
+        await expect(page.locator('.admin-row')).toHaveCount(1);
+        await expect(page.locator('.admin-row .admin-status-pill')).toHaveText('sent');
+    });
+
+    test('Retry on a failed entry flips it back to pending in storage and UI', async ({ page }) => {
+        await seedQueue(page, [
+            mkEntry('f1', { failed: true, attempts: 3 }),
+        ]);
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+
+        const row = page.locator('.admin-row[data-id="f1"]');
+        await expect(row.locator('.admin-status-pill')).toHaveText('failed');
+        await row.locator('.admin-retry-btn').click();
+
+        // UI flips
+        await expect(row.locator('.admin-status-pill')).toHaveText('pending');
+        // Retry button is hidden on pending rows
+        await expect(row.locator('.admin-retry-btn')).toHaveCount(0);
+
+        // Storage flips: sent stays false, failed=false, attempts=0
+        const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('email_queue')));
+        expect(stored.f1.sent).toBe(false);
+        expect(stored.f1.failed).toBe(false);
+        expect(stored.f1.attempts).toBe(0);
+    });
+
+    test('Clear sent older than 7 days removes only sent entries past the threshold', async ({ page }) => {
+        // One old-sent, one fresh-sent, one pending, one failed
+        await seedQueue(page, [
+            mkEntry('oldSent', { sent: true, sentAt: '2026-04-01T10:00:00.000Z', queuedAt: '2026-03-30T10:00:00.000Z' }),
+            mkEntry('freshSent', { sent: true, sentAt: '2026-05-20T10:00:00.000Z', queuedAt: '2026-05-19T10:00:00.000Z' }),
+            mkEntry('pending', { queuedAt: '2026-05-21T10:00:00.000Z' }),
+            mkEntry('failed', { failed: true, attempts: 3, queuedAt: '2026-05-21T11:00:00.000Z' }),
+        ]);
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+
+        // Button shows "Clear 1 sent entry older than 7 days"
+        const clearBtn = page.locator('#admin-clear-sent-btn');
+        await expect(clearBtn).toContainText('Clear 1 sent entry older than 7 days');
+        await clearBtn.click();
+
+        // Old-sent gone; the other three remain
+        await expect(page.locator('.admin-row[data-id="oldSent"]')).toHaveCount(0);
+        await expect(page.locator('.admin-row')).toHaveCount(3);
+        // Button now disabled (nothing older than 7 days)
+        await expect(clearBtn).toBeDisabled();
+
+        const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('email_queue')));
+        expect(stored.oldSent).toBeUndefined();
+        expect(stored.freshSent).toBeDefined();
+        expect(stored.pending).toBeDefined();
+        expect(stored.failed).toBeDefined();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {
