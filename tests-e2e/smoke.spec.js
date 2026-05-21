@@ -2440,6 +2440,141 @@ test.describe('Phase 6.3 — Email queue (browser-side enqueue)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 6.4 — Daily digest accumulation', () => {
+
+    async function readEmailQueue(page) {
+        return await page.evaluate(() => {
+            const raw = localStorage.getItem('email_queue');
+            if (!raw) return {};
+            try { return JSON.parse(raw); } catch { return {}; }
+        });
+    }
+    async function readDigestPending(page) {
+        return await page.evaluate(() => {
+            const raw = localStorage.getItem('projects');
+            if (!raw) return {};
+            try { return JSON.parse(raw).digest_pending || {}; } catch { return {}; }
+        });
+    }
+    async function seedPrefs(page, prefs) {
+        await page.evaluate((p) => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: p, digest_pending: {},
+            }));
+        }, prefs);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+    }
+
+    test('digest-mode recipient accumulates into digest_pending instead of email_queue', async ({ page }) => {
+        await seedPrefs(page, {
+            diana: { master: true, mode: 'digest', kinds: {} },
+        });
+
+        await createProject(page, { name: 'Digest accumulation' });
+        await page.locator('#task-add-name').fill('First task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'First task' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        // No instant email
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+        // One digest entry for Diana
+        const digest = await readDigestPending(page);
+        expect(Array.isArray(digest.diana)).toBe(true);
+        expect(digest.diana.length).toBe(1);
+        expect(digest.diana[0].kind).toBe('task_assigned');
+        expect(digest.diana[0].title).toBe('Task assigned: First task');
+    });
+
+    test('digest entries accumulate across multiple events for the same user', async ({ page }) => {
+        await seedPrefs(page, {
+            diana: { master: true, mode: 'digest', kinds: {} },
+        });
+
+        await createProject(page, { name: 'Repeated digest' });
+        for (const name of ['Task A', 'Task B', 'Task C']) {
+            await page.locator('#task-add-name').fill(name);
+            await page.locator('#task-add-name').press('Enter');
+            await page.locator('.task-row', { hasText: name }).locator('.task-row-name').click();
+            await setPanelAssignee(page, 'diana');
+            await page.locator('#tp-save').click();
+            // The slide-in panel closes after save; loop to next task.
+        }
+
+        const digest = await readDigestPending(page);
+        expect(digest.diana.length).toBe(3);
+        // Email queue stays empty
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+    });
+
+    test('flipping prefs from digest to instant routes the next event to email_queue', async ({ page }) => {
+        await seedPrefs(page, {
+            diana: { master: true, mode: 'digest', kinds: {} },
+        });
+
+        await createProject(page, { name: 'Switcher' });
+        await page.locator('#task-add-name').fill('Digest task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Digest task' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        // First event lands in the digest bucket
+        let digest = await readDigestPending(page);
+        expect(digest.diana.length).toBe(1);
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+
+        // Flip Diana to instant by editing the stored prefs directly + reload.
+        // (The prefs modal is keyed to the current user — Brad in localStorage
+        // mode — so we mutate Diana's record via storage like the seed helper.)
+        await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            data.prefs.diana = { master: true, mode: 'instant', kinds: {} };
+            localStorage.setItem('projects', JSON.stringify(data));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Switcher' }).click();
+
+        await page.locator('#task-add-name').fill('Instant task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Instant task' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        // Second event lands in the email queue, not the digest bucket
+        digest = await readDigestPending(page);
+        expect(digest.diana.length).toBe(1, 'digest entries from before the switch are preserved');
+        const queue = await readEmailQueue(page);
+        const entries = Object.values(queue);
+        expect(entries.length).toBe(1);
+        expect(entries[0].subject).toContain('Instant task');
+    });
+
+    test('digest entries persist across reload (localStorage round-trip)', async ({ page }) => {
+        await seedPrefs(page, {
+            diana: { master: true, mode: 'digest', kinds: {} },
+        });
+
+        await createProject(page, { name: 'Persist digest' });
+        await page.locator('#task-add-name').fill('Something');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Something' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        const digest = await readDigestPending(page);
+        expect(digest.diana.length).toBe(1);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

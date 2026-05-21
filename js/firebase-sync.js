@@ -221,6 +221,9 @@ export function setupRealtimeListeners() {
                 prefs: (data.prefs && typeof data.prefs === 'object' && !Array.isArray(data.prefs))
                     ? data.prefs
                     : {},
+                digest_pending: (data.digest_pending && typeof data.digest_pending === 'object' && !Array.isArray(data.digest_pending))
+                    ? data.digest_pending
+                    : {},
             };
             if (renderProjectsTab) renderProjectsTab();
         }
@@ -264,6 +267,9 @@ export async function initialSync() {
                     : {},
                 prefs: (fbProjects.prefs && typeof fbProjects.prefs === 'object' && !Array.isArray(fbProjects.prefs))
                     ? fbProjects.prefs
+                    : {},
+                digest_pending: (fbProjects.digest_pending && typeof fbProjects.digest_pending === 'object' && !Array.isArray(fbProjects.digest_pending))
+                    ? fbProjects.digest_pending
                     : {},
             };
         }

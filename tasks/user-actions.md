@@ -75,3 +75,15 @@ These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Beelink 
   6. **Error branch** — on send failure: PATCH the same path with `{ "attempts": <attempts+1> }`; when `attempts >= 3` also set `"failed": true` so the loop stops retrying that entry. The Phase 6.5 admin panel will surface failed items for manual retry.
 
   Why it matters: without n8n the queue grows unboundedly in Firebase RTDB — emails never send. Use the n8n MCP tools to author the workflow once SEi14 is reachable, M365 credentials are in place, and the Firebase service-account Bearer is configured.
+
+- [ ] **2026-05-21** — During Task 6.4: **build the daily-8am n8n workflow that drains `/household/family/projects/digest_pending/{user}`**. Browser side accumulates one digest entry per "digest"-mode notification (alongside the bell entry); the email queue is bypassed for these users. The daily roll-up itself is deferred. Workflow shape per plan §6.4:
+  1. **Schedule Trigger** — daily at 08:00 Australia/Melbourne
+  2. **HTTP Request (GET)** — Firebase REST `/household/family/projects/digest_pending.json` with the service-account Bearer creds
+  3. **Loop / SplitInBatches** — one user per iteration (`brad`, `diana`)
+  4. **Filter** — skip when the user's entries array is empty / missing
+  5. **Compose email** — subject `[Family Planner] Daily digest — <summary>` where `<summary>` is the comma-joined grouped counts (e.g. `3 tasks assigned, 2 tasks overdue, 1 milestone completed`); body is a `<ul>` of `<title> — <summary>` bullets + an "Open Family Planner" link. The browser-side `composeDigestSummary` / `buildDigestEmail` helpers in `notifications.js` are the reference shape — n8n can mirror them with a Code node, or recompose via Function nodes.
+  6. **Microsoft Outlook (Send Email)** — to `participantEmail(user)`
+  7. **HTTP Request (PATCH)** — on send success: PATCH `/household/family/projects/digest_pending/{user}.json` with `null` (or an empty array) to clear the bucket
+  8. **Error branch** — log + skip the user on send failure; next day's run picks up the same entries (idempotent — no double-send because the bucket only clears on success)
+
+  Why it matters: this is the entire delivery channel for digest-mode users. Without the workflow they see bell entries but never receive a summary email. **Concurrent-write caveat**: the browser writes the whole `projects` subtree via `fbSave('projects', ...)` on every user-driven mutation, which can race with the n8n PATCH that clears `digest_pending/{user}` — to be safe, run the daily workflow at 08:00 (low-traffic window) and accept that an edge-case overlap will replay last night's entries the next day. Phase 6.5 admin panel can surface manual override if it ever bites.

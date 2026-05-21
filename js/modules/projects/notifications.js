@@ -551,3 +551,125 @@ export function buildEmailQueueEntry(notification, project, task, baseUrl) {
         failed: false,
     };
 }
+
+// ── Digest mode (Task 6.4) ──
+
+/**
+ * Human-readable noun for each NOTIFICATION_KINDS entry. The daily summary
+ * email composes one comma-joined phrase per kind: "3 tasks assigned, 2
+ * tasks overdue". Kept here (next to the kinds list) so adding a new kind
+ * in a future phase only touches one file.
+ */
+const DIGEST_KIND_LABELS = {
+    task_assigned: { one: 'task assigned', many: 'tasks assigned' },
+    comment_added: { one: 'new comment', many: 'new comments' },
+    dependency_unblocked: { one: 'task unblocked', many: 'tasks unblocked' },
+    task_due_soon: { one: 'task due soon', many: 'tasks due soon' },
+    task_overdue: { one: 'task overdue', many: 'tasks overdue' },
+    milestone_completed: { one: 'milestone completed', many: 'milestones completed' },
+    project_completed: { one: 'project completed', many: 'projects completed' },
+};
+
+/**
+ * Should this notification accumulate into the daily digest bucket? Inverse
+ * partner to shouldEnqueueInstantEmail — requires master + per-kind on AND
+ * `mode === 'digest'`. Null/missing prefs default to instant, so they don't
+ * accumulate (digest is opt-in).
+ */
+export function shouldAccumulateDigest(prefs, kind) {
+    if (!shouldNotifyUser(prefs, kind)) return false;
+    return !!(prefs && prefs.mode === 'digest');
+}
+
+/**
+ * Immutably append a digest entry to one user's bucket. Same-ref no-op for
+ * missing recipient or null entry. No size cap here — the daily n8n workflow
+ * drains the bucket and clears it; in normal use it never grows past a day.
+ */
+export function appendDigestEntry(digestMap, user, entry) {
+    if (!entry || !user) return digestMap;
+    const map = (digestMap && typeof digestMap === 'object') ? digestMap : {};
+    const existing = Array.isArray(map[user]) ? map[user] : [];
+    return { ...map, [user]: existing.concat([entry]) };
+}
+
+/**
+ * Empty one user's digest bucket. The n8n daily-8am workflow calls this
+ * shape (via REST PATCH) after sending the summary email. Same-ref no-op
+ * when the user has no bucket or it's already empty.
+ */
+export function clearDigestForUser(digestMap, user) {
+    if (!digestMap || !user) return digestMap;
+    const existing = digestMap[user];
+    if (!Array.isArray(existing) || existing.length === 0) return digestMap;
+    return { ...digestMap, [user]: [] };
+}
+
+/**
+ * Group digest entries by kind and produce a comma-joined phrase. Ordering
+ * follows the canonical NOTIFICATION_KINDS sequence, not input order, so the
+ * subject reads predictably (e.g. assignments before overdue). Empty entries
+ * / unknown kinds are dropped.
+ */
+export function composeDigestSummary(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) return '';
+    const counts = new Map();
+    for (const e of entries) {
+        if (!e || !e.kind) continue;
+        if (!DIGEST_KIND_LABELS[e.kind]) continue;
+        counts.set(e.kind, (counts.get(e.kind) || 0) + 1);
+    }
+    const parts = [];
+    for (const k of NOTIFICATION_KINDS) {
+        const n = counts.get(k);
+        if (!n) continue;
+        const label = DIGEST_KIND_LABELS[k];
+        parts.push(`${n} ${n === 1 ? label.one : label.many}`);
+    }
+    return parts.join(', ');
+}
+
+/**
+ * Compose the one summary email a user gets per day. Returns `{to, subject,
+ * bodyHtml}` ready for the n8n daily workflow to hand to the Outlook node,
+ * or null when there's nothing to send (empty bucket or unknown recipient).
+ *
+ * Subject leads with the grouped counts ("Daily digest — 3 tasks assigned, 2
+ * tasks overdue"); body lists each entry's title + summary as a bullet so
+ * the recipient can scan without opening the app.
+ */
+export function buildDigestEmail(user, entries, baseUrl) {
+    if (!Array.isArray(entries) || entries.length === 0) return null;
+    const recipient = participantEmail(user);
+    if (!recipient) return null;
+    const summary = composeDigestSummary(entries);
+    if (!summary) return null;
+    const base = (typeof baseUrl === 'string' && baseUrl) ? baseUrl : DEFAULT_APP_BASE_URL;
+    const subject = `[Family Planner] Daily digest — ${summary}`;
+    const bullets = entries.map(e =>
+        `<li><strong>${escapeHtmlForEmail(e.title || '')}</strong> — ${escapeHtmlForEmail(e.summary || '')}</li>`
+    ).join('');
+    const bodyHtml = `<p>${escapeHtmlForEmail(summary)}.</p>`
+        + `<ul>${bullets}</ul>`
+        + `<p><a href="${escapeHtmlForEmail(base)}">Open Family Planner</a></p>`;
+    return { to: recipient, subject, bodyHtml };
+}
+
+/**
+ * Build a compact record for the digest bucket from one bell notification.
+ * The bucket only needs enough context for composeDigestSummary +
+ * buildDigestEmail; we deliberately exclude `read` etc. so the n8n PATCH
+ * payload stays small.
+ */
+export function buildDigestEntry(notification) {
+    if (!notification || !notification.kind) return null;
+    return {
+        id: notification.id || ('d_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)),
+        kind: notification.kind,
+        title: notification.title || '',
+        summary: notification.summary || '',
+        taskId: notification.taskId || null,
+        projectId: notification.projectId || null,
+        at: notification.at || nowIso(),
+    };
+}

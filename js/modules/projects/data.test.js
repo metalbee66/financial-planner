@@ -98,6 +98,11 @@ import {
     EMAIL_QUEUE_KEY,
     shouldEnqueueInstantEmail,
     buildEmailQueueEntry,
+    shouldAccumulateDigest,
+    appendDigestEntry,
+    clearDigestForUser,
+    composeDigestSummary,
+    buildDigestEmail,
 } from './notifications.js';
 
 const tests = [];
@@ -3042,6 +3047,126 @@ test('buildEmailQueueEntry falls back to the deployed-app base URL when none is 
     const entry = buildEmailQueueEntry(notif, { id: 'p1', name: 'P' }, { id: 't1', name: 'X' });
     truthy(entry.sourceUrl.startsWith('https://'), 'default base url is an absolute https URL');
     truthy(entry.sourceUrl.endsWith('#/projects/p1/tasks/t1'), 'preserves deep-link hash shape');
+});
+
+// ── Digest mode (Task 6.4) ──
+
+test('shouldAccumulateDigest is true only when master + kind + digest mode all align', () => {
+    const instant = sanitiseNotificationPrefs({ mode: 'instant' });
+    eq(shouldAccumulateDigest(instant, 'task_assigned'), false, 'instant mode never accumulates');
+
+    const digest = sanitiseNotificationPrefs({ mode: 'digest' });
+    eq(shouldAccumulateDigest(digest, 'task_assigned'), true);
+
+    const digestMasterOff = sanitiseNotificationPrefs({ master: false, mode: 'digest' });
+    eq(shouldAccumulateDigest(digestMasterOff, 'task_assigned'), false);
+
+    const digestKindOff = sanitiseNotificationPrefs({ mode: 'digest', kinds: { task_assigned: false } });
+    eq(shouldAccumulateDigest(digestKindOff, 'task_assigned'), false);
+});
+
+test('shouldAccumulateDigest treats null prefs as instant (default) — does not accumulate', () => {
+    // Default for unsaved prefs is mode='instant'; digest is opt-in.
+    eq(shouldAccumulateDigest(null, 'task_assigned'), false);
+    eq(shouldAccumulateDigest(undefined, 'task_assigned'), false);
+});
+
+test('appendDigestEntry immutably appends one entry per user', () => {
+    const start = {};
+    const e1 = { id: 'd1', kind: 'task_assigned', title: 'T1', summary: 'S1', at: '2026-05-21T10:00:00.000Z' };
+    const next = appendDigestEntry(start, 'diana', e1);
+    eq(next.diana.length, 1);
+    eq(Object.keys(start).length, 0, 'original map untouched');
+    const next2 = appendDigestEntry(next, 'diana', { ...e1, id: 'd2' });
+    eq(next2.diana.length, 2);
+    eq(next.diana.length, 1, 'previous map untouched');
+});
+
+test('appendDigestEntry is a same-ref no-op for falsy input or missing recipient', () => {
+    const start = { diana: [] };
+    eq(appendDigestEntry(start, 'diana', null), start);
+    eq(appendDigestEntry(start, null, { id: 'd', kind: 'x' }), start);
+    eq(appendDigestEntry(start, '', { id: 'd', kind: 'x' }), start);
+});
+
+test('clearDigestForUser empties one bucket immutably', () => {
+    const start = {
+        brad: [{ id: 'd1', kind: 'task_assigned', title: 'T', summary: 'S', at: '' }],
+        diana: [{ id: 'd2', kind: 'comment_added', title: 'C', summary: 'X', at: '' }],
+    };
+    const next = clearDigestForUser(start, 'brad');
+    eq(next.brad.length, 0);
+    eq(next.diana.length, 1, 'other users untouched');
+    eq(start.brad.length, 1, 'original map untouched');
+});
+
+test('clearDigestForUser is a same-ref no-op for unknown user or already-empty bucket', () => {
+    const start = { brad: [] };
+    eq(clearDigestForUser(start, 'ghost'), start);
+    eq(clearDigestForUser(start, 'brad'), start);
+});
+
+test('composeDigestSummary returns a comma-separated grouped count', () => {
+    const entries = [
+        { kind: 'task_assigned' }, { kind: 'task_assigned' }, { kind: 'task_assigned' },
+        { kind: 'task_overdue' }, { kind: 'task_overdue' },
+        { kind: 'milestone_completed' },
+    ];
+    eq(composeDigestSummary(entries), '3 tasks assigned, 2 tasks overdue, 1 milestone completed');
+});
+
+test('composeDigestSummary uses singular for count of 1', () => {
+    eq(composeDigestSummary([{ kind: 'task_assigned' }]), '1 task assigned');
+});
+
+test('composeDigestSummary preserves canonical NOTIFICATION_KINDS ordering, not input order', () => {
+    const entries = [
+        { kind: 'project_completed' },
+        { kind: 'task_assigned' },
+        { kind: 'task_overdue' },
+    ];
+    const out = composeDigestSummary(entries);
+    // task_assigned is first in NOTIFICATION_KINDS; project_completed is last
+    truthy(out.indexOf('task assigned') < out.indexOf('task overdue'), 'task_assigned before task_overdue');
+    truthy(out.indexOf('task overdue') < out.indexOf('project completed'), 'task_overdue before project_completed');
+});
+
+test('composeDigestSummary returns empty string for empty / malformed input', () => {
+    eq(composeDigestSummary([]), '');
+    eq(composeDigestSummary(null), '');
+    eq(composeDigestSummary([null, { foo: 'no-kind' }]), '');
+});
+
+test('buildDigestEmail returns a full {to, subject, bodyHtml} for a known recipient', () => {
+    const entries = [
+        { id: 'd1', kind: 'task_assigned', title: 'Task assigned: Pour foundation', summary: 'Diana assigned "Pour foundation".', at: '2026-05-21T10:00:00.000Z' },
+        { id: 'd2', kind: 'task_overdue', title: 'Overdue: Wire kitchen', summary: '"Wire kitchen" is past its due date.', at: '2026-05-21T10:01:00.000Z' },
+    ];
+    const email = buildDigestEmail('brad', entries, 'https://example.test/');
+    truthy(email !== null);
+    eq(email.to, 'metalbee66@gmail.com');
+    truthy(email.subject.startsWith('[Family Planner] Daily digest'), 'subject prefixed');
+    truthy(email.subject.includes('1 task assigned'), 'summary in subject');
+    truthy(email.subject.includes('1 task overdue'), 'second count in subject');
+    truthy(email.bodyHtml.includes('Pour foundation'), 'first entry rendered');
+    truthy(email.bodyHtml.includes('Wire kitchen'), 'second entry rendered');
+    truthy(email.bodyHtml.includes('https://example.test/'), 'app link rendered');
+});
+
+test('buildDigestEmail HTML-escapes entry title + summary', () => {
+    const entries = [
+        { id: 'd1', kind: 'comment_added', title: '<b>X</b>', summary: 'Diana said <script>alert(1)</script>', at: '' },
+    ];
+    const email = buildDigestEmail('brad', entries);
+    truthy(!email.bodyHtml.includes('<script>'), 'raw script tag escaped');
+    truthy(!email.bodyHtml.includes('<b>X</b>'), 'raw <b> in title escaped');
+    truthy(email.bodyHtml.includes('&lt;script&gt;'));
+});
+
+test('buildDigestEmail returns null for unknown recipient or empty entries', () => {
+    eq(buildDigestEmail('external_consultant', [{ kind: 'task_assigned', title: 'T', summary: 'S', at: '' }]), null);
+    eq(buildDigestEmail('brad', []), null);
+    eq(buildDigestEmail('brad', null), null);
 });
 
 // ── runner ──

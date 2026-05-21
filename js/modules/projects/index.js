@@ -93,6 +93,9 @@ import {
     shouldNotifyUser,
     shouldEnqueueInstantEmail,
     buildEmailQueueEntry,
+    shouldAccumulateDigest,
+    appendDigestEntry,
+    buildDigestEntry,
     markNotificationRead,
     markAllNotificationsRead,
     unreadCount,
@@ -185,6 +188,9 @@ function ensureProjectsData() {
     if (!state.projectsData.prefs || typeof state.projectsData.prefs !== 'object' || Array.isArray(state.projectsData.prefs)) {
         state.projectsData.prefs = {};
     }
+    if (!state.projectsData.digest_pending || typeof state.projectsData.digest_pending !== 'object' || Array.isArray(state.projectsData.digest_pending)) {
+        state.projectsData.digest_pending = {};
+    }
 }
 
 function getProjects() {
@@ -226,6 +232,11 @@ function getPrefsMap() {
     return state.projectsData.prefs;
 }
 
+function getDigestPending() {
+    ensureProjectsData();
+    return state.projectsData.digest_pending;
+}
+
 /** Resolve the current Family Planner participant id from the auth user. */
 function currentUserId() {
     return defaultMyTasksUser(currentUserEmail());
@@ -257,15 +268,18 @@ function saveNotifications(nextMap) {
 }
 
 /**
- * Fold one or more trigger events into the per-user notification bucket
- * map without saving. Returns the new map. Caller is responsible for
- * persisting (typically via a combined save with the originating mutation).
+ * Fold one or more trigger events into the per-user notification + digest
+ * buckets without saving. Returns `{notifications, digest_pending}` — caller
+ * persists both via a combined save with the originating mutation. Also
+ * side-effects the email queue (Phase 6.3) for instant-mode recipients.
  *
  * Each trigger is `{event, task, project}`. Recipients are resolved per
- * trigger and each gets at most one notification.
+ * trigger; each gets at most one bell entry + one email enqueue OR digest
+ * append (mutually exclusive by `prefs.mode`).
  */
-function foldTriggersIntoBucket(triggers, startMap) {
-    let map = (startMap && typeof startMap === 'object') ? startMap : {};
+function foldTriggersIntoBuckets(triggers) {
+    let notifMap = getNotifications();
+    let digestMap = getDigestPending();
     const prefsMap = getPrefsMap();
     for (const t of triggers) {
         if (!t || !t.event || !t.task || !t.project) continue;
@@ -278,17 +292,23 @@ function foldTriggersIntoBucket(triggers, startMap) {
             // emission filter, not a retroactive purge.
             const userPrefs = prefsMap[n.to];
             if (!shouldNotifyUser(userPrefs, n.kind)) continue;
-            map = addNotificationToBucket(map, n);
+            notifMap = addNotificationToBucket(notifMap, n);
             // Phase 6.3: mirror "instant" notifications into the n8n-drained
-            // email queue. Digest-mode users defer to the Phase 6.4 roll-up;
-            // external assignees without an email on file are dropped here.
+            // email queue. External assignees without an email on file are
+            // dropped here (participantEmail returns null).
             if (shouldEnqueueInstantEmail(userPrefs, n.kind)) {
                 const entry = buildEmailQueueEntry(n, t.project, t.task);
                 if (entry) enqueueEmail(entry);
             }
+            // Phase 6.4: digest-mode users accumulate into digest_pending
+            // instead of the email queue. The daily-8am n8n workflow drains
+            // and clears each user's bucket.
+            if (shouldAccumulateDigest(userPrefs, n.kind)) {
+                digestMap = appendDigestEntry(digestMap, n.to, buildDigestEntry(n));
+            }
         }
     }
-    return map;
+    return { notifications: notifMap, digest_pending: digestMap };
 }
 
 /**
@@ -298,8 +318,8 @@ function foldTriggersIntoBucket(triggers, startMap) {
  */
 function commitTasksWithTriggers(nextTasks, triggers) {
     ensureProjectsData();
-    const nextNotifications = foldTriggersIntoBucket(triggers, getNotifications());
-    state.projectsData = { ...state.projectsData, tasks: nextTasks, notifications: nextNotifications };
+    const { notifications, digest_pending } = foldTriggersIntoBuckets(triggers);
+    state.projectsData = { ...state.projectsData, tasks: nextTasks, notifications, digest_pending };
     saveProjects(state.projectsData);
 }
 
@@ -1764,7 +1784,7 @@ function commitProjectsWithStatusTrigger(items, before, after) {
     ensureProjectsData();
     let triggers = [];
     if (after && before && after.status === 'completed' && before.status !== 'completed') {
-        // For project triggers, the "task" param of foldTriggersIntoBucket
+        // For project triggers, the "task" param of foldTriggersIntoBuckets
         // expects shape with id; passing the project itself works because
         // candidateRecipientsForEvent('project_completed') ignores the task
         // entirely. We pass a sentinel object so the same fold helper applies.
@@ -1774,8 +1794,8 @@ function commitProjectsWithStatusTrigger(items, before, after) {
             project: after,
         }];
     }
-    const nextNotifications = foldTriggersIntoBucket(triggers, getNotifications());
-    state.projectsData = { ...state.projectsData, items, notifications: nextNotifications };
+    const { notifications, digest_pending } = foldTriggersIntoBuckets(triggers);
+    state.projectsData = { ...state.projectsData, items, notifications, digest_pending };
     saveProjects(state.projectsData);
 }
 
