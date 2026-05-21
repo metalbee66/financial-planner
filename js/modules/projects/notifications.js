@@ -16,7 +16,7 @@
  * Phase 6.3 will mirror the "instant" subset into the email queue.
  */
 
-import { countBlockingDeps, emailToParticipantId, readAssignees } from './data.js';
+import { countBlockingDeps, emailToParticipantId, participantEmail, readAssignees } from './data.js';
 
 /** All notification kinds this module knows how to produce. */
 export const NOTIFICATION_KINDS = [
@@ -458,4 +458,96 @@ export function getUserNotifications(bucketMap, user) {
     return reversed.length > MAX_NOTIFICATIONS_PER_USER
         ? reversed.slice(0, MAX_NOTIFICATIONS_PER_USER)
         : reversed;
+}
+
+// ── Email queue (Task 6.3) ──
+
+/**
+ * Root-level Firebase key for the n8n-drained email queue. Sibling to
+ * `projects`, not a child — matches the schema in plan §6.3 and the n8n
+ * REST workflow that reads `/household/family/email_queue/`.
+ */
+export const EMAIL_QUEUE_KEY = 'email_queue';
+
+/** Default deployed-app base URL for source links in email bodies. */
+const DEFAULT_APP_BASE_URL = 'https://metalbee66.github.io/financial-planner/';
+
+const KIND_SUBJECT_PREFIX = {
+    task_assigned: 'Task assigned',
+    comment_added: 'New comment',
+    dependency_unblocked: 'Unblocked',
+    task_due_soon: 'Due soon',
+    task_overdue: 'Overdue',
+    milestone_completed: 'Milestone reached',
+    project_completed: 'Project completed',
+};
+
+function escapeHtmlForEmail(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+function generateEmailQueueId() {
+    return 'eq_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * Should the bell entry also enqueue an instant email? Requires master + per-kind
+ * toggles on AND `mode === 'instant'`. Digest-mode users defer to the Phase 6.4
+ * daily roll-up — those notifications still surface in the bell, just not in
+ * the immediate email queue. Null/missing prefs fall through to enabled.
+ */
+export function shouldEnqueueInstantEmail(prefs, kind) {
+    if (!shouldNotifyUser(prefs, kind)) return false;
+    const mode = (prefs && prefs.mode) || 'instant';
+    return mode === 'instant';
+}
+
+/**
+ * Materialise an email-queue entry from one bell notification plus its
+ * project / task context. Returns null when:
+ *   - notification / kind / recipient are missing
+ *   - recipient is an external assignee with no email on file
+ *
+ * The n8n drainer reads this object as-is, sends the email via the Microsoft
+ * Outlook node, then PATCHes `sent: true / sentAt` (or increments `attempts`
+ * up to 3 and sets `failed: true`). `baseUrl` controls the deep-link prefix;
+ * defaults to the deployed GitHub Pages URL.
+ */
+export function buildEmailQueueEntry(notification, project, task, baseUrl) {
+    if (!notification || !notification.kind || !notification.to) return null;
+    const recipient = participantEmail(notification.to);
+    if (!recipient) return null;
+    const prefix = KIND_SUBJECT_PREFIX[notification.kind] || 'Notification';
+    const focusName = (notification.kind === 'project_completed')
+        ? (project && project.name)
+        : (task && task.name);
+    const subject = `[Family Planner] ${prefix}${focusName ? ': ' + focusName : ''}`;
+    const base = (typeof baseUrl === 'string' && baseUrl) ? baseUrl : DEFAULT_APP_BASE_URL;
+    let sourceUrl = base;
+    if (notification.projectId && notification.taskId) {
+        sourceUrl = `${base}#/projects/${notification.projectId}/tasks/${notification.taskId}`;
+    } else if (notification.projectId) {
+        sourceUrl = `${base}#/projects/${notification.projectId}`;
+    }
+    const summary = notification.summary || '';
+    const bodyHtml = `<p>${escapeHtmlForEmail(summary)}</p>`
+        + `<p><a href="${escapeHtmlForEmail(sourceUrl)}">Open in Family Planner</a></p>`;
+    return {
+        id: generateEmailQueueId(),
+        to: recipient,
+        subject,
+        bodyHtml,
+        kind: notification.kind,
+        notificationId: notification.id || null,
+        taskId: notification.taskId || null,
+        projectId: notification.projectId || null,
+        sourceUrl,
+        queuedAt: notification.at || nowIso(),
+        sent: false,
+        sentAt: null,
+        attempts: 0,
+        failed: false,
+    };
 }

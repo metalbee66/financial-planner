@@ -1150,6 +1150,19 @@ export function emailToParticipantId(email) {
 }
 
 /**
+ * Built-in participant id → inbox address. Inverse of EMAIL_TO_USER. Returns
+ * null for unknown ids (external assignees aren't on file), letting callers
+ * cleanly skip enqueueing email for participants without a contact.
+ */
+const USER_TO_EMAIL = Object.freeze(Object.fromEntries(
+    Object.entries(EMAIL_TO_USER).map(([email, id]) => [id, email])
+));
+export function participantEmail(participantId) {
+    if (!participantId) return null;
+    return USER_TO_EMAIL[participantId] || null;
+}
+
+/**
  * Selectable users for the My Tasks view: brad and diana always come first
  * (in canonical order), then any external assignees seen in the task list,
  * sorted alphabetically and deduped.

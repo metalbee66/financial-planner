@@ -75,6 +75,7 @@ import {
     DASHBOARD_WEEKS,
     collectAttachmentsByProject,
     emailToParticipantId,
+    participantEmail,
 } from './data.js';
 import {
     NOTIFICATION_KINDS,
@@ -94,6 +95,9 @@ import {
     markAllNotificationsRead,
     unreadCount,
     getUserNotifications,
+    EMAIL_QUEUE_KEY,
+    shouldEnqueueInstantEmail,
+    buildEmailQueueEntry,
 } from './notifications.js';
 
 const tests = [];
@@ -2924,6 +2928,120 @@ test('getUserNotifications never returns more than MAX_NOTIFICATIONS_PER_USER ev
     }
     const out = getUserNotifications({ brad: arr }, 'brad');
     eq(out.length, MAX_NOTIFICATIONS_PER_USER);
+});
+
+// ── Email queue (Task 6.3) ──
+
+test('participantEmail resolves built-in participants and returns null otherwise', () => {
+    eq(participantEmail('brad'), 'metalbee66@gmail.com');
+    eq(participantEmail('diana'), 'dianaleshcheva@gmail.com');
+    eq(participantEmail('external_consultant'), null);
+    eq(participantEmail(null), null);
+    eq(participantEmail(''), null);
+});
+
+test('EMAIL_QUEUE_KEY is the root-level Firebase key, not under projects', () => {
+    // The n8n drainer reads /household/family/email_queue/* — keeping this a
+    // sibling of `projects` is required by the plan §6.3 schema. Guard against
+    // a future refactor that accidentally moves it under `projects/`.
+    eq(EMAIL_QUEUE_KEY, 'email_queue');
+});
+
+test('shouldEnqueueInstantEmail respects master, kind, and mode', () => {
+    const allOn = sanitiseNotificationPrefs({});
+    eq(shouldEnqueueInstantEmail(allOn, 'task_assigned'), true);
+
+    const masterOff = sanitiseNotificationPrefs({ master: false });
+    eq(shouldEnqueueInstantEmail(masterOff, 'task_assigned'), false);
+
+    const kindOff = sanitiseNotificationPrefs({ kinds: { task_assigned: false } });
+    eq(shouldEnqueueInstantEmail(kindOff, 'task_assigned'), false);
+
+    const digest = sanitiseNotificationPrefs({ mode: 'digest' });
+    eq(shouldEnqueueInstantEmail(digest, 'task_assigned'), false, 'digest mode defers to Phase 6.4 roll-up');
+});
+
+test('shouldEnqueueInstantEmail treats null prefs as enabled (instant by default)', () => {
+    eq(shouldEnqueueInstantEmail(null, 'task_assigned'), true);
+    eq(shouldEnqueueInstantEmail(undefined, 'task_overdue'), true);
+});
+
+test('buildEmailQueueEntry returns a fully-shaped queue record for a built-in recipient', () => {
+    const notif = {
+        id: 'n1', kind: 'task_assigned', to: 'diana', by: 'metalbee66@gmail.com',
+        taskId: 't1', projectId: 'p1',
+        title: 'Task assigned: Buy timber',
+        summary: 'Brad assigned "Buy timber" to you in Reno.',
+        at: '2026-05-21T10:00:00.000Z', read: false,
+    };
+    const entry = buildEmailQueueEntry(notif, { id: 'p1', name: 'Reno' }, { id: 't1', name: 'Buy timber' }, 'https://example.test/');
+    truthy(entry !== null);
+    eq(entry.to, 'dianaleshcheva@gmail.com');
+    eq(entry.subject, '[Family Planner] Task assigned: Buy timber');
+    eq(entry.kind, 'task_assigned');
+    eq(entry.taskId, 't1');
+    eq(entry.projectId, 'p1');
+    eq(entry.notificationId, 'n1');
+    eq(entry.sourceUrl, 'https://example.test/#/projects/p1/tasks/t1');
+    eq(entry.sent, false);
+    eq(entry.sentAt, null);
+    eq(entry.attempts, 0);
+    eq(entry.failed, false);
+    truthy(typeof entry.id === 'string' && entry.id.startsWith('eq_'));
+    truthy(entry.bodyHtml.includes('Brad assigned'), 'summary embedded in body');
+    truthy(entry.bodyHtml.includes('https://example.test/#/projects/p1/tasks/t1'), 'sourceUrl linked in body');
+});
+
+test('buildEmailQueueEntry returns null when recipient has no email on file', () => {
+    const notif = {
+        id: 'n2', kind: 'task_assigned', to: 'external_consultant', by: 'metalbee66@gmail.com',
+        taskId: 't1', projectId: 'p1',
+        title: 'Task assigned: Site visit', summary: '...',
+        at: '2026-05-21T10:00:00.000Z', read: false,
+    };
+    eq(buildEmailQueueEntry(notif, { id: 'p1', name: 'Reno' }, { id: 't1', name: 'Site visit' }), null);
+});
+
+test('buildEmailQueueEntry returns null for malformed inputs', () => {
+    eq(buildEmailQueueEntry(null, {}, {}), null);
+    eq(buildEmailQueueEntry({ to: 'brad' }, {}, {}), null, 'missing kind');
+    eq(buildEmailQueueEntry({ kind: 'task_assigned' }, {}, {}), null, 'missing recipient');
+});
+
+test('buildEmailQueueEntry uses project name in subject for project_completed', () => {
+    const notif = {
+        id: 'n3', kind: 'project_completed', to: 'brad', by: 'dianaleshcheva@gmail.com',
+        taskId: null, projectId: 'p1',
+        title: 'Project completed: Reno', summary: 'Diana marked Reno as completed.',
+        at: '2026-05-21T10:00:00.000Z', read: false,
+    };
+    const entry = buildEmailQueueEntry(notif, { id: 'p1', name: 'Reno' }, null);
+    eq(entry.subject, '[Family Planner] Project completed: Reno');
+    eq(entry.taskId, null);
+});
+
+test('buildEmailQueueEntry HTML-escapes the summary so user input cannot break the email body', () => {
+    const notif = {
+        id: 'n4', kind: 'comment_added', to: 'brad', by: 'dianaleshcheva@gmail.com',
+        taskId: 't1', projectId: 'p1',
+        title: 'New comment', summary: 'Diana commented: <script>alert(1)</script>',
+        at: '2026-05-21T10:00:00.000Z', read: false,
+    };
+    const entry = buildEmailQueueEntry(notif, { id: 'p1', name: 'Reno' }, { id: 't1', name: 'Demo' });
+    truthy(!entry.bodyHtml.includes('<script>'), 'raw <script> escaped');
+    truthy(entry.bodyHtml.includes('&lt;script&gt;'), 'entity-encoded in output');
+});
+
+test('buildEmailQueueEntry falls back to the deployed-app base URL when none is passed', () => {
+    const notif = {
+        id: 'n5', kind: 'task_assigned', to: 'brad', by: 'dianaleshcheva@gmail.com',
+        taskId: 't1', projectId: 'p1',
+        title: 'Task assigned: X', summary: '...',
+        at: '2026-05-21T10:00:00.000Z', read: false,
+    };
+    const entry = buildEmailQueueEntry(notif, { id: 'p1', name: 'P' }, { id: 't1', name: 'X' });
+    truthy(entry.sourceUrl.startsWith('https://'), 'default base url is an absolute https URL');
+    truthy(entry.sourceUrl.endsWith('#/projects/p1/tasks/t1'), 'preserves deep-link hash shape');
 });
 
 // ── runner ──

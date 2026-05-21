@@ -62,8 +62,16 @@ These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Beelink 
 
 ## Surfaced during implementation (added by Claude as we go)
 
-_None yet — items will be appended below with date and the task that surfaced them._
-
 <!-- Template:
 - [ ] **2026-MM-DD** — During Task X.Y: <action>. Why it matters: <reason>.
 -->
+
+- [ ] **2026-05-21** — During Task 6.3: **build the n8n workflow that drains `/household/family/email_queue/`**. The browser-side enqueue is live (writes one queue entry per "instant" notification, mirrored to a localStorage `email_queue` map for offline-mode visibility). The n8n half is deferred until the Pre-Phase-6 infra above is up. Workflow shape per plan §6.3:
+  1. **Schedule Trigger** — every 60s
+  2. **HTTP Request (GET)** — Firebase REST API `https://<rtdb-host>/household/family/email_queue.json?orderBy=%22sent%22&equalTo=false` with the service-account Bearer creds, then filter results where `failed !== true`
+  3. **Loop / SplitInBatches** — one item per iteration
+  4. **Microsoft Outlook (Send Email)** — `to`, `subject`, `bodyHtml` from the entry (using D3-decided from-address)
+  5. **HTTP Request (PATCH)** — on send success: PATCH `/household/family/email_queue/{id}.json` with `{ "sent": true, "sentAt": "<iso>" }`
+  6. **Error branch** — on send failure: PATCH the same path with `{ "attempts": <attempts+1> }`; when `attempts >= 3` also set `"failed": true` so the loop stops retrying that entry. The Phase 6.5 admin panel will surface failed items for manual retry.
+
+  Why it matters: without n8n the queue grows unboundedly in Firebase RTDB — emails never send. Use the n8n MCP tools to author the workflow once SEi14 is reachable, M365 credentials are in place, and the Firebase service-account Bearer is configured.

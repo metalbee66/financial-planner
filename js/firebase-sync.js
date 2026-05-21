@@ -122,6 +122,32 @@ export function fbSave(key, data) {
     localStorage.setItem(key, JSON.stringify(data));
 }
 
+/**
+ * Write one email-queue entry under /household/family/email_queue/{id} for the
+ * n8n drainer (plan §6.3). Always mirrors to a localStorage `email_queue` map
+ * keyed by entry id — gives E2E tests + offline-mode debugging visibility into
+ * what would have been sent, even when Firebase isn't connected.
+ */
+export function enqueueEmail(entry) {
+    if (!entry || !entry.id) return;
+    if (useFirebase && currentUser) {
+        dbRef(`email_queue/${entry.id}`).set(entry)
+            .catch(e => console.error('Firebase enqueueEmail error:', entry.id, e));
+    }
+    let map = {};
+    try {
+        const raw = localStorage.getItem('email_queue');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) map = parsed;
+        }
+    } catch (e) {
+        console.error('email_queue parse error:', e);
+    }
+    map[entry.id] = entry;
+    localStorage.setItem('email_queue', JSON.stringify(map));
+}
+
 export async function fbLoad(key) {
     if (useFirebase && currentUser) {
         try {

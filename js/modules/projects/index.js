@@ -13,7 +13,7 @@
  */
 
 import { state } from '../../state.js';
-import { currentUser } from '../../firebase-sync.js';
+import { currentUser, enqueueEmail } from '../../firebase-sync.js';
 import {
     PROJECT_STATUSES,
     TASK_STATUSES,
@@ -91,6 +91,8 @@ import {
     createDefaultPrefs,
     sanitiseNotificationPrefs,
     shouldNotifyUser,
+    shouldEnqueueInstantEmail,
+    buildEmailQueueEntry,
     markNotificationRead,
     markAllNotificationsRead,
     unreadCount,
@@ -274,8 +276,16 @@ function foldTriggersIntoBucket(triggers, startMap) {
             // kind off (or master off) doesn't see future events of that kind.
             // Prior-recorded notifications stay in their bucket — this is an
             // emission filter, not a retroactive purge.
-            if (!shouldNotifyUser(prefsMap[n.to], n.kind)) continue;
+            const userPrefs = prefsMap[n.to];
+            if (!shouldNotifyUser(userPrefs, n.kind)) continue;
             map = addNotificationToBucket(map, n);
+            // Phase 6.3: mirror "instant" notifications into the n8n-drained
+            // email queue. Digest-mode users defer to the Phase 6.4 roll-up;
+            // external assignees without an email on file are dropped here.
+            if (shouldEnqueueInstantEmail(userPrefs, n.kind)) {
+                const entry = buildEmailQueueEntry(n, t.project, t.task);
+                if (entry) enqueueEmail(entry);
+            }
         }
     }
     return map;

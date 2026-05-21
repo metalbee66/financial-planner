@@ -2337,6 +2337,109 @@ test.describe('Phase 6.2 — Notification bell + preferences', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 6.3 — Email queue (browser-side enqueue)', () => {
+
+    async function readEmailQueue(page) {
+        return await page.evaluate(() => {
+            const raw = localStorage.getItem('email_queue');
+            if (!raw) return {};
+            try { return JSON.parse(raw); } catch { return {}; }
+        });
+    }
+
+    test('assigning a task to Diana writes one instant email-queue entry for her', async ({ page }) => {
+        await createProject(page, { name: 'Email round-trip' });
+        await page.locator('#task-add-name').fill('Pour foundation');
+        await page.locator('#task-add-name').press('Enter');
+
+        // Reassign to Diana via the panel checkbox group — fires assignee_changed,
+        // which the trigger mapper turns into a task_assigned for diana.
+        await page.locator('.task-row', { hasText: 'Pour foundation' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        const queue = await readEmailQueue(page);
+        const entries = Object.values(queue);
+        expect(entries.length).toBe(1);
+        expect(entries[0].to).toBe('dianaleshcheva@gmail.com');
+        expect(entries[0].kind).toBe('task_assigned');
+        expect(entries[0].subject).toBe('[Family Planner] Task assigned: Pour foundation');
+        expect(entries[0].sent).toBe(false);
+        expect(entries[0].attempts).toBe(0);
+        expect(entries[0].sourceUrl).toContain('#/projects/');
+    });
+
+    test('digest-mode users defer to Phase 6.4 — no instant queue entry written for them', async ({ page }) => {
+        // Seed Diana with mode='digest' before the assignment.
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {},
+                prefs: {
+                    diana: { master: true, mode: 'digest', kinds: {} },
+                },
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+
+        await createProject(page, { name: 'Digest-mode' });
+        await page.locator('#task-add-name').fill('Quiet task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Quiet task' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        const queue = await readEmailQueue(page);
+        expect(Object.keys(queue).length).toBe(0);
+    });
+
+    test('master-off recipient receives neither bell entry nor email', async ({ page }) => {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {},
+                prefs: {
+                    diana: { master: false, mode: 'instant', kinds: {} },
+                },
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+
+        await createProject(page, { name: 'Silent' });
+        await page.locator('#task-add-name').fill('Should not email');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Should not email' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'diana');
+        await page.locator('#tp-save').click();
+
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+        // Bell stays empty for the actor (brad) too.
+        await expect(page.locator('#notif-bell-btn .notif-bell-badge')).toHaveCount(0);
+    });
+
+    test('external assignees with no email on file are skipped silently', async ({ page }) => {
+        await createProject(page, { name: 'External' });
+        // Add an external participant to the project so the panel can assign to it.
+        await page.locator('#projects-edit-btn').click();
+        await page.locator('.participant-add-input').fill('consultant');
+        await page.locator('.participants-adder .participant-add-btn').click();
+        await page.locator('#pf-save').click();
+
+        await page.locator('#task-add-name').fill('Site visit');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Site visit' }).locator('.task-row-name').click();
+        await setPanelAssignee(page, 'consultant');
+        await page.locator('#tp-save').click();
+
+        // Notification fires (external is a valid recipient id) but email is skipped
+        // because participantEmail('consultant') === null.
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {
