@@ -83,6 +83,12 @@ import {
     saveProjects,
 } from './data.js';
 import {
+    triggerCelebration,
+    classifyCelebration,
+    isCelebrationSoundEnabled,
+    setCelebrationSoundEnabled,
+} from './celebrate.js';
+import {
     NOTIFICATION_KINDS,
     NOTIFICATION_MODES,
     eventToNotificationsForRecipients,
@@ -360,6 +366,20 @@ function applyTaskPatch(taskId, patch) {
         }
     }
     commitTasksWithTriggers(next, triggers);
+    // Phase 7.1: celebrate the moment a task flips into done. Project-level
+    // "all tasks done" wins over milestone wins over light — classifyCelebration
+    // handles the precedence.
+    if (project && patch && Object.prototype.hasOwnProperty.call(patch, 'status')
+        && patch.status === 'done' && prev.status !== 'done') {
+        const projectTasks = findTasksByProject(next, project.id);
+        const allDoneAfter = projectTasks.length > 0 && projectTasks.every(t => t.status === 'done');
+        triggerCelebration({
+            intensity: classifyCelebration({
+                wasMilestone: prev.isMilestone === true,
+                allTasksDoneAfter: allDoneAfter,
+            }),
+        });
+    }
 }
 
 /** Add a dep + log a `dependency_added` event in one save. Returns boolean. */
@@ -1805,7 +1825,9 @@ function onSubmit(editingId) {
 function commitProjectsWithStatusTrigger(items, before, after) {
     ensureProjectsData();
     let triggers = [];
-    if (after && before && after.status === 'completed' && before.status !== 'completed') {
+    const flippedToCompleted = after && before
+        && after.status === 'completed' && before.status !== 'completed';
+    if (flippedToCompleted) {
         // For project triggers, the "task" param of foldTriggersIntoBuckets
         // expects shape with id; passing the project itself works because
         // candidateRecipientsForEvent('project_completed') ignores the task
@@ -1819,6 +1841,10 @@ function commitProjectsWithStatusTrigger(items, before, after) {
     const { notifications, digest_pending } = foldTriggersIntoBuckets(triggers);
     state.projectsData = { ...state.projectsData, items, notifications, digest_pending };
     saveProjects(state.projectsData);
+    // Phase 7.1: explicit project→completed flip earns the full celebration.
+    // The derived-from-last-task path already fires inside applyTaskPatch, so
+    // we don't double-fire there.
+    if (flippedToCompleted) triggerCelebration({ intensity: 'full' });
 }
 
 function onDelete(p) {
@@ -3019,6 +3045,13 @@ function openPrefsModal() {
                     </label>
                 `).join('')}
             </fieldset>
+            <fieldset class="notif-prefs-fieldset">
+                <legend>Celebrations</legend>
+                <label class="notif-prefs-row">
+                    <input type="checkbox" id="np-celebrate-sound" ${isCelebrationSoundEnabled() ? 'checked' : ''}/>
+                    <span>Play sound when a task is completed</span>
+                </label>
+            </fieldset>
         </div>
         <div class="notif-prefs-foot">
             <button type="button" id="np-cancel" class="notif-prefs-cancel">Cancel</button>
@@ -3037,6 +3070,7 @@ function openPrefsModal() {
             kinds[el.dataset.kind] = el.checked;
         });
         saveUserPrefs(userId, { master, mode, kinds });
+        setCelebrationSoundEnabled(modal.querySelector('#np-celebrate-sound').checked);
         closePrefsModal();
     });
 

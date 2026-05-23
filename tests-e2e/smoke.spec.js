@@ -2712,6 +2712,93 @@ test.describe('Phase 6.5 — Email-queue admin panel', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 7.1 — Celebrations', () => {
+
+    test('marking a regular task done shows a light celebration overlay', async ({ page }) => {
+        await createProject(page, { name: 'Celebrate small' });
+        await page.locator('#task-add-name').fill('Mow lawn');
+        await page.locator('#task-add-name').press('Enter');
+        // Add a second task so marking the first done isn't also the last —
+        // otherwise classifyCelebration would escalate to 'full'.
+        await page.locator('#task-add-name').fill('Edge garden');
+        await page.locator('#task-add-name').press('Enter');
+
+        const row = page.locator('.task-row', { hasText: 'Mow lawn' });
+        await row.locator('.task-row-status').selectOption('done');
+
+        const overlay = page.locator('.celebrate-overlay').first();
+        await expect(overlay).toBeVisible();
+        await expect(overlay).toHaveAttribute('data-intensity', 'light');
+        // Auto-clears within 3s — celebrate.js timeout is 3000ms.
+        await expect(page.locator('.celebrate-overlay')).toHaveCount(0, { timeout: 4500 });
+    });
+
+    test('marking a milestone task done shows a medium celebration', async ({ page }) => {
+        await createProject(page, { name: 'Celebrate milestone' });
+        await page.locator('#task-add-name').fill('Pour slab');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'Pour slab' }).locator('.task-row-name').click();
+        await page.locator('#tp-milestone').check();
+        await page.locator('#tp-save').click();
+
+        // Add another task so finishing the milestone isn't also "all tasks done"
+        await page.locator('#task-add-name').fill('Followup');
+        await page.locator('#task-add-name').press('Enter');
+
+        const row = page.locator('.task-row', { hasText: 'Pour slab' });
+        await row.locator('.task-row-status').selectOption('done');
+
+        const overlay = page.locator('.celebrate-overlay').first();
+        await expect(overlay).toBeVisible();
+        await expect(overlay).toHaveAttribute('data-intensity', 'medium');
+    });
+
+    test('completing the last open task in a project shows a full celebration', async ({ page }) => {
+        await createProject(page, { name: 'Celebrate finale' });
+        await page.locator('#task-add-name').fill('Only task');
+        await page.locator('#task-add-name').press('Enter');
+
+        const row = page.locator('.task-row', { hasText: 'Only task' });
+        await row.locator('.task-row-status').selectOption('done');
+
+        const overlay = page.locator('.celebrate-overlay').first();
+        await expect(overlay).toBeVisible();
+        await expect(overlay).toHaveAttribute('data-intensity', 'full');
+    });
+
+    test('celebration does not block interaction (pointer-events: none on overlay)', async ({ page }) => {
+        await createProject(page, { name: 'Celebrate noblock' });
+        await page.locator('#task-add-name').fill('T1');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#task-add-name').fill('T2');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'T1' }).locator('.task-row-status').selectOption('done');
+
+        // Overlay should be visible AND clickable through — adding T3 should still work.
+        await expect(page.locator('.celebrate-overlay').first()).toBeVisible();
+        await page.locator('#task-add-name').fill('T3 during celebration');
+        await page.locator('#task-add-name').press('Enter');
+        await expect(page.locator('.task-row', { hasText: 'T3 during celebration' })).toBeVisible();
+    });
+
+    test('celebration sound toggle in the prefs modal persists across reload', async ({ page }) => {
+        await page.locator('#notif-bell-btn').click();
+        await page.locator('#notif-prefs-btn').click();
+        await expect(page.locator('#np-celebrate-sound')).toBeVisible();
+        await expect(page.locator('#np-celebrate-sound')).not.toBeChecked();
+        await page.locator('#np-celebrate-sound').check();
+        await page.locator('#np-save').click();
+
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('#notif-bell-btn').click();
+        await page.locator('#notif-prefs-btn').click();
+        await expect(page.locator('#np-celebrate-sound')).toBeChecked();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

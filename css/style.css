@@ -887,6 +887,127 @@ select.editable { width: 100px; cursor: pointer; }
 }
 .sign-out-btn:hover { color: var(--red); border-color: var(--red); }
 
+/* ── Celebrations (Task 7.1) ── */
+
+/* Fixed-position overlay that sits on top of everything but never blocks
+   interaction. Pieces inside use their own animation timing so they spawn,
+   drift, and fade independently. Auto-cleared by celebrate.js after 3s. */
+.celebrate-root {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 500;
+}
+.celebrate-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+/* Light pieces — confetti rectangles + emojis fall from the top of the
+   viewport with a slight horizontal drift. */
+.celebrate-confetti {
+    position: absolute;
+    top: -20px;
+    width: 8px;
+    height: 14px;
+    border-radius: 2px;
+    opacity: 0;
+    animation: celebrate-confetti-fall 2.2s ease-out forwards;
+    transform-origin: center;
+}
+.celebrate-emoji {
+    position: absolute;
+    bottom: 20%;
+    font-size: 1.6rem;
+    opacity: 0;
+    animation: celebrate-emoji-rise 2.4s ease-out forwards;
+    will-change: transform, opacity;
+}
+
+@keyframes celebrate-confetti-fall {
+    0%   { opacity: 0; transform: translate(0, 0) rotate(0deg) scale(1); }
+    10%  { opacity: 1; }
+    100% { opacity: 0; transform: translate(var(--drift, 0), 100vh) rotate(var(--spin, 0deg)) scale(0.8); }
+}
+@keyframes celebrate-emoji-rise {
+    0%   { opacity: 0; transform: translate(0, 40vh) rotate(0deg) scale(0.6); }
+    20%  { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(var(--scale, 1)); }
+    100% { opacity: 0; transform: translate(var(--drift, 0), -70vh) rotate(var(--spin, 0deg)) scale(var(--scale, 1)); }
+}
+
+/* Badge / banner variants — center-screen pop with a fade-out. */
+.celebrate-badge {
+    position: absolute;
+    top: 32%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    background: var(--green);
+    color: #001a14;
+    padding: 16px 30px;
+    border-radius: 999px;
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+    font-weight: 700;
+    font-size: 1.05rem;
+    box-shadow: 0 8px 30px rgba(0,200,83,0.4);
+    animation: celebrate-badge-pop 2s ease-out forwards;
+}
+.celebrate-badge-icon {
+    font-size: 1.4rem;
+    line-height: 1;
+}
+.celebrate-banner {
+    position: absolute;
+    top: 28%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.85);
+    padding: 18px 36px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 1.2rem;
+    color: #fff;
+    opacity: 0;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    animation: celebrate-banner-pop 2.6s ease-out forwards;
+}
+.celebrate-banner-milestone {
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+}
+.celebrate-banner-project {
+    background: linear-gradient(135deg, var(--accent), var(--green));
+    font-size: 1.4rem;
+    padding: 22px 44px;
+}
+@keyframes celebrate-badge-pop {
+    0%   { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+    20%  { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+    35%  { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    75%  { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0; }
+}
+@keyframes celebrate-banner-pop {
+    0%   { transform: translate(-50%, -50%) scale(0.85); opacity: 0; }
+    15%  { transform: translate(-50%, -50%) scale(1.05); opacity: 1; }
+    30%  { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    80%  { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(0.95); opacity: 0; }
+}
+
+/* Respect users who prefer reduced motion — keep the celebration short and
+   silent rather than disabling it entirely (the user still gets feedback,
+   they just don't get whirling confetti). */
+@media (prefers-reduced-motion: reduce) {
+    .celebrate-emoji, .celebrate-confetti {
+        animation-duration: 0.4s;
+    }
+    .celebrate-badge, .celebrate-banner {
+        animation-duration: 1.2s;
+    }
+}
+
 /* ── Email-queue admin (Task 6.5) ── */
 
 .admin-toolbar {

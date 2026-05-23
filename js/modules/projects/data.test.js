@@ -113,6 +113,15 @@ import {
     retryQueueEntry,
     clearSentOlderThan,
 } from './notifications.js';
+import {
+    CELEBRATION_INTENSITIES,
+    CELEBRATION_VARIANTS,
+    classifyCelebration,
+    pickCelebrationVariant,
+    __resetCelebrationQueues,
+    isCelebrationSoundEnabled,
+    setCelebrationSoundEnabled,
+} from './celebrate.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -3332,6 +3341,78 @@ test('clearSentOlderThan is a same-ref no-op when nothing qualifies', () => {
 
 test('clearSentOlderThan returns the input unchanged for null / non-object input', () => {
     eq(clearSentOlderThan(null, '2026-05-15T00:00:00.000Z'), null);
+});
+
+// ── Celebrations (Task 7.1) ──
+
+test('CELEBRATION_INTENSITIES advertises light / medium / full', () => {
+    eq(CELEBRATION_INTENSITIES, ['light', 'medium', 'full']);
+});
+
+test('CELEBRATION_VARIANTS has at least 5 light variants to satisfy "5 in a row, all different"', () => {
+    // Plan §7.1 verification: "Mark 5 tasks done in a row → all 5 celebrations are different".
+    truthy(CELEBRATION_VARIANTS.light.length >= 5, 'need ≥5 light variants for the no-repeat cycle');
+    truthy(CELEBRATION_VARIANTS.medium.length >= 1);
+    truthy(CELEBRATION_VARIANTS.full.length >= 1);
+});
+
+test('classifyCelebration returns full when the completion finishes the project', () => {
+    // allTasksDone takes precedence over isMilestone — finishing the project
+    // is the biggest moment regardless of whether the last task was a milestone.
+    eq(classifyCelebration({ wasMilestone: false, allTasksDoneAfter: true }), 'full');
+    eq(classifyCelebration({ wasMilestone: true, allTasksDoneAfter: true }), 'full');
+});
+
+test('classifyCelebration returns medium for a milestone that does not finish the project', () => {
+    eq(classifyCelebration({ wasMilestone: true, allTasksDoneAfter: false }), 'medium');
+});
+
+test('classifyCelebration returns light for a regular task done', () => {
+    eq(classifyCelebration({ wasMilestone: false, allTasksDoneAfter: false }), 'light');
+    eq(classifyCelebration({}), 'light', 'defaults to light on missing input');
+});
+
+test('pickCelebrationVariant cycles through the full pool with no repeats before refilling', () => {
+    __resetCelebrationQueues();
+    const pool = CELEBRATION_VARIANTS.light;
+    const picks = [];
+    for (let i = 0; i < pool.length; i++) picks.push(pickCelebrationVariant('light'));
+    eq(new Set(picks).size, pool.length, 'every variant picked once before any repeat');
+});
+
+test('pickCelebrationVariant never repeats the same variant on consecutive calls across cycles', () => {
+    // After exhausting one cycle, the queue refills. The first pick of the new
+    // cycle must not equal the last pick of the previous one — otherwise users
+    // see the same celebration twice in a row.
+    __resetCelebrationQueues();
+    const pool = CELEBRATION_VARIANTS.light;
+    let prev = null;
+    for (let cycle = 0; cycle < 4; cycle++) {
+        for (let i = 0; i < pool.length; i++) {
+            const v = pickCelebrationVariant('light');
+            truthy(v !== prev, `cycle ${cycle} pick ${i}: ${v} repeats prev ${prev}`);
+            prev = v;
+        }
+    }
+});
+
+test('pickCelebrationVariant returns null for an unknown intensity', () => {
+    __resetCelebrationQueues();
+    eq(pickCelebrationVariant('nope'), null);
+    eq(pickCelebrationVariant(null), null);
+});
+
+test('isCelebrationSoundEnabled defaults to false (plan §7.1: sound is opt-in)', () => {
+    localStorage.removeItem('celebrate_sound_enabled');
+    eq(isCelebrationSoundEnabled(), false);
+});
+
+test('setCelebrationSoundEnabled / isCelebrationSoundEnabled round-trip via localStorage', () => {
+    setCelebrationSoundEnabled(true);
+    eq(isCelebrationSoundEnabled(), true);
+    setCelebrationSoundEnabled(false);
+    eq(isCelebrationSoundEnabled(), false);
+    localStorage.removeItem('celebrate_sound_enabled');
 });
 
 // ── runner ──

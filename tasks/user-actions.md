@@ -26,7 +26,7 @@ Decision deadline: by start of Phase 6 (email infra) for D3; by start of Phase 7
 
 ## Pre-Phase-6 (n8n + M365 infrastructure for email)
 
-These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Beelink + n8n + M365 stack. If you finish those for SenseAi first, this whole list ticks itself.
+These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Geekom + n8n + M365 stack. If you finish those for SenseAi first, this whole list ticks itself.
 
 - [ ] **n8n container running on SEi14** (Docker Desktop / WSL2)
 - [ ] **n8n reachable via Tailscale** from the family-planner browser context (CORS allowed, or rely on Firebase as the bridge so n8n only needs outbound)

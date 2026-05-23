@@ -97,7 +97,7 @@ Firebase RTDB:
   }
   │ polled every 60s via HTTP Request node
   ▼
-n8n on SEi14 Beelink (sensei infrastructure)
+n8n on SEi14 Geekom (sensei infrastructure)
   - Schedule trigger (every 60s)
   - HTTP Request: GET Firebase REST API for unsent items
   - Loop over results

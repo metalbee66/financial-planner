@@ -93,7 +93,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 
 ## Phase 7 — Celebrations & Local AI
 
-- [ ] **7.1** Celebrations (confetti / emoji rain / chime, randomized pool) — M — [plan §7.1](plan.md#task-71-celebration-animations-on-task-complete--milestone--project-complete)
+- [x] **7.1** Celebrations (confetti / emoji rain / chime, randomized pool) — M — [plan §7.1](plan.md#task-71-celebration-animations-on-task-complete--milestone--project-complete) — _done 2026-05-22, light/medium/full intensities + 5 light variants no-repeat queue + WebAudio chime opt-in via prefs modal (+9 unit cases / +5 E2E, now 149 E2E)_
 - [ ] **7.2** Local AI helpers (autocomplete, due-date guess, daily digest, stale flag, smart-sort) — M — [plan §7.2](plan.md#task-72-local-ai-helpers-no-api-calls)
 - [ ] **Checkpoint H**: celebrations + AI feel polished; user reviews
 
