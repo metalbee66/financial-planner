@@ -1,39 +1,39 @@
 # Family Planner — Manual Action Tracker
 
-Manual ops Brad needs to do that aren't code changes. I (Claude) maintain this list throughout the project and walk through it with you at project completion (Phase 8 sign-off).
+Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this list throughout the project and walked through it with Brad at project completion (Phase 8 sign-off).
 
-> **Convention:** items are checked off when **you** confirm they're done; I won't tick them speculatively. Items added by me along the way will appear with the date and the task that surfaced them.
+> **Convention:** items are checked off when **you** confirm they're done; I won't tick them speculatively. Items added by me along the way appear with the date and the task that surfaced them.
+
+**Phase 8 walkthrough — 2026-05-24.** Decisions resolved with Brad; items in-scope for the v2.0.0 release are ticked, deferred items are flagged and rolled forward into the v2.1 backlog at the bottom.
 
 ---
 
 ## Decisions still pending
 
-| # | Decision | Why it matters | Default if no decision |
+| # | Decision | Resolution (2026-05-24) | Notes |
 |---|---|---|---|
-| D1 | Firebase project rename: keep `financial-planner-e85d4-default-rtdb` or migrate? | Cosmetic mismatch with new app name; migrating means a one-off data export+import | **Keep existing project** |
-| D2 | GitHub repo rename: `financial-planner` → `family-planner`? | Renaming breaks live URL until you redirect | **Don't rename** |
-| D3 | Email from-address: personal Gmail vs M365 business email? | Determines which credential n8n uses for outbound | **M365 business email** once that account exists; until then, personal Gmail via app-password SMTP |
-| D4 | Celebration sound: own asset files, or WebAudio-synthesized? | Asset files = nicer audio, repo size grows; WebAudio = zero deps | **WebAudio tones** |
-
-Decision deadline: by start of Phase 6 (email infra) for D3; by start of Phase 7 for D4; D1/D2 can wait until project completion.
+| D1 | Firebase project rename: keep `financial-planner-e85d4-default-rtdb` or migrate? | **Keep existing.** | Cosmetic mismatch with the new app name accepted; no migration risk taken. Revisit if/when Firebase costs or naming becomes blocking. |
+| D2 | GitHub repo rename: `financial-planner` → `family-planner`? | **Keep existing.** | Live URL `metalbee66.github.io/financial-planner/` stays stable. Defer indefinitely. |
+| D3 | Email from-address: personal Gmail vs M365 business email? | **M365 business email once that mailbox exists; personal Gmail via app-password SMTP until then.** | Default accepted. Resolved in practice when the n8n workflow is built. |
+| D4 | Celebration sound: own asset files, or WebAudio-synthesized? | **WebAudio tones.** | Shipped this way in Task 7.1 — no external assets, opt-in via prefs. |
 
 ---
 
 ## Pre-Phase-0 (before any code)
 
-- [ ] Confirm you have an editable copy of these plans — review [plan.md](plan.md) and [todo.md](todo.md), push back on anything you disagree with
-- [ ] Confirm you're happy with **native ES modules** as the JS architecture (no bundler, no build step). If you'd rather keep the existing global-script style, say so before Task 0.2.
+- [x] Confirmed editable copy of the plans; Brad reviewed [plan.md](plan.md) + [todo.md](todo.md) throughout.
+- [x] Confirmed happy with **native ES modules** as the JS architecture (no bundler, no build step). Shipped in Task 0.2.
 
-## Pre-Phase-6 (n8n + M365 infrastructure for email)
+## Pre-Phase-6 (n8n + M365 infrastructure for email) — DEFERRED to v2.1
 
-These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Geekom + n8n + M365 stack. If you finish those for SenseAi first, this whole list ticks itself.
+> Status: still gated on the SenseAi `Business_Project_Plan.md` setup. Family Planner's browser-side work is done; the n8n / Outlook layer ships alongside the SenseAi backend whenever that infra lands. The two queued workflow builds are at the bottom of this file.
 
-- [ ] **n8n container running on SEi14** (Docker Desktop / WSL2)
+- [ ] **n8n container running on SEi14 Geekom** (Docker Desktop / WSL2)
 - [ ] **n8n reachable via Tailscale** from the family-planner browser context (CORS allowed, or rely on Firebase as the bridge so n8n only needs outbound)
 - [ ] **n8n admin account created** (not default credentials)
 - [ ] **n8n base URL recorded** somewhere I can read when I build the workflow (Tailscale IP + port)
 - [ ] **M365 Outlook credential configured in n8n** with `Mail.Send` Graph API scope
-- [ ] **Decide D3** above (personal Gmail vs M365 business)
+- [x] **D3 resolved** (above) — M365 once the mailbox exists; Gmail SMTP until then
 - [ ] **Firebase REST API service-account key** exported and added to n8n as an HTTP Bearer credential, scoped to `/household/family/email_queue/*` and `/household/family/projects/*`
 - [ ] **Firebase RTDB rules updated** to allow:
     - `email_queue` writes from authed brad/diana
@@ -45,18 +45,18 @@ These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Geekom +
 
 ## Pre-Phase-8 (migration sign-off)
 
-- [ ] **Backup of existing `pm_dlbooks` Firebase data** (export JSON from Firebase console) before running migration
-- [ ] **Verify migrated data** in the new Projects module matches the old PM DLBooks state, side by side
-- [ ] **Sign off on retiring the legacy PM DLBooks tab**
+- [x] **Backup of existing `pm_dlbooks` Firebase data** — Skipped. Task 8.2 deliberately preserved the legacy `pm_dlbooks` RTDB key intact, so the data is still in the Firebase console; a separate export wasn't needed for this migration. (Brad confirmed 2026-05-24 — "don't actually need it".)
+- [x] **Verify migrated data** in the new Projects module matches the old PM DLBooks state — verified on the live site after the Task 8.1 push (2026-05-24).
+- [x] **Sign off on retiring the legacy PM DLBooks tab** — confirmed 2026-05-24 (Task 8.2 shipped).
 
 ## At project completion (Phase 8 wrap)
 
-- [ ] Walk through this whole file with me; tick or defer every line
-- [ ] Decide D1 + D2 (Firebase / repo rename) one way or the other
-- [ ] Tag a `v2.0.0` release in the repo
-- [ ] Update [CHANGELOG.md](../CHANGELOG.md) with full release notes
-- [ ] Update [HANDOVER.md](../HANDOVER.md) — document the modular monolith, the email pipeline, and where to add a new module
-- [ ] Confirm GitHub Pages live site reflects all changes after final push
+- [x] Walked through this whole file with Brad; ticked or deferred every line. (2026-05-24)
+- [x] Decided D1 + D2 (Firebase / repo rename) — both **keep existing**.
+- [x] Tagged **v2.0.0** release in the repo.
+- [x] Updated [CHANGELOG.md](../CHANGELOG.md) with full release notes.
+- [x] Updated [HANDOVER.md](../HANDOVER.md) — modular monolith, email pipeline, where to add a new module.
+- [x] Confirmed GitHub Pages live site reflects all changes after final push.
 
 ---
 
@@ -65,6 +65,8 @@ These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Geekom +
 <!-- Template:
 - [ ] **2026-MM-DD** — During Task X.Y: <action>. Why it matters: <reason>.
 -->
+
+### Deferred to v2.1 (n8n / Outlook layer)
 
 - [ ] **2026-05-21** — During Task 6.3: **build the n8n workflow that drains `/household/family/email_queue/`**. The browser-side enqueue is live (writes one queue entry per "instant" notification, mirrored to a localStorage `email_queue` map for offline-mode visibility). The n8n half is deferred until the Pre-Phase-6 infra above is up. Workflow shape per plan §6.3:
   1. **Schedule Trigger** — every 60s
@@ -87,3 +89,9 @@ These mirror the SenseAi `Business_Project_Plan.md` setup tasks for the Geekom +
   8. **Error branch** — log + skip the user on send failure; next day's run picks up the same entries (idempotent — no double-send because the bucket only clears on success)
 
   Why it matters: this is the entire delivery channel for digest-mode users. Without the workflow they see bell entries but never receive a summary email. **Concurrent-write caveat**: the browser writes the whole `projects` subtree via `fbSave('projects', ...)` on every user-driven mutation, which can race with the n8n PATCH that clears `digest_pending/{user}` — to be safe, run the daily workflow at 08:00 (low-traffic window) and accept that an edge-case overlap will replay last night's entries the next day. Phase 6.5 admin panel can surface manual override if it ever bites.
+
+### Carried into v2.1 backlog
+
+- [ ] **Checkpoint G** — two-user end-to-end notification flow + daily digest tested end-to-end. Blocks on the n8n infra above.
+- [ ] **Manual two-tab Firebase smoke** still owed from the polish-round close-out (2026-05-21); deferred during that round.
+- [ ] **2026-05-24** — During Task 8.3 walkthrough: **build a one-off Asana → Projects importer**. Brad was locked out of his Asana project by a subscription gate; the original Claude-generated project tree lives in the shared chat at `https://claude.ai/share/d162fea2-bb74-48f1-a15a-4525bcb143e4`. Approach: fetch the transcript, extract the project structure into the same `{projects:[], tasks:[]}` shape `migrate-pm.js` produces (matching `sanitiseProject` / `sanitiseTask`), drop a one-off `migrate-asana.js` (same pattern as `migrate-pm.js`) with its own idempotency flag (`asana_imported_to_projects`), and run it once. Mark v2.1 — kicked off after v2.0.0 ships.

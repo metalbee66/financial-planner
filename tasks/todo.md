@@ -101,8 +101,8 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 
 - [x] **8.1** Data migration (idempotent, preserves original) — S — [plan §8.1](plan.md#task-81-data-migration) — _done 2026-05-24, pure `migratePMDLBooksToProjects` in new `migrate-pm.js` + `maybeRunPMMigration` runner in `shell.js` gated by `pm_dlbooks_migrated_to_projects` flag on the projects root; legacy `pm_dlbooks` preserved (+10 unit / +4 E2E, now 158 E2E)_
 - [x] **8.2** Retire PM DLBooks legacy module + update CHANGELOG — XS — [plan §8.2](plan.md#task-82-retire-pm-dlbooks-tab) — _done 2026-05-24, pm-legacy entry removed from `modules.js`, `renderPMTab` hook + `pm_dlbooks` listener dropped, `loadPM` kept in `shell.js` for the Phase 8.1 migration on fresh devices; Phase 0 regression test updated; legacy `pm_dlbooks` RTDB key preserved for 8.3 cleanup decision_
-- [ ] **8.3** Walk through [user-actions.md](user-actions.md) with user, tick or defer every item, tag v2.0.0
-- [ ] **Checkpoint I — DONE**: tagged release, HANDOVER updated
+- [x] **8.3** Walk through [user-actions.md](user-actions.md) with user, tick or defer every item, tag v2.0.0 — _done 2026-05-24, D1/D2 resolved keep-existing, D3/D4 accepted defaults, Pre-Phase-6 + the two n8n workflows + Checkpoint G + two-tab smoke + Asana importer all carried into v2.1 backlog; CHANGELOG + HANDOVER refreshed; `v2.0.0` tag created_
+- [x] **Checkpoint I — DONE**: tagged v2.0.0, HANDOVER updated, live site current
 
 ---
 

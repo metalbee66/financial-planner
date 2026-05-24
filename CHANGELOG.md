@@ -1,8 +1,19 @@
 # Family Planner — Changelog
 
-## v2.0.0 (in progress) — Modular monolith + Projects module
+## v2.0.0 — 2026-05-24 — Modular monolith + Projects module
 
 Rebranding "Financial Planner" → "Family Planner" and restructuring the app into a modular monolith. The existing finance features become the **Finance** module; a new **Projects** module (Asana-like project management) is added alongside. Future modules slot into the same registry. See [tasks/plan.md](tasks/plan.md) for the full plan.
+
+**Release highlights:**
+
+- **Modular monolith shape** — thin `shell.js` + `modules.js` registry; each module owns its own DOM, data, and renderers. Adding a new module is one entry in the registry.
+- **Projects module** — Asana-equivalent feature set: projects + tasks + subtasks + dependencies + comments + audit trail + attachments + milestones, six cross-cutting views (Overview / List / Timeline / Calendar / Dashboard / My Tasks / Files), per-user notification preferences with in-app bell + email queue.
+- **Local AI helpers** — five pure heuristics (name autocomplete, due-date suggester, dashboard digest, stale-project flag, urgency sort) with zero external API calls.
+- **Celebrations** — three intensities with 10 anti-repeat variants and an opt-in WebAudio chime.
+- **PM DLBooks → Projects migration** — one-shot, idempotent, preserves the original data; legacy tab retired.
+- **Tests** — ~351 in-browser data-layer unit cases + 158 Playwright E2E smoke tests, hermetic against localStorage.
+
+**Deferred to v2.1:** the two n8n workflow builds (instant email-queue drainer + daily 08:00 digest sender) and Checkpoint G, both gated on the SenseAi-shared n8n + M365 Outlook infrastructure on the SEi14 Geekom box. The browser side of email notifications (queue writes, digest accumulation, admin retry) all ship in v2.0.0. See [tasks/user-actions.md](tasks/user-actions.md).
 
 ### Phase 0 — Rebrand & Modular-Monolith Conversion (complete, 2026-04-28)
 
@@ -79,10 +90,11 @@ Specced + planned + built the three open polish items from Checkpoint F. See [ta
 
 - **Task 8.1** — One-shot PM DLBooks → Projects data migration. New `migrate-pm.js` module exposes a single pure function `migratePMDLBooksToProjects(pmData)` returning `{projects, tasks}` to append. Macro initiatives become a single project named "Macro Initiatives"; each customer becomes a project named "DLBooks — <name>"; legacy `{name, done}` subtasks become real child tasks with `parentTaskId` set. Status (`not-started`/`in-progress`/`done`/`blocked`) is a direct match; `assignee` (`brad`/`diana`/`both`) maps to the `assignees: string[]` array (`both` → `['brad','diana']`); `notes` becomes `description`; `createdAt` YYYY-MM-DD is normalised to a full ISO timestamp; done tasks/subtasks pick up a `completedAt` stamp. The runner lives in `shell.js` (`maybeRunPMMigration`) and is gated by a `pm_dlbooks_migrated_to_projects` flag persisted on the projects root (defaulted in `DEFAULT_PROJECTS`, mirrored through `loadProjects`, `setupRealtimeListeners`, and `initialSync` so it survives Firebase round-trips). Legacy `pm_dlbooks` key is intentionally NOT deleted — Task 8.2 retires the tab. 10 new pure-data unit cases (~351 total); 4 new Playwright tests (~158 total) under the `Phase 8.1 — PM DLBooks → Projects migration` describe.
 - **Task 8.2** — Retire the PM DLBooks (legacy) tab. The `pm-legacy` entry is removed from `modules.js` so the top nav now renders only **Finance** + **Projects**. `renderPMTab` is unwired from the firebase-sync render-hook chain and the `pm_dlbooks` Firebase listener is dropped (no UI to refresh on remote changes). `loadPM` is intentionally kept imported in `shell.js` so the Phase 8.1 migration runner can still source `state.pmData` on a fresh device that boots after the upgrade. `pm.js` stays on disk, archived but un-imported by anything user-facing. The legacy `pm_dlbooks` RTDB key is untouched — manual cleanup deferred to the user-actions walkthrough in 8.3. The Phase 0 module-shell regression test updates from "all three top-level tabs" to "both top-level tabs" and asserts the `pm-legacy` nav button no longer renders.
+- **Task 8.3** — Project completion walkthrough. Walked through [tasks/user-actions.md](tasks/user-actions.md) with Brad: D1 (Firebase project rename) and D2 (GitHub repo rename) resolved as **keep existing**; D3 (email from-address) and D4 (celebration sound) accept the shipping defaults; pm_dlbooks backup skipped (Task 8.2 preserved the legacy RTDB key intact); migration verification + retirement sign-off ticked on the live site. Pre-Phase-6 (n8n + M365 infra) and the two queued n8n workflow builds are formally **deferred to v2.1** alongside Checkpoint G — they're gated on the SenseAi-shared infrastructure on the SEi14 Geekom box and don't block the v2.0.0 release. CHANGELOG + HANDOVER refreshed. v2.0.0 git tag created.
 
-### Phase 3+ remaining
+### Checkpoint I — DONE (2026-05-24)
 
-See [tasks/plan.md](tasks/plan.md). Phase 3 complete pending Checkpoint D (two-user smoke test). Phase 4 complete pending Checkpoint E (three-view review). Phase 5 complete pending Checkpoint F (performance review on 5+ projects). Phase 6 in progress (6.1 + 6.2 + 6.3 browser-side + 6.4 browser-side + 6.5 admin panel done; **6.3 + 6.4 n8n workflow builds deferred to user-actions.md**; Checkpoint G blocks on the n8n infra). Phase 7 complete (7.1 celebrations + 7.2 local AI helpers done). Phase 8 in progress (8.1 data migration + 8.2 retire legacy tab done; 8.3 user-actions walkthrough + v2.0.0 tag remaining).
+All v2.0.0 acceptance criteria across Phases 0–8 met. Browser-side functionality is feature-complete; the only outstanding work is the n8n / Outlook delivery layer which has been formally deferred to v2.1 with full workflow specs preserved in [tasks/user-actions.md](tasks/user-actions.md). Live site at https://metalbee66.github.io/financial-planner/ is current.
 
 ## v1.0.0 — 2026-03-26 (Financial Planner)
 
