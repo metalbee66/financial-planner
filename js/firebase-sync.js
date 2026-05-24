@@ -14,7 +14,8 @@
 import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
 import { migrateOutgoing, DEFAULT_CY, DEFAULT_NY } from './data.js';
 import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
-import { DEFAULT_PM } from './modules/pm-legacy/pm.js';
+// v2.0.2: DEFAULT_PM import removed; firebase-sync no longer reads or writes
+// the legacy `pm_dlbooks` key.
 import { DEFAULT_PROJECTS, sanitiseProject, sanitiseTask } from './modules/projects/data.js';
 import { state } from './state.js';
 
@@ -161,6 +162,21 @@ export function removeEmailQueueEntries(ids) {
     if (touched) localStorage.setItem('email_queue', JSON.stringify(map));
 }
 
+/**
+ * v2.0.2 one-shot: remove the legacy `pm_dlbooks` data from Firebase and
+ * localStorage. Safe to call when neither side has the key — `.remove()`
+ * is a no-op on missing keys and `localStorage.removeItem` is unconditional.
+ * Called by `maybeCleanupLegacyPMData` in shell.js after the Phase 8.1
+ * migration has run on this projects bucket.
+ */
+export function deleteLegacyPMData() {
+    if (useFirebase && currentUser) {
+        dbRef('pm_dlbooks').remove()
+            .catch(e => console.error('Firebase deleteLegacyPMData error:', e));
+    }
+    localStorage.removeItem('pm_dlbooks');
+}
+
 function readLocalEmailQueue() {
     try {
         const raw = localStorage.getItem('email_queue');
@@ -262,6 +278,7 @@ export function setupRealtimeListeners() {
                     : {},
                 pm_dlbooks_migrated_to_projects: data.pm_dlbooks_migrated_to_projects === true,
                 business_transform_seeded: data.business_transform_seeded === true,
+                pm_dlbooks_cleaned: data.pm_dlbooks_cleaned === true,
             };
             if (renderProjectsTab) renderProjectsTab();
         }
@@ -291,8 +308,9 @@ export async function initialSync() {
         const fbAcct = await fbLoad('accounts_data');
         if (fbAcct && fbAcct.banking) state.accountsData = fbAcct;
 
-        const fbPM = await fbLoad('pm_dlbooks');
-        if (fbPM && (fbPM.macro || fbPM.customers)) state.pmData = fbPM;
+        // v2.0.2: pm_dlbooks load removed. Brad signed off on the cleanup;
+        // the key is deleted on next boot via maybeCleanupLegacyPMData and
+        // the migration runner gracefully handles undefined state.pmData.
 
         const fbEq = await fbLoad('email_queue');
         if (fbEq && typeof fbEq === 'object' && !Array.isArray(fbEq)) {
@@ -316,6 +334,7 @@ export async function initialSync() {
                     : {},
                 pm_dlbooks_migrated_to_projects: fbProjects.pm_dlbooks_migrated_to_projects === true,
                 business_transform_seeded: fbProjects.business_transform_seeded === true,
+                pm_dlbooks_cleaned: fbProjects.pm_dlbooks_cleaned === true,
             };
         }
 
@@ -338,9 +357,8 @@ export async function initialSync() {
         if (!state.weekActuals || typeof state.weekActuals !== 'object') {
             state.weekActuals = {};
         }
-        if (!state.pmData || (!state.pmData.macro && !state.pmData.customers)) {
-            state.pmData = JSON.parse(JSON.stringify(DEFAULT_PM));
-        }
+        // v2.0.2: pm_dlbooks defaulting + push removed. The legacy module is
+        // retired; fresh installs shouldn't reintroduce demo PM data.
         if (!state.projectsData || !Array.isArray(state.projectsData.items)) {
             state.projectsData = JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
         }
@@ -349,7 +367,6 @@ export async function initialSync() {
         fbSave('budget_ny27', state.budgetNY);
         fbSave('week_actuals_cy26', state.weekActuals);
         fbSave('accounts_data', state.accountsData);
-        fbSave('pm_dlbooks', state.pmData);
         fbSave('projects', state.projectsData);
         console.log('Default data pushed to Firebase.');
     }

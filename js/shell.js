@@ -19,7 +19,7 @@ import {
 import {
     initFirebase, getFirebaseAuth, setCurrentUser, signInWithGoogle, signOut,
     showLoginScreen, showApp, initialSync, setupRealtimeListeners,
-    registerRenderHooks, fbSave,
+    registerRenderHooks, fbSave, deleteLegacyPMData,
 } from './firebase-sync.js';
 import { ALLOWED_EMAILS } from './firebase-config.js';
 import { state } from './state.js';
@@ -72,6 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await initialSync();
                 maybeRunPMMigration();
                 maybeRunBusinessTransformSeed();
+                maybeCleanupLegacyPMData();
                 bootModules();
                 setupRealtimeListeners();
             } else {
@@ -86,6 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         showApp();
         maybeRunPMMigration();
         maybeRunBusinessTransformSeed();
+        maybeCleanupLegacyPMData();
         bootModules();
     }
 });
@@ -127,6 +129,24 @@ function maybeRunBusinessTransformSeed() {
     if (projects.length > 0) {
         console.log(`Business transform seed: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
     }
+}
+
+/**
+ * v2.0.2 one-shot cleanup: delete the legacy `pm_dlbooks` Firebase +
+ * localStorage key now that Brad has signed off on the Phase 8.1 migration.
+ * Gated on the migration flag — never deletes pmData on a device that
+ * hasn't migrated yet. Idempotent via `pm_dlbooks_cleaned` on the projects
+ * root; flag survives across devices via the same firebase-sync path as
+ * the other migration flags.
+ */
+function maybeCleanupLegacyPMData() {
+    if (!state.projectsData) return;
+    if (!state.projectsData.pm_dlbooks_migrated_to_projects) return;
+    if (state.projectsData.pm_dlbooks_cleaned) return;
+    deleteLegacyPMData();
+    state.projectsData.pm_dlbooks_cleaned = true;
+    fbSave(PROJECTS_KEY, state.projectsData);
+    console.log('Legacy pm_dlbooks data removed from Firebase + localStorage.');
 }
 
 let modulesBooted = false;

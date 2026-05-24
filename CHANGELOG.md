@@ -1,5 +1,17 @@
 # Family Planner — Changelog
 
+## v2.0.2 — 2026-05-25 — Legacy `pm_dlbooks` cleanup
+
+Removes the legacy `pm_dlbooks` Firebase + localStorage key now that Brad has signed off on the Phase 8.1 migration and Task 8.2 retired the consuming tab. The data has been preserved as migrated projects in the Projects module since v2.0.0; v2.0.2 just deletes the original source.
+
+**Pipeline:** new `deleteLegacyPMData()` in `firebase-sync.js` removes both the RTDB key (`dbRef('pm_dlbooks').remove()`) and the localStorage mirror. A new `pm_dlbooks_cleaned` flag on the projects root gates the one-shot — runner `maybeCleanupLegacyPMData` in `shell.js` fires after `maybeRunPMMigration` and `maybeRunBusinessTransformSeed`, but ONLY when `pm_dlbooks_migrated_to_projects` is already true (never deletes pmData on a device that hasn't migrated yet). Flag threaded through `DEFAULT_PROJECTS`, `loadProjects`, the realtime listener, and `initialSync`.
+
+**Side cleanup in firebase-sync:** `initialSync` no longer calls `fbLoad('pm_dlbooks')` or `fbSave('pm_dlbooks', ...)` — those would have undone the cleanup on a fresh-Firebase install. The `DEFAULT_PM` import is dropped from `firebase-sync.js`. The `pm.js` / `pm-legacy/` source files remain on disk (the migration runner still loads them in case any unsynced device boots up needing the data, though the runner short-circuits on the flag).
+
+**Tests:** +3 Playwright tests (164 E2E total) under the `v2.0.2 — Legacy pm_dlbooks cleanup` describe. Existing tests get the `pm_dlbooks_cleaned: true` flag pre-set in `beforeEach` so the auto-cleanup doesn't run on every test boot.
+
+---
+
 ## v2.0.1 — 2026-05-24 — Business transformation seed
 
 Content-only patch. Imports the SenseAi "Business transformation & scale — SPEC v2.0" project tree into the Projects module on first boot after v2.0.0. The project came from a Claude conversation that Brad lost direct access to once Asana subscription-gated him out of the original board; the seed was reconstructed from that transcript and pasted as JSON.

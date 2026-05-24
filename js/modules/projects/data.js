@@ -30,6 +30,10 @@ export const DEFAULT_PROJECTS = {
     // v2.0.1 idempotency flag — set true after the one-shot SenseAi
     // "Business transformation & scale" project seed has been imported.
     business_transform_seeded: false,
+    // v2.0.2 idempotency flag — set true after the one-shot delete of the
+    // legacy `pm_dlbooks` Firebase + localStorage key. Only runs when the
+    // Phase 8.1 migration has already completed (flag above is true).
+    pm_dlbooks_cleaned: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
@@ -1459,6 +1463,7 @@ export function loadProjects() {
                 : {},
             pm_dlbooks_migrated_to_projects: parsed.pm_dlbooks_migrated_to_projects === true,
             business_transform_seeded: parsed.business_transform_seeded === true,
+            pm_dlbooks_cleaned: parsed.pm_dlbooks_cleaned === true,
         };
     } catch (e) {
         console.error('loadProjects parse error:', e);

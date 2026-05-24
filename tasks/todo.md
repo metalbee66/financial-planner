@@ -107,6 +107,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 ## v2.0.1 — Business transformation seed (content-only patch)
 
 - [x] **v2.0.1** Import the SenseAi "Business transformation & scale — SPEC v2.0" project tree into Projects via a one-shot seed — _done 2026-05-24, `seed-businesstransform.js` + `maybeRunBusinessTransformSeed` runner in `shell.js` gated by `business_transform_seeded` flag; produces 10 projects (9 streams + Milestones) and ~280 tasks (+9 unit / +3 E2E, now 161 E2E); released as tag `v2.0.1`_
+- [x] **v2.0.2** Delete the legacy `pm_dlbooks` data (Firebase + localStorage) — _done 2026-05-25, `deleteLegacyPMData` in firebase-sync + `maybeCleanupLegacyPMData` runner in `shell.js` gated by `pm_dlbooks_cleaned` flag; only runs after migration is complete; also drops vestigial pm_dlbooks load/save from `initialSync` (+3 E2E, now 164 E2E); released as tag `v2.0.2`_
 
 ---
 

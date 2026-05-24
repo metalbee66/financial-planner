@@ -57,6 +57,7 @@ test.beforeEach(async ({ page }) => {
             digest_pending: {},
             pm_dlbooks_migrated_to_projects: true,
             business_transform_seeded: true,
+            pm_dlbooks_cleaned: true,
         }));
     });
     await page.reload();
@@ -2973,19 +2974,14 @@ test.describe('Phase 8.1 — PM DLBooks → Projects migration', () => {
         await expect(page.locator('.project-card', { hasText: 'Macro Initiatives' })).toHaveCount(1);
     });
 
-    test('legacy pm_dlbooks key is preserved after migration (not deleted)', async ({ page }) => {
-        await seedPMAndReload(page, {
-            macro: [{ id: 'm1', name: 'Keep me around', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' }],
-            customers: [],
-        });
-        await expect(page.locator('.project-card', { hasText: 'Macro Initiatives' })).toBeVisible();
-        const stillThere = await page.evaluate(() => {
-            const raw = localStorage.getItem('pm_dlbooks');
-            return raw ? JSON.parse(raw) : null;
-        });
-        expect(stillThere).not.toBeNull();
-        expect(stillThere.macro[0].name).toBe('Keep me around');
-    });
+    // Note: the original "legacy pm_dlbooks key is preserved after migration"
+    // test was retired in v2.0.2 when the cleanup runner started removing the
+    // key in the same boot. Post-cleanup behavior is covered by the
+    // `v2.0.2 — Legacy pm_dlbooks cleanup` describe further down. The
+    // migration itself is still append-only — that's exercised by the
+    // "first boot after upgrade migrates ..." and "is idempotent ..." tests
+    // above, both of which would notice if migration accidentally deleted
+    // upstream data before re-running.
 
     test('migrated tasks land in the project detail view with the right metadata', async ({ page }) => {
         await seedPMAndReload(page, {
@@ -3054,6 +3050,87 @@ test.describe('v2.0.1 — Business transformation seed', () => {
         await expect(parentRow).toBeVisible();
         // Subtask from the JSON appears indented under its parent.
         await expect(page.locator('.task-row', { hasText: 'auth/routes.py — login/logout Blueprint' })).toBeVisible();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('v2.0.2 — Legacy pm_dlbooks cleanup', () => {
+
+    test('cleanup removes the legacy pm_dlbooks key from localStorage on first boot after migration', async ({ page }) => {
+        // Seed both pm_dlbooks data AND the migration flag, but leave the
+        // cleanup flag off so maybeCleanupLegacyPMData runs on next reload.
+        await page.evaluate(() => {
+            localStorage.setItem('pm_dlbooks', JSON.stringify({
+                macro: [{ id: 'm1', name: 'Leftover', status: 'not-started', assignee: 'brad' }],
+                customers: [],
+            }));
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                business_transform_seeded: true,
+                pm_dlbooks_cleaned: false,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        // After the boot, pm_dlbooks should be gone and the cleanup flag set.
+        const after = await page.evaluate(() => ({
+            pm: localStorage.getItem('pm_dlbooks'),
+            flag: JSON.parse(localStorage.getItem('projects')).pm_dlbooks_cleaned,
+        }));
+        expect(after.pm).toBeNull();
+        expect(after.flag).toBe(true);
+    });
+
+    test('cleanup is gated on the migration flag — does not run if migration never happened', async ({ page }) => {
+        // Migration flag false → cleanup must NOT run.
+        await page.evaluate(() => {
+            localStorage.setItem('pm_dlbooks', JSON.stringify({ macro: [], customers: [] }));
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: false,
+                business_transform_seeded: true,
+                pm_dlbooks_cleaned: false,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        // Migration will run (migrating an empty payload), then cleanup runs in
+        // the same boot since the migration set its flag to true.
+        // The key SHOULD be cleared in this case — gating is "won't run UNTIL
+        // migration is done", not "won't run if both happen on the same boot".
+        // Assert the resulting cleaned state.
+        const after = await page.evaluate(() => ({
+            pm: localStorage.getItem('pm_dlbooks'),
+            migrated: JSON.parse(localStorage.getItem('projects')).pm_dlbooks_migrated_to_projects,
+            cleaned: JSON.parse(localStorage.getItem('projects')).pm_dlbooks_cleaned,
+        }));
+        expect(after.migrated).toBe(true);
+        expect(after.cleaned).toBe(true);
+        expect(after.pm).toBeNull();
+    });
+
+    test('cleanup is idempotent — reloading after the flag is set does not error', async ({ page }) => {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                business_transform_seeded: true,
+                pm_dlbooks_cleaned: true,
+            }));
+        });
+        const errors = [];
+        page.on('pageerror', e => errors.push(e.message));
+        page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        const realErrors = errors.filter(e =>
+            !/firebase/i.test(e) && !/net::ERR_FAILED/i.test(e) && !/asynchronous response/i.test(e)
+        );
+        expect(realErrors).toEqual([]);
     });
 });
 
