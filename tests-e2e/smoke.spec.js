@@ -2799,6 +2799,104 @@ test.describe('Phase 7.1 — Celebrations', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 7.2 — Local AI helpers', () => {
+
+    test('task-name input exposes a <datalist> populated from existing task names', async ({ page }) => {
+        await createProject(page, { name: 'AI autocomplete' });
+        // Seed two tasks so the datalist has something to offer.
+        await page.locator('#task-add-name').fill('Mow lawn');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#task-add-name').fill('Edge garden');
+        await page.locator('#task-add-name').press('Enter');
+
+        // The add row re-renders after each submit; the latest datalist should
+        // include both historical names.
+        const list = page.locator('#task-name-suggestions');
+        await expect(list.locator('option[value="Mow lawn"]')).toHaveCount(1);
+        await expect(list.locator('option[value="Edge garden"]')).toHaveCount(1);
+        // And the name input is wired to it via the `list` attribute.
+        await expect(page.locator('#task-add-name')).toHaveAttribute('list', 'task-name-suggestions');
+    });
+
+    test('due-date "Suggest" pill appears after a project has at least one dated task and applies on click', async ({ page }) => {
+        await createProject(page, { name: 'AI due-date suggester' });
+        // No suggest pill yet — no historical data, just fallback. The
+        // implementation still surfaces the +7-day fallback, so the pill
+        // should appear immediately on a fresh project too.
+        await expect(page.locator('#task-add-due-suggest')).toBeVisible();
+        const initialText = (await page.locator('#task-add-due-suggest').textContent()).trim();
+        expect(initialText).toMatch(/^Suggest: /);
+
+        // Seed a dated task so we have one real datapoint.
+        await page.locator('#task-add-name').fill('Prep tools');
+        await page.locator('#task-add-due').fill('2026-06-15');
+        await page.locator('#task-add-submit').click();
+
+        // The pill now reflects the historical median. Click it and the
+        // due-date input fills in.
+        await expect(page.locator('#task-add-due-suggest')).toBeVisible();
+        await page.locator('#task-add-due-suggest').click();
+        await expect(page.locator('#task-add-due')).not.toHaveValue('');
+    });
+
+    test('Dashboard shows a plain-English daily digest paragraph above the cards', async ({ page }) => {
+        // No tasks → "All clear" sentence.
+        await page.locator('.projects-subtab[data-subtab="dashboard"]').click();
+        await expect(page.locator('#dashboard-digest')).toBeVisible();
+        await expect(page.locator('#dashboard-digest')).toContainText('All clear');
+    });
+
+    test('Stale project gets an orange ⏳ Stale badge on the Overview card', async ({ page }) => {
+        await createProject(page, { name: 'Idle reno' });
+        await backToList(page);
+        // Simulate "no activity in over 14 days" by reaching into localStorage,
+        // back-dating updatedAt on both the project and any tasks, then reloading.
+        await page.evaluate(() => {
+            const raw = JSON.parse(localStorage.getItem('projects'));
+            raw.items.forEach(p => { p.updatedAt = '2025-01-01T00:00:00.000Z'; });
+            (raw.tasks || []).forEach(t => { t.updatedAt = '2025-01-01T00:00:00.000Z'; });
+            localStorage.setItem('projects', JSON.stringify(raw));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await expect(page.locator('.project-card-stale')).toBeVisible();
+    });
+
+    test('Smart sort option appears in the list-view Sort dropdown and reorders tasks by urgency', async ({ page }) => {
+        await createProject(page, { name: 'Smart sort' });
+        // Three tasks: an overdue low-priority, a future high-priority, and a future low-priority.
+        await page.locator('#task-add-name').fill('Overdue low');
+        await page.locator('#task-add-due').fill('2025-01-01');
+        await page.locator('#task-add-submit').click();
+
+        await page.locator('#task-add-name').fill('Future high');
+        await page.locator('#task-add-due').fill('2099-01-01');
+        await page.locator('#task-add-submit').click();
+        // Bump priority to high via the slide-in panel.
+        await page.locator('.task-row', { hasText: 'Future high' }).locator('.task-row-name').click();
+        await page.locator('#tp-priority').selectOption('high');
+        await page.locator('#tp-save').click();
+
+        await page.locator('#task-add-name').fill('Future low');
+        await page.locator('#task-add-due').fill('2099-01-01');
+        await page.locator('#task-add-submit').click();
+
+        // Switch to smart sort.
+        await page.locator('#tasks-sort-by').selectOption('smart');
+        // Direction toggle hides while smart is active.
+        await expect(page.locator('#tasks-sort-dir')).toHaveCount(0);
+
+        // Order: overdue (3 + 1 low = 4) > future-high (3 priority) > future-low (1 priority)
+        const names = await page.locator('.task-row .task-row-name').allTextContents();
+        const indexOf = (s) => names.findIndex(n => n.includes(s));
+        expect(indexOf('Overdue low')).toBe(0);
+        expect(indexOf('Future high')).toBe(1);
+        expect(indexOf('Future low')).toBe(2);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

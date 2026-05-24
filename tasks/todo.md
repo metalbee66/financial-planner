@@ -94,7 +94,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 ## Phase 7 — Celebrations & Local AI
 
 - [x] **7.1** Celebrations (confetti / emoji rain / chime, randomized pool) — M — [plan §7.1](plan.md#task-71-celebration-animations-on-task-complete--milestone--project-complete) — _done 2026-05-22, light/medium/full intensities + 5 light variants no-repeat queue + WebAudio chime opt-in via prefs modal (+9 unit cases / +5 E2E, now 149 E2E)_
-- [ ] **7.2** Local AI helpers (autocomplete, due-date guess, daily digest, stale flag, smart-sort) — M — [plan §7.2](plan.md#task-72-local-ai-helpers-no-api-calls)
+- [x] **7.2** Local AI helpers (autocomplete, due-date guess, daily digest, stale flag, smart-sort) — M — [plan §7.2](plan.md#task-72-local-ai-helpers-no-api-calls) — _done 2026-05-24, five pure heuristics in new `local-ai.js`: frequency-weighted task-name datalist, median-offset due-date "Suggest" pill, Dashboard digest paragraph, ⏳ Stale badge on Overview cards, "Smart (urgency)" entry in the list Sort dropdown (+24 unit cases / +5 E2E, now 154 E2E)_
 - [ ] **Checkpoint H**: celebrations + AI feel polished; user reviews
 
 ## Phase 8 — Migrate PM DLBooks → Projects

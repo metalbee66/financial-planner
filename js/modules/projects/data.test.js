@@ -122,6 +122,13 @@ import {
     isCelebrationSoundEnabled,
     setCelebrationSoundEnabled,
 } from './celebrate.js';
+import {
+    suggestTaskNames,
+    suggestDueDate,
+    composeDashboardDigest,
+    isProjectStale,
+    smartSortTasks,
+} from './local-ai.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -3413,6 +3420,230 @@ test('setCelebrationSoundEnabled / isCelebrationSoundEnabled round-trip via loca
     setCelebrationSoundEnabled(false);
     eq(isCelebrationSoundEnabled(), false);
     localStorage.removeItem('celebrate_sound_enabled');
+});
+
+// ── Local AI helpers (Task 7.2) ──
+
+test('suggestTaskNames returns empty array for empty input', () => {
+    eq(suggestTaskNames('', []), []);
+    eq(suggestTaskNames('', null), []);
+});
+
+test('suggestTaskNames orders results by frequency desc then alpha asc', () => {
+    const tasks = [
+        { name: 'Mow lawn' },
+        { name: 'Mow lawn' },
+        { name: 'Mow lawn' },
+        { name: 'Edge garden' },
+        { name: 'Edge garden' },
+        { name: 'Trim hedge' },
+    ];
+    const out = suggestTaskNames('', tasks);
+    eq(out.map(s => s.name), ['Mow lawn', 'Edge garden', 'Trim hedge']);
+    eq(out.map(s => s.count), [3, 2, 1]);
+});
+
+test('suggestTaskNames filters by case-insensitive prefix', () => {
+    const tasks = [
+        { name: 'Mow lawn' },
+        { name: 'mow grass' },
+        { name: 'Edge garden' },
+        { name: 'Move boxes' },
+    ];
+    const out = suggestTaskNames('mo', tasks);
+    // Mow lawn, mow grass, Move boxes — all start with "mo" case-insensitively.
+    // .sort() applies the default JS charcode order: capitals first ('M' < 'm').
+    eq(out.map(s => s.name).sort(), ['Move boxes', 'Mow lawn', 'mow grass']);
+});
+
+test('suggestTaskNames dedupes case-insensitively and keeps first-seen casing', () => {
+    const tasks = [
+        { name: 'Mow Lawn' },
+        { name: 'mow lawn' },
+        { name: 'MOW LAWN' },
+    ];
+    const out = suggestTaskNames('', tasks);
+    eq(out.length, 1);
+    eq(out[0].name, 'Mow Lawn');
+    eq(out[0].count, 3);
+});
+
+test('suggestTaskNames respects the limit option (default 5)', () => {
+    const tasks = Array.from({ length: 12 }, (_, i) => ({ name: `Task ${i}` }));
+    eq(suggestTaskNames('', tasks).length, 5);
+    eq(suggestTaskNames('', tasks, { limit: 3 }).length, 3);
+});
+
+test('suggestTaskNames ignores blank/whitespace names', () => {
+    const tasks = [{ name: '' }, { name: '   ' }, { name: null }, { name: 'Real task' }];
+    const out = suggestTaskNames('', tasks);
+    eq(out.length, 1);
+    eq(out[0].name, 'Real task');
+});
+
+// ── suggestDueDate ──
+
+test('suggestDueDate returns today + fallbackDays when no historical tasks', () => {
+    eq(suggestDueDate({ id: 'p1' }, [], { todayIso: '2026-05-24', fallbackDays: 7 }), '2026-05-31');
+});
+
+test('suggestDueDate uses median offset (in days) from past completed tasks in same project', () => {
+    const tasks = [
+        { projectId: 'p1', startDate: '2026-05-01', dueDate: '2026-05-04' }, // 3 days
+        { projectId: 'p1', startDate: '2026-05-05', dueDate: '2026-05-12' }, // 7 days
+        { projectId: 'p1', startDate: '2026-05-10', dueDate: '2026-05-15' }, // 5 days
+    ];
+    // Median of [3, 7, 5] is 5 → 2026-05-24 + 5 = 2026-05-29
+    eq(suggestDueDate({ id: 'p1' }, tasks, { todayIso: '2026-05-24' }), '2026-05-29');
+});
+
+test('suggestDueDate falls back to global history when project has none', () => {
+    const tasks = [
+        { projectId: 'other', startDate: '2026-04-01', dueDate: '2026-04-11' }, // 10 days
+        { projectId: 'other', startDate: '2026-04-10', dueDate: '2026-04-20' }, // 10 days
+    ];
+    eq(suggestDueDate({ id: 'p1' }, tasks, { todayIso: '2026-05-24', fallbackDays: 7 }), '2026-06-03');
+});
+
+test('suggestDueDate clamps to project.endDate when the suggestion would overshoot', () => {
+    const tasks = [
+        { projectId: 'p1', startDate: '2026-05-01', dueDate: '2026-06-20' }, // 50 days
+    ];
+    eq(
+        suggestDueDate(
+            { id: 'p1', endDate: '2026-05-30' },
+            tasks,
+            { todayIso: '2026-05-24' }
+        ),
+        '2026-05-30'
+    );
+});
+
+test('suggestDueDate skips tasks missing start or due dates', () => {
+    const tasks = [
+        { projectId: 'p1', startDate: null, dueDate: '2026-05-04' },
+        { projectId: 'p1', startDate: '2026-05-01', dueDate: null },
+        { projectId: 'p1' },
+    ];
+    eq(suggestDueDate({ id: 'p1' }, tasks, { todayIso: '2026-05-24', fallbackDays: 7 }), '2026-05-31');
+});
+
+// ── composeDashboardDigest ──
+
+test('composeDashboardDigest returns "All clear" when nothing pressing', () => {
+    eq(composeDashboardDigest([], '2026-05-24'), 'All clear — nothing pressing right now.');
+});
+
+test('composeDashboardDigest counts tasks due today, overdue, due this week, milestones in next fortnight', () => {
+    const tasks = [
+        { status: 'not-started', dueDate: '2026-05-24' }, // today
+        { status: 'in-progress', dueDate: '2026-05-23' }, // overdue
+        { status: 'in-progress', dueDate: '2026-05-22' }, // overdue
+        { status: 'not-started', dueDate: '2026-05-26' }, // this week (later)
+        { status: 'not-started', dueDate: '2026-05-30' }, // this week (later)
+        { status: 'not-started', dueDate: '2026-06-02', isMilestone: true }, // milestone in fortnight
+        { status: 'done', dueDate: '2026-05-24' }, // done — ignored
+    ];
+    const text = composeDashboardDigest(tasks, '2026-05-24');
+    truthy(/1 task due today/.test(text), `due today phrase missing: ${text}`);
+    truthy(/2 overdue/.test(text), `overdue phrase missing: ${text}`);
+    truthy(/2 due later this week/.test(text), `due-later phrase missing: ${text}`);
+    truthy(/1 milestone in the next fortnight/.test(text), `milestone phrase missing: ${text}`);
+});
+
+test('composeDashboardDigest pluralises correctly for single-count buckets', () => {
+    const tasks = [
+        { status: 'not-started', dueDate: '2026-05-24' },
+        { status: 'not-started', dueDate: '2026-06-02', isMilestone: true },
+    ];
+    const text = composeDashboardDigest(tasks, '2026-05-24');
+    truthy(/1 task due today/.test(text));
+    truthy(/1 milestone in the next fortnight/.test(text));
+});
+
+// ── isProjectStale ──
+
+test('isProjectStale flags projects whose last task update is older than the threshold', () => {
+    const project = { id: 'p1', status: 'active', updatedAt: '2026-05-01T00:00:00.000Z' };
+    const tasks = [{ projectId: 'p1', updatedAt: '2026-05-05T00:00:00.000Z' }];
+    truthy(isProjectStale(project, tasks, '2026-05-24'));
+});
+
+test('isProjectStale returns false when recently touched within 14 days', () => {
+    const project = { id: 'p1', status: 'active', updatedAt: '2026-05-01T00:00:00.000Z' };
+    const tasks = [{ projectId: 'p1', updatedAt: '2026-05-20T00:00:00.000Z' }];
+    falsy(isProjectStale(project, tasks, '2026-05-24'));
+});
+
+test('isProjectStale never flags completed / cancelled / archived projects', () => {
+    const archived = { id: 'p1', status: 'active', archivedAt: '2026-05-01', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const completed = { id: 'p2', status: 'completed', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const cancelled = { id: 'p3', status: 'cancelled', updatedAt: '2026-01-01T00:00:00.000Z' };
+    falsy(isProjectStale(archived, [], '2026-05-24'));
+    falsy(isProjectStale(completed, [], '2026-05-24'));
+    falsy(isProjectStale(cancelled, [], '2026-05-24'));
+});
+
+test('isProjectStale uses the most recent of project.updatedAt and any task.updatedAt', () => {
+    // project.updatedAt is old but a task is recent → not stale
+    const project = { id: 'p1', status: 'active', updatedAt: '2026-01-01T00:00:00.000Z' };
+    const tasks = [{ projectId: 'p1', updatedAt: '2026-05-20T00:00:00.000Z' }];
+    falsy(isProjectStale(project, tasks, '2026-05-24'));
+});
+
+test('isProjectStale supports a custom threshold', () => {
+    const project = { id: 'p1', status: 'active', updatedAt: '2026-05-20T00:00:00.000Z' };
+    falsy(isProjectStale(project, [], '2026-05-24', 7));
+    truthy(isProjectStale(project, [], '2026-05-30', 7));
+});
+
+// ── smartSortTasks ──
+
+test('smartSortTasks scores overdue tasks higher than due-soon tasks', () => {
+    const today = '2026-05-24';
+    const overdue = { id: 'a', status: 'not-started', dueDate: '2026-05-20', priority: 'low', dependsOn: [] };
+    const dueSoon = { id: 'b', status: 'not-started', dueDate: '2026-05-26', priority: 'low', dependsOn: [] };
+    const result = smartSortTasks([dueSoon, overdue], [dueSoon, overdue], today);
+    eq(result.map(t => t.id), ['a', 'b']);
+});
+
+test('smartSortTasks ranks tasks blocking others above tasks not blocking', () => {
+    const today = '2026-05-24';
+    const blocker = { id: 'a', status: 'not-started', priority: 'normal', dueDate: null, dependsOn: [] };
+    const isolated = { id: 'b', status: 'not-started', priority: 'normal', dueDate: null, dependsOn: [] };
+    const consumer = { id: 'c', status: 'not-started', priority: 'low', dueDate: null, dependsOn: ['a'] };
+    const result = smartSortTasks([isolated, blocker, consumer], [isolated, blocker, consumer], today);
+    // 'a' has +2 for blocking 'c'; 'b' isolated has only the priority component;
+    // 'c' has its own priority + nothing else. 'a' should outrank 'b'.
+    eq(result[0].id, 'a');
+});
+
+test('smartSortTasks adds priority weight to the score', () => {
+    const today = '2026-05-24';
+    const lo = { id: 'a', status: 'not-started', priority: 'low', dueDate: null, dependsOn: [] };
+    const hi = { id: 'b', status: 'not-started', priority: 'high', dueDate: null, dependsOn: [] };
+    const result = smartSortTasks([lo, hi], [lo, hi], today);
+    eq(result.map(t => t.id), ['b', 'a']);
+});
+
+test('smartSortTasks returns a new array and does not mutate the input', () => {
+    const today = '2026-05-24';
+    const a = { id: 'a', status: 'not-started', priority: 'low', dueDate: null, dependsOn: [] };
+    const b = { id: 'b', status: 'not-started', priority: 'high', dueDate: null, dependsOn: [] };
+    const input = [a, b];
+    const result = smartSortTasks(input, input, today);
+    truthy(result !== input);
+    eq(input.map(t => t.id), ['a', 'b'], 'input order preserved');
+});
+
+test('smartSortTasks ignores "blocking" weight for tasks whose dependants are done', () => {
+    const today = '2026-05-24';
+    const blocker = { id: 'a', status: 'not-started', priority: 'low', dueDate: null, dependsOn: [] };
+    const isolated = { id: 'b', status: 'not-started', priority: 'normal', dueDate: null, dependsOn: [] };
+    const doneConsumer = { id: 'c', status: 'done', priority: 'low', dueDate: null, dependsOn: ['a'] };
+    const result = smartSortTasks([blocker, isolated], [blocker, isolated, doneConsumer], today);
+    // 'a' isn't actually blocking anything (its consumer is done), so 'b' (normal priority) wins.
+    eq(result.map(t => t.id), ['b', 'a']);
 });
 
 // ── runner ──

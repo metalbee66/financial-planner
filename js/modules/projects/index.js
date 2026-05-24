@@ -89,6 +89,13 @@ import {
     setCelebrationSoundEnabled,
 } from './celebrate.js';
 import {
+    suggestTaskNames,
+    suggestDueDate,
+    composeDashboardDigest,
+    isProjectStale,
+    smartSortTasks,
+} from './local-ai.js';
+import {
     NOTIFICATION_KINDS,
     NOTIFICATION_MODES,
     eventToNotificationsForRecipients,
@@ -134,7 +141,11 @@ const TASK_STATUS_LABELS = {
 
 const TASK_PRIORITY_LABELS = { low: 'Low', normal: 'Normal', high: 'High' };
 
-const TASK_SORT_LABELS = { dueDate: 'Due date', name: 'Name', priority: 'Priority' };
+// 7.2.e — 'smart' is rendered alongside the data.js TASK_SORT_FIELDS but
+// uses local-ai.smartSortTasks (a single ordering — direction toggle is hidden
+// when active because urgency is inherently descending).
+const TASK_SORT_LABELS = { dueDate: 'Due date', name: 'Name', priority: 'Priority', smart: 'Smart (urgency)' };
+const SMART_SORT_KEY = 'smart';
 const TASK_GROUP_LABELS = { none: 'None', status: 'Status', assignee: 'Assignee' };
 const OVERVIEW_SORT_LABELS = {
     updated: 'Updated',
@@ -761,10 +772,14 @@ function renderDashboardBody(root) {
         `;
     }
 
+    // 7.2.c — plain-English daily digest paragraph above the cards.
+    const digestText = composeDashboardDigest(allTasks, today);
+
     root.innerHTML = `
         <div class="projects-toolbar">
             <h2 class="projects-title">Dashboard</h2>
         </div>
+        <p class="dashboard-digest" id="dashboard-digest">${escapeHtml(digestText)}</p>
         <div class="dashboard-cards" id="dashboard-cards">${cardsHtml}</div>
         ${bodyHtml}
     `;
@@ -1003,6 +1018,10 @@ function renderCard(p, allTasks, today) {
     const overdueStr = overdue > 0
         ? `<span class="project-card-overdue" aria-label="${overdue} overdue tasks">⚠ ${overdue} overdue</span>`
         : '';
+    // 7.2.d — stale flag for projects with no activity in >14 days.
+    const staleStr = isProjectStale(p, tasks, todayStr)
+        ? `<span class="project-card-stale" title="No activity in over 14 days">⏳ Stale</span>`
+        : '';
 
     card.innerHTML = `
         <div class="project-card-head">
@@ -1012,7 +1031,7 @@ function renderCard(p, allTasks, today) {
         ${dateRange ? `<div class="project-card-dates">${escapeHtml(dateRange)}</div>` : ''}
         ${p.description ? `<p class="project-card-desc">${escapeHtml(p.description)}</p>` : ''}
         ${progressBar}
-        ${(milestoneStr || overdueStr) ? `<div class="project-card-flags">${milestoneStr}${overdueStr}</div>` : ''}
+        ${(milestoneStr || overdueStr || staleStr) ? `<div class="project-card-flags">${milestoneStr}${overdueStr}${staleStr}</div>` : ''}
         <div class="project-card-foot">
             <div class="project-card-chips">${participants}</div>
         </div>
@@ -1113,11 +1132,13 @@ function renderListBody(root, p, allTasks) {
             <label class="tasks-toolbar-field">
                 <span class="tasks-toolbar-label">Sort</span>
                 <select id="tasks-sort-by" aria-label="Sort tasks by">
-                    ${TASK_SORT_FIELDS.map(f =>
+                    ${TASK_SORT_FIELDS.concat([SMART_SORT_KEY]).map(f =>
                         `<option value="${f}"${f === sort.by ? ' selected' : ''}>${escapeHtml(TASK_SORT_LABELS[f] || f)}</option>`
                     ).join('')}
                 </select>
-                <button type="button" class="tasks-toolbar-dir" id="tasks-sort-dir" aria-label="Toggle sort direction" title="Toggle sort direction">${sort.dir === 'desc' ? '↓' : '↑'}</button>
+                ${sort.by === SMART_SORT_KEY
+                    ? ''
+                    : `<button type="button" class="tasks-toolbar-dir" id="tasks-sort-dir" aria-label="Toggle sort direction" title="Toggle sort direction">${sort.dir === 'desc' ? '↓' : '↑'}</button>`}
             </label>
             <label class="tasks-toolbar-field">
                 <span class="tasks-toolbar-label">Group</span>
@@ -1161,11 +1182,14 @@ function renderListBody(root, p, allTasks) {
         mode.taskSort = { ...(mode.taskSort || DEFAULT_TASK_SORT), by: e.target.value };
         render();
     });
-    root.querySelector('#tasks-sort-dir').addEventListener('click', () => {
-        const cur = mode.taskSort || DEFAULT_TASK_SORT;
-        mode.taskSort = { ...cur, dir: cur.dir === 'desc' ? 'asc' : 'desc' };
-        render();
-    });
+    const dirBtn = root.querySelector('#tasks-sort-dir');
+    if (dirBtn) {
+        dirBtn.addEventListener('click', () => {
+            const cur = mode.taskSort || DEFAULT_TASK_SORT;
+            mode.taskSort = { ...cur, dir: cur.dir === 'desc' ? 'asc' : 'desc' };
+            render();
+        });
+    }
     root.querySelector('#tasks-group-by').addEventListener('change', (e) => {
         mode.taskGroup = e.target.value || DEFAULT_TASK_GROUP;
         render();
@@ -1446,8 +1470,17 @@ function collectAssigneeOptions(project, tasks) {
 }
 
 function renderAddTaskRow(root, project) {
+    // 7.2.a — frequency-weighted autocomplete on the name input via <datalist>.
+    // 7.2.b — median-offset due-date suggestion exposed as a small "Suggest" chip.
+    const allTasksForHints = getTasks();
+    const nameOptions = suggestTaskNames('', allTasksForHints, { limit: 12 });
+    const suggestedDue = suggestDueDate(project, allTasksForHints, { todayIso: todayIso() });
+
     root.innerHTML = `
-        <input type="text" class="task-add-name" id="task-add-name" placeholder="+ Add a task…" maxlength="200" autocomplete="off" />
+        <input type="text" class="task-add-name" id="task-add-name" placeholder="+ Add a task…" maxlength="200" autocomplete="off" list="task-name-suggestions" />
+        <datalist id="task-name-suggestions">
+            ${nameOptions.map(o => `<option value="${escapeAttr(o.name)}"></option>`).join('')}
+        </datalist>
         <select class="task-add-assignee" id="task-add-assignee">
             <option value="">Unassigned</option>
             ${project.participants.map(p =>
@@ -1455,12 +1488,16 @@ function renderAddTaskRow(root, project) {
             ).join('')}
         </select>
         <input type="date" class="task-add-due" id="task-add-due" aria-label="Due date" />
+        ${suggestedDue
+            ? `<button type="button" class="task-add-due-suggest" id="task-add-due-suggest" title="Apply suggested due date">Suggest: ${escapeHtml(formatDateOnly(suggestedDue))}</button>`
+            : ''}
         <button type="button" class="btn-primary task-add-submit" id="task-add-submit">Add</button>
     `;
     const nameEl = root.querySelector('#task-add-name');
     const assigneeEl = root.querySelector('#task-add-assignee');
     const dueEl = root.querySelector('#task-add-due');
     const btn = root.querySelector('#task-add-submit');
+    const suggestBtn = root.querySelector('#task-add-due-suggest');
 
     const submit = () => {
         const name = nameEl.value.trim();
@@ -1483,6 +1520,12 @@ function renderAddTaskRow(root, project) {
     nameEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); submit(); }
     });
+    if (suggestBtn && suggestedDue) {
+        suggestBtn.addEventListener('click', () => {
+            dueEl.value = suggestedDue;
+            nameEl.focus();
+        });
+    }
 }
 
 function renderTasksList(root, project, tasks, totalTasksInProject) {
@@ -1518,7 +1561,11 @@ function renderTasksList(root, project, tasks, totalTasksInProject) {
         }
         const open = bucket.tasks.filter(t => t.status !== 'done');
         const done = bucket.tasks.filter(t => t.status === 'done');
-        const sortedOpen = sortTasks(open, sortOpts);
+        // 7.2.e — smart sort is a separate code path: it consults the full
+        // task list for dependency-blocking weight, and direction is fixed.
+        const sortedOpen = sortOpts.by === SMART_SORT_KEY
+            ? smartSortTasks(open, getTasks(), todayIso())
+            : sortTasks(open, sortOpts);
         const sortedDone = done.slice().sort(
             (a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')
         );

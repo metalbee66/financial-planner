@@ -1785,6 +1785,29 @@ select.editable { width: 100px; cursor: pointer; }
 }
 .project-card-milestone { color: var(--accent); }
 .project-card-overdue { color: #d97706; }
+/* 7.2.d — orange "Stale" badge for projects idle >14 days. */
+.project-card-stale { color: #c2410c; }
+
+/* 7.2.b — "Suggest: <date>" pill on the + Add task row. */
+.task-add-due-suggest {
+    border: 1px dashed var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    line-height: 1.3;
+}
+.task-add-due-suggest:hover { background: var(--surface); color: var(--text); }
+
+/* 7.2.c — single-line digest paragraph on the Dashboard. */
+.dashboard-digest {
+    margin: 0 0 14px;
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.45;
+}
 
 .project-detail-meta {
     display: flex;
