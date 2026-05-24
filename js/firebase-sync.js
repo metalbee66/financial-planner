@@ -264,6 +264,7 @@ export function setupRealtimeListeners() {
                 digest_pending: (data.digest_pending && typeof data.digest_pending === 'object' && !Array.isArray(data.digest_pending))
                     ? data.digest_pending
                     : {},
+                pm_dlbooks_migrated_to_projects: data.pm_dlbooks_migrated_to_projects === true,
             };
             if (renderProjectsTab) renderProjectsTab();
         }
@@ -316,6 +317,7 @@ export async function initialSync() {
                 digest_pending: (fbProjects.digest_pending && typeof fbProjects.digest_pending === 'object' && !Array.isArray(fbProjects.digest_pending))
                     ? fbProjects.digest_pending
                     : {},
+                pm_dlbooks_migrated_to_projects: fbProjects.pm_dlbooks_migrated_to_projects === true,
             };
         }
 

@@ -19,7 +19,7 @@ import {
 import {
     initFirebase, getFirebaseAuth, setCurrentUser, signInWithGoogle, signOut,
     showLoginScreen, showApp, initialSync, setupRealtimeListeners,
-    registerRenderHooks,
+    registerRenderHooks, fbSave,
 } from './firebase-sync.js';
 import { ALLOWED_EMAILS } from './firebase-config.js';
 import { state } from './state.js';
@@ -31,8 +31,9 @@ import { renderBudgetTab } from './modules/finance/budget.js';
 import { renderAccountsTab } from './modules/finance/accounts.js';
 import { loadPM } from './modules/pm-legacy/pm.js';
 import { renderPMTab } from './modules/pm-legacy/pm.js';
-import { loadProjects } from './modules/projects/data.js';
+import { loadProjects, PROJECTS_KEY } from './modules/projects/data.js';
 import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/projects/index.js';
+import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
@@ -66,6 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showApp();
 
                 await initialSync();
+                maybeRunPMMigration();
                 bootModules();
                 setupRealtimeListeners();
             } else {
@@ -78,9 +80,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         // No Firebase — run locally
         showApp();
+        maybeRunPMMigration();
         bootModules();
     }
 });
+
+/**
+ * Phase 8.1 one-time migration: copy the legacy `pm_dlbooks` tree into the
+ * Projects module the first time the app boots after the v2.0.0 upgrade.
+ * Idempotent via the `pm_dlbooks_migrated_to_projects` flag on the projects
+ * root, so re-running on later loads is a no-op. The legacy `pm_dlbooks`
+ * RTDB/localStorage key is intentionally NOT deleted — Task 8.2 retires the
+ * tab once the user has confirmed the migration.
+ */
+function maybeRunPMMigration() {
+    if (!state.projectsData || state.projectsData.pm_dlbooks_migrated_to_projects) return;
+    const { projects, tasks } = migratePMDLBooksToProjects(state.pmData);
+    state.projectsData.items = (state.projectsData.items || []).concat(projects);
+    state.projectsData.tasks = (state.projectsData.tasks || []).concat(tasks);
+    state.projectsData.pm_dlbooks_migrated_to_projects = true;
+    // Persist directly via fbSave so the silent first-boot migration doesn't
+    // flash the user-facing "Saved" toast that saveProjects emits.
+    fbSave(PROJECTS_KEY, state.projectsData);
+    if (projects.length > 0) {
+        console.log(`PM DLBooks migration: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
+    }
+}
 
 let modulesBooted = false;
 

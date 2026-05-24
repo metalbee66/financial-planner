@@ -129,6 +129,7 @@ import {
     isProjectStale,
     smartSortTasks,
 } from './local-ai.js';
+import { migratePMDLBooksToProjects } from './migrate-pm.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -3644,6 +3645,129 @@ test('smartSortTasks ignores "blocking" weight for tasks whose dependants are do
     const result = smartSortTasks([blocker, isolated], [blocker, isolated, doneConsumer], today);
     // 'a' isn't actually blocking anything (its consumer is done), so 'b' (normal priority) wins.
     eq(result.map(t => t.id), ['b', 'a']);
+});
+
+// ── PM DLBooks → Projects migration (Task 8.1) ──
+
+test('migratePMDLBooksToProjects returns empty result for null / empty input', () => {
+    eq(migratePMDLBooksToProjects(null), { projects: [], tasks: [] });
+    eq(migratePMDLBooksToProjects({}), { projects: [], tasks: [] });
+    eq(migratePMDLBooksToProjects({ macro: [], customers: [] }), { projects: [], tasks: [] });
+});
+
+test('migratePMDLBooksToProjects builds a single "Macro Initiatives" project from macro items', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [
+            { id: 'macro-1', name: 'Migrate to SharePoint', status: 'not-started', assignee: 'both', notes: '', createdAt: '2026-03-26' },
+            { id: 'macro-2', name: 'Build CRM module',     status: 'in-progress', assignee: 'brad', notes: 'first cut', createdAt: '2026-04-10' },
+        ],
+        customers: [],
+    });
+    eq(result.projects.length, 1);
+    eq(result.projects[0].name, 'Macro Initiatives');
+    eq(result.tasks.length, 2);
+    eq(result.tasks[0].projectId, result.projects[0].id);
+    eq(result.tasks[0].name, 'Migrate to SharePoint');
+    eq(result.tasks[0].assignees, ['brad', 'diana']);
+    eq(result.tasks[1].assignees, ['brad']);
+    eq(result.tasks[1].description, 'first cut');
+});
+
+test('migratePMDLBooksToProjects builds one project per customer named "DLBooks — <name>"', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [],
+        customers: [
+            { id: 'c1', name: 'Reed Cranes', tasks: [{ id: 't1', name: 'Xero vendor review', status: 'in-progress', assignee: 'brad', subtasks: [], createdAt: '2026-03-26' }] },
+            { id: 'c2', name: 'A1 Showers', tasks: [] },
+        ],
+    });
+    eq(result.projects.length, 2);
+    eq(result.projects.map(p => p.name).sort(), ['DLBooks — A1 Showers', 'DLBooks — Reed Cranes']);
+    // One task on Reed Cranes, none on A1 Showers
+    eq(result.tasks.length, 1);
+    eq(result.tasks[0].name, 'Xero vendor review');
+});
+
+test('migratePMDLBooksToProjects maps each pm subtask to a child task with parentTaskId', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [],
+        customers: [{
+            id: 'c1', name: 'Reed Cranes',
+            tasks: [{
+                id: 't1', name: 'Time sheet automation', status: 'not-started', assignee: 'brad', subtasks: [
+                    { name: 'Spec the API', done: true },
+                    { name: 'Wire up the form', done: false },
+                ], createdAt: '2026-03-26',
+            }],
+        }],
+    });
+    const parent = result.tasks.find(t => t.name === 'Time sheet automation');
+    const subs = result.tasks.filter(t => t.parentTaskId === parent.id);
+    eq(subs.length, 2);
+    eq(subs[0].name, 'Spec the API');
+    eq(subs[0].status, 'done');
+    truthy(subs[0].completedAt, 'completed sub should stamp completedAt');
+    eq(subs[1].status, 'not-started');
+    eq(subs[1].completedAt, null);
+});
+
+test('migratePMDLBooksToProjects preserves status values that exist in both schemas', () => {
+    const statuses = ['not-started', 'in-progress', 'done', 'blocked'];
+    const result = migratePMDLBooksToProjects({
+        macro: statuses.map((s, i) => ({ id: `m${i}`, name: `T${i}`, status: s, assignee: 'brad', createdAt: '2026-03-26' })),
+    });
+    eq(result.tasks.map(t => t.status), statuses);
+});
+
+test('migratePMDLBooksToProjects falls back to "not-started" for unknown statuses', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [{ id: 'm1', name: 'Mystery', status: 'review', assignee: 'brad', createdAt: '2026-03-26' }],
+    });
+    eq(result.tasks[0].status, 'not-started');
+});
+
+test('migratePMDLBooksToProjects converts YYYY-MM-DD createdAt into an ISO timestamp', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [{ id: 'm1', name: 'T', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' }],
+    });
+    eq(result.tasks[0].createdAt, '2026-03-26T00:00:00.000Z');
+});
+
+test('migratePMDLBooksToProjects stamps completedAt on done tasks', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [{ id: 'm1', name: 'Closed', status: 'done', assignee: 'brad', createdAt: '2026-01-01' }],
+    });
+    truthy(result.tasks[0].completedAt, 'completedAt should be set when status=done');
+});
+
+test('migratePMDLBooksToProjects skips macro / customer / subtask entries with blank names', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [
+            { id: 'm1', name: '', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' },
+            { id: 'm2', name: '  ', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' },
+            { id: 'm3', name: 'Real', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' },
+        ],
+        customers: [
+            { id: 'c0', name: '', tasks: [] },
+            { id: 'c1', name: 'Reed', tasks: [
+                { id: 't0', name: '', status: 'not-started', assignee: 'brad', subtasks: [{ name: '', done: false }], createdAt: '2026-03-26' },
+                { id: 't1', name: 'Real task', status: 'not-started', assignee: 'brad', subtasks: [{ name: 'Real sub', done: false }, { name: '', done: false }], createdAt: '2026-03-26' },
+            ] },
+        ],
+    });
+    eq(result.projects.length, 2); // Macro Initiatives + DLBooks — Reed
+    eq(result.tasks.filter(t => !t.parentTaskId).map(t => t.name), ['Real', 'Real task']);
+    eq(result.tasks.filter(t => t.parentTaskId).map(t => t.name), ['Real sub']);
+});
+
+test('migratePMDLBooksToProjects defaults projects to active + brad/diana participants', () => {
+    const result = migratePMDLBooksToProjects({
+        macro: [{ id: 'm1', name: 'T', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' }],
+    });
+    const proj = result.projects[0];
+    eq(proj.status, 'active');
+    eq(proj.statusOverride, false);
+    eq(proj.participants, ['brad', 'diana']);
 });
 
 // ── runner ──

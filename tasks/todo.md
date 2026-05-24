@@ -99,7 +99,7 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 
 ## Phase 8 — Migrate PM DLBooks → Projects
 
-- [ ] **8.1** Data migration (idempotent, preserves original) — S — [plan §8.1](plan.md#task-81-data-migration)
+- [x] **8.1** Data migration (idempotent, preserves original) — S — [plan §8.1](plan.md#task-81-data-migration) — _done 2026-05-24, pure `migratePMDLBooksToProjects` in new `migrate-pm.js` + `maybeRunPMMigration` runner in `shell.js` gated by `pm_dlbooks_migrated_to_projects` flag on the projects root; legacy `pm_dlbooks` preserved (+10 unit / +4 E2E, now 158 E2E)_
 - [ ] **8.2** Retire PM DLBooks legacy module + update CHANGELOG — XS — [plan §8.2](plan.md#task-82-retire-pm-dlbooks-tab)
 - [ ] **8.3** Walk through [user-actions.md](user-actions.md) with user, tick or defer every item, tag v2.0.0
 - [ ] **Checkpoint I — DONE**: tagged release, HANDOVER updated

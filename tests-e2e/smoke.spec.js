@@ -44,7 +44,18 @@ import { test, expect } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
     await page.route('**/firebase-*-compat.js', route => route.abort());
     await page.goto('/');
-    await page.evaluate(() => localStorage.clear());
+    await page.evaluate(() => {
+        localStorage.clear();
+        // Phase 8.1: pre-mark the one-shot PM DLBooks migration as done so
+        // tests that expect an empty Projects bucket don't get the demo
+        // "Macro Initiatives" / "DLBooks — Reed Cranes" projects pre-loaded
+        // from DEFAULT_PM. The Phase 8.1 describe re-enables the migration
+        // explicitly via its own seedPMAndReload helper.
+        localStorage.setItem('projects', JSON.stringify({
+            items: [], tasks: [], notifications: {}, prefs: {},
+            digest_pending: {}, pm_dlbooks_migrated_to_projects: true,
+        }));
+    });
     await page.reload();
     await page.waitForSelector('#module-host', { state: 'attached' });
     // Switch to Projects tab — Finance is the default
@@ -2893,6 +2904,105 @@ test.describe('Phase 7.2 — Local AI helpers', () => {
         expect(indexOf('Overdue low')).toBe(0);
         expect(indexOf('Future high')).toBe(1);
         expect(indexOf('Future low')).toBe(2);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Phase 8.1 — PM DLBooks → Projects migration', () => {
+
+    // The beforeEach in this file clears localStorage and reloads on `/`. To
+    // exercise the migration we need to seed `pm_dlbooks` AFTER the initial
+    // clear+reload but before the projects module first mounts. The shell
+    // re-runs `maybeRunPMMigration` on each load, so seeding + reloading is
+    // the simplest way to drive it.
+    async function seedPMAndReload(page, pmData) {
+        // The describe-level beforeEach has already triggered one boot that
+        // migrated whatever PM defaults were lying around. Wipe `projects`
+        // back to an empty bucket (flag off) so we exercise a clean migration
+        // from our seed data — otherwise the prior-boot migration shows up as
+        // duplicate "Macro Initiatives" cards.
+        await page.evaluate((data) => {
+            localStorage.setItem('pm_dlbooks', JSON.stringify(data));
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {}, pm_dlbooks_migrated_to_projects: false,
+            }));
+        }, pmData);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+    }
+
+    test('first boot after upgrade migrates Macro Initiatives + customer projects', async ({ page }) => {
+        await seedPMAndReload(page, {
+            macro: [
+                { id: 'm1', name: 'Migrate to SharePoint', status: 'not-started', assignee: 'both', notes: '', createdAt: '2026-03-26' },
+            ],
+            customers: [
+                { id: 'c1', name: 'Reed Cranes', tasks: [
+                    { id: 't1', name: 'Xero vendor review', status: 'in-progress', assignee: 'brad', notes: 'review the catalogue', subtasks: [
+                        { name: 'Pull current list', done: true },
+                        { name: 'Confirm with Reed', done: false },
+                    ], createdAt: '2026-03-26' },
+                ] },
+                { id: 'c2', name: 'A1 Showers', tasks: [] },
+            ],
+        });
+
+        await expect(page.locator('.project-card', { hasText: 'Macro Initiatives' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'DLBooks — Reed Cranes' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'DLBooks — A1 Showers' })).toBeVisible();
+    });
+
+    test('migration is idempotent — reloading does not duplicate projects', async ({ page }) => {
+        const pmData = {
+            macro: [{ id: 'm1', name: 'One macro', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' }],
+            customers: [],
+        };
+        await seedPMAndReload(page, pmData);
+        await expect(page.locator('.project-card', { hasText: 'Macro Initiatives' })).toHaveCount(1);
+
+        // Reload without flipping the flag back — migration should NOT re-run.
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await expect(page.locator('.project-card', { hasText: 'Macro Initiatives' })).toHaveCount(1);
+    });
+
+    test('legacy pm_dlbooks key is preserved after migration (not deleted)', async ({ page }) => {
+        await seedPMAndReload(page, {
+            macro: [{ id: 'm1', name: 'Keep me around', status: 'not-started', assignee: 'brad', createdAt: '2026-03-26' }],
+            customers: [],
+        });
+        await expect(page.locator('.project-card', { hasText: 'Macro Initiatives' })).toBeVisible();
+        const stillThere = await page.evaluate(() => {
+            const raw = localStorage.getItem('pm_dlbooks');
+            return raw ? JSON.parse(raw) : null;
+        });
+        expect(stillThere).not.toBeNull();
+        expect(stillThere.macro[0].name).toBe('Keep me around');
+    });
+
+    test('migrated tasks land in the project detail view with the right metadata', async ({ page }) => {
+        await seedPMAndReload(page, {
+            macro: [],
+            customers: [{
+                id: 'c1', name: 'Reed Cranes', tasks: [
+                    { id: 't1', name: 'Time sheet automation', status: 'in-progress', assignee: 'both', notes: 'kick-off this week', subtasks: [
+                        { name: 'Draft spec', done: true },
+                    ], createdAt: '2026-03-26' },
+                ],
+            }],
+        });
+        // Open the migrated project
+        await page.locator('.project-card', { hasText: 'DLBooks — Reed Cranes' }).click();
+        const parentRow = page.locator('.task-row', { hasText: 'Time sheet automation' });
+        await expect(parentRow).toBeVisible();
+        // Indented sub-task is also rendered
+        await expect(page.locator('.task-row', { hasText: 'Draft spec' })).toBeVisible();
+        // Task panel shows the migrated notes as the description
+        await parentRow.locator('.task-row-name').click();
+        await expect(page.locator('#tp-desc')).toHaveValue('kick-off this week');
     });
 });
 

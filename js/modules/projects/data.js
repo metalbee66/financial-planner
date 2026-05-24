@@ -18,7 +18,16 @@ export const PROJECT_STATUSES = ['planning', 'active', 'on-hold', 'completed', '
 export const TASK_STATUSES = ['not-started', 'in-progress', 'review', 'done', 'blocked'];
 export const TASK_PRIORITIES = ['low', 'normal', 'high'];
 export const DEFAULT_PARTICIPANTS = ['brad', 'diana'];
-export const DEFAULT_PROJECTS = { items: [], tasks: [], notifications: {}, prefs: {}, digest_pending: {} };
+export const DEFAULT_PROJECTS = {
+    items: [],
+    tasks: [],
+    notifications: {},
+    prefs: {},
+    digest_pending: {},
+    // Phase 8.1 idempotency flag — set true after the one-shot PM DLBooks
+    // migration has appended its projects + tasks to this bucket.
+    pm_dlbooks_migrated_to_projects: false,
+};
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
 const TASK_STATUS_SET = new Set(TASK_STATUSES);
@@ -1445,6 +1454,7 @@ export function loadProjects() {
             digest_pending: (parsed.digest_pending && typeof parsed.digest_pending === 'object' && !Array.isArray(parsed.digest_pending))
                 ? parsed.digest_pending
                 : {},
+            pm_dlbooks_migrated_to_projects: parsed.pm_dlbooks_migrated_to_projects === true,
         };
     } catch (e) {
         console.error('loadProjects parse error:', e);
