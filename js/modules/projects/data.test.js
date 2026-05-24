@@ -130,6 +130,7 @@ import {
     smartSortTasks,
 } from './local-ai.js';
 import { migratePMDLBooksToProjects } from './migrate-pm.js';
+import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './seed-businesstransform.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -3768,6 +3769,117 @@ test('migratePMDLBooksToProjects defaults projects to active + brad/diana partic
     eq(proj.status, 'active');
     eq(proj.statusOverride, false);
     eq(proj.participants, ['brad', 'diana']);
+});
+
+// ── Business transformation seed (v2.0.1) ──
+
+test('seedBusinessTransformProjects returns empty result for null / empty input', () => {
+    eq(seedBusinessTransformProjects(null), { projects: [], tasks: [] });
+    eq(seedBusinessTransformProjects({}), { projects: [], tasks: [] });
+    eq(seedBusinessTransformProjects({ streams: [] }), { projects: [], tasks: [] });
+});
+
+test('seedBusinessTransformProjects with milestones only builds a single Milestones project', () => {
+    const result = seedBusinessTransformProjects({
+        project: { name: 'X', target_date: '2026-07-01', milestones: [
+            { name: 'M1', date: '2026-04-18' },
+            { name: 'M2', date: '2026-05-31' },
+        ] },
+        streams: [],
+    });
+    eq(result.projects.length, 1);
+    eq(result.projects[0].name, 'Milestones');
+    eq(result.tasks.length, 2);
+    truthy(result.tasks.every(t => t.isMilestone === true), 'all milestone tasks flagged');
+    eq(result.tasks.map(t => t.dueDate), ['2026-04-18', '2026-05-31']);
+});
+
+test('seedBusinessTransformProjects builds one project per stream named exactly as stream.name', () => {
+    const result = seedBusinessTransformProjects({
+        project: {},
+        streams: [
+            { id: 's1', name: 'Stream 1 — CRM build', owner: 'brad', deadline: '2026-05-31', tasks: [] },
+            { id: 's2', name: 'Stream 2 — Tech infrastructure', owner: 'brad', deadline: '2026-05-31', tasks: [] },
+        ],
+    });
+    eq(result.projects.length, 2);
+    eq(result.projects.map(p => p.name), ['Stream 1 — CRM build', 'Stream 2 — Tech infrastructure']);
+    eq(result.projects[0].endDate, '2026-05-31');
+});
+
+test('seedBusinessTransformProjects maps task assignee strings into the assignees array', () => {
+    const result = seedBusinessTransformProjects({
+        streams: [{
+            id: 's', name: 'S', deadline: null, tasks: [
+                { id: 't1', name: 'T1', assignee: 'brad', status: 'todo' },
+                { id: 't2', name: 'T2', assignee: 'diana', status: 'todo' },
+                { id: 't3', name: 'T3', assignee: 'both', status: 'todo' },
+                { id: 't4', name: 'T4', assignee: 'someone-else', status: 'todo' },
+            ],
+        }],
+    });
+    eq(result.tasks.map(t => t.assignees), [['brad'], ['diana'], ['brad', 'diana'], []]);
+});
+
+test('seedBusinessTransformProjects maps subtasks into real child tasks with parentTaskId', () => {
+    const result = seedBusinessTransformProjects({
+        streams: [{
+            id: 's', name: 'S', tasks: [{
+                id: 't1', name: 'Parent', assignee: 'brad', status: 'todo',
+                subtasks: ['Sub A', 'Sub B', '  ', 'Sub C'],
+            }],
+        }],
+    });
+    const parent = result.tasks.find(t => t.name === 'Parent');
+    const subs = result.tasks.filter(t => t.parentTaskId === parent.id);
+    eq(subs.map(t => t.name), ['Sub A', 'Sub B', 'Sub C']);
+    truthy(subs.every(t => t.assignees[0] === 'brad'), 'subtask assignees inherit from parent');
+});
+
+test('seedBusinessTransformProjects maps todo → not-started and preserves dates / priorities', () => {
+    const result = seedBusinessTransformProjects({
+        streams: [{ id: 's', name: 'S', tasks: [
+            { id: 't1', name: 'T', assignee: 'brad', status: 'todo', priority: 'high', start_date: '2026-04-12', due_date: '2026-04-15' },
+        ] }],
+    });
+    eq(result.tasks[0].status, 'not-started');
+    eq(result.tasks[0].priority, 'high');
+    eq(result.tasks[0].startDate, '2026-04-12');
+    eq(result.tasks[0].dueDate, '2026-04-15');
+});
+
+test('seedBusinessTransformProjects maps medium priority to normal (Projects schema only knows low/normal/high)', () => {
+    const result = seedBusinessTransformProjects({
+        streams: [{ id: 's', name: 'S', tasks: [
+            { id: 't', name: 'T', assignee: 'brad', status: 'todo', priority: 'medium' },
+        ] }],
+    });
+    eq(result.tasks[0].priority, 'normal');
+});
+
+test('seedBusinessTransformProjects marks template-status tasks with a [Template] prefix and not-started status', () => {
+    const result = seedBusinessTransformProjects({
+        streams: [{ id: 's', name: 'Adhoc', tasks: [
+            { id: 't', name: 'Bank reconciliation catch-up — [client name]', assignee: 'diana', priority: 'medium', status: 'template', description: 'Catch-up reconciliation.' },
+        ] }],
+    });
+    eq(result.tasks[0].status, 'not-started');
+    eq(result.tasks[0].name, '[Template] Bank reconciliation catch-up — [client name]');
+});
+
+test('BUSINESS_TRANSFORM_SEED is the literal SenseAi payload with 8 streams and 12 milestones', () => {
+    eq(BUSINESS_TRANSFORM_SEED.project.name, 'Business transformation & scale — SPEC v2.0');
+    eq(BUSINESS_TRANSFORM_SEED.streams.length, 9);
+    eq(BUSINESS_TRANSFORM_SEED.project.milestones.length, 12);
+});
+
+test('full seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED) produces 10 projects (Milestones + 9 streams) and >250 tasks', () => {
+    const result = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    eq(result.projects.length, 10);
+    truthy(result.tasks.length > 250, `expected >250 tasks, got ${result.tasks.length}`);
+    // Every task belongs to one of the created projects.
+    const projectIds = new Set(result.projects.map(p => p.id));
+    truthy(result.tasks.every(t => projectIds.has(t.projectId)), 'every task has a valid projectId');
 });
 
 // ── runner ──

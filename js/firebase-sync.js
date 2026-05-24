@@ -261,6 +261,7 @@ export function setupRealtimeListeners() {
                     ? data.digest_pending
                     : {},
                 pm_dlbooks_migrated_to_projects: data.pm_dlbooks_migrated_to_projects === true,
+                business_transform_seeded: data.business_transform_seeded === true,
             };
             if (renderProjectsTab) renderProjectsTab();
         }
@@ -314,6 +315,7 @@ export async function initialSync() {
                     ? fbProjects.digest_pending
                     : {},
                 pm_dlbooks_migrated_to_projects: fbProjects.pm_dlbooks_migrated_to_projects === true,
+                business_transform_seeded: fbProjects.business_transform_seeded === true,
             };
         }
 

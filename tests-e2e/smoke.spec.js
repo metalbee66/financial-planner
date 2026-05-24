@@ -46,14 +46,17 @@ test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.evaluate(() => {
         localStorage.clear();
-        // Phase 8.1: pre-mark the one-shot PM DLBooks migration as done so
+        // Phase 8.1 / v2.0.1: pre-mark both one-shot migrations as done so
         // tests that expect an empty Projects bucket don't get the demo
-        // "Macro Initiatives" / "DLBooks — Reed Cranes" projects pre-loaded
-        // from DEFAULT_PM. The Phase 8.1 describe re-enables the migration
-        // explicitly via its own seedPMAndReload helper.
+        // "Macro Initiatives" / "DLBooks — Reed Cranes" projects (from
+        // DEFAULT_PM) or the SenseAi "Business transformation & scale"
+        // seed (10 projects) pre-loaded. The Phase 8.1 + v2.0.1 describes
+        // re-enable their migration explicitly via their own helpers.
         localStorage.setItem('projects', JSON.stringify({
             items: [], tasks: [], notifications: {}, prefs: {},
-            digest_pending: {}, pm_dlbooks_migrated_to_projects: true,
+            digest_pending: {},
+            pm_dlbooks_migrated_to_projects: true,
+            business_transform_seeded: true,
         }));
     });
     await page.reload();
@@ -3004,6 +3007,53 @@ test.describe('Phase 8.1 — PM DLBooks → Projects migration', () => {
         // Task panel shows the migrated notes as the description
         await parentRow.locator('.task-row-name').click();
         await expect(page.locator('#tp-desc')).toHaveValue('kick-off this week');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('v2.0.1 — Business transformation seed', () => {
+
+    // Same beforeEach-flip pattern as Phase 8.1 — clear the seed flag so the
+    // shell's `maybeRunBusinessTransformSeed` runs against a clean bucket.
+    async function resetSeedFlagAndReload(page) {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                business_transform_seeded: false,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+    }
+
+    test('first boot seeds the Milestones + 8 stream projects', async ({ page }) => {
+        await resetSeedFlagAndReload(page);
+        await expect(page.locator('.project-card', { hasText: 'Milestones' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'Stream 1 — CRM build' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'Stream 8 — Growth & acquisition' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'Adhoc — Diana' })).toBeVisible();
+    });
+
+    test('seed is idempotent — reloading does not duplicate any project', async ({ page }) => {
+        await resetSeedFlagAndReload(page);
+        await expect(page.locator('.project-card', { hasText: 'Milestones' })).toHaveCount(1);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await expect(page.locator('.project-card', { hasText: 'Milestones' })).toHaveCount(1);
+        await expect(page.locator('.project-card', { hasText: 'Stream 1 — CRM build' })).toHaveCount(1);
+    });
+
+    test('Stream 1 — CRM build opens to seeded tasks with their migrated subtasks', async ({ page }) => {
+        await resetSeedFlagAndReload(page);
+        await page.locator('.project-card', { hasText: 'Stream 1 — CRM build' }).click();
+        const parentRow = page.locator('.task-row', { hasText: 'Phase 1: Auth module' });
+        await expect(parentRow).toBeVisible();
+        // Subtask from the JSON appears indented under its parent.
+        await expect(page.locator('.task-row', { hasText: 'auth/routes.py — login/logout Blueprint' })).toBeVisible();
     });
 });
 

@@ -104,6 +104,10 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **8.3** Walk through [user-actions.md](user-actions.md) with user, tick or defer every item, tag v2.0.0 — _done 2026-05-24, D1/D2 resolved keep-existing, D3/D4 accepted defaults, Pre-Phase-6 + the two n8n workflows + Checkpoint G + two-tab smoke + Asana importer all carried into v2.1 backlog; CHANGELOG + HANDOVER refreshed; `v2.0.0` tag created_
 - [x] **Checkpoint I — DONE**: tagged v2.0.0, HANDOVER updated, live site current
 
+## v2.0.1 — Business transformation seed (content-only patch)
+
+- [x] **v2.0.1** Import the SenseAi "Business transformation & scale — SPEC v2.0" project tree into Projects via a one-shot seed — _done 2026-05-24, `seed-businesstransform.js` + `maybeRunBusinessTransformSeed` runner in `shell.js` gated by `business_transform_seeded` flag; produces 10 projects (9 streams + Milestones) and ~280 tasks (+9 unit / +3 E2E, now 161 E2E); released as tag `v2.0.1`_
+
 ---
 
 ## Resolved decisions (from review)

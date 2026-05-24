@@ -36,6 +36,7 @@ import { loadPM } from './modules/pm-legacy/pm.js';
 import { loadProjects, PROJECTS_KEY } from './modules/projects/data.js';
 import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/projects/index.js';
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
+import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './modules/projects/seed-businesstransform.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
@@ -70,6 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 await initialSync();
                 maybeRunPMMigration();
+                maybeRunBusinessTransformSeed();
                 bootModules();
                 setupRealtimeListeners();
             } else {
@@ -83,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // No Firebase — run locally
         showApp();
         maybeRunPMMigration();
+        maybeRunBusinessTransformSeed();
         bootModules();
     }
 });
@@ -106,6 +109,23 @@ function maybeRunPMMigration() {
     fbSave(PROJECTS_KEY, state.projectsData);
     if (projects.length > 0) {
         console.log(`PM DLBooks migration: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
+    }
+}
+
+/**
+ * v2.0.1 one-time seed: imports the SenseAi "Business transformation & scale"
+ * project tree (8 streams + a Milestones cross-cut) into the Projects module.
+ * Idempotent via the `business_transform_seeded` flag.
+ */
+function maybeRunBusinessTransformSeed() {
+    if (!state.projectsData || state.projectsData.business_transform_seeded) return;
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    state.projectsData.items = (state.projectsData.items || []).concat(projects);
+    state.projectsData.tasks = (state.projectsData.tasks || []).concat(tasks);
+    state.projectsData.business_transform_seeded = true;
+    fbSave(PROJECTS_KEY, state.projectsData);
+    if (projects.length > 0) {
+        console.log(`Business transform seed: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
     }
 }
 

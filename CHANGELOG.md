@@ -1,5 +1,17 @@
 # Family Planner — Changelog
 
+## v2.0.1 — 2026-05-24 — Business transformation seed
+
+Content-only patch. Imports the SenseAi "Business transformation & scale — SPEC v2.0" project tree into the Projects module on first boot after v2.0.0. The project came from a Claude conversation that Brad lost direct access to once Asana subscription-gated him out of the original board; the seed was reconstructed from that transcript and pasted as JSON.
+
+**Shape:** 10 new projects (one "Milestones" cross-cut + 9 streams, including an "Adhoc — Diana" template stream), ~45 top-level tasks, ~280 child tasks (subtasks unpacked into real Projects-tasks with `parentTaskId`). Each milestone is `isMilestone: true` with `dueDate` set; template tasks render with a `[Template]` prefix.
+
+**Pipeline:** new `seed-businesstransform.js` exposes `seedBusinessTransformProjects(seed)` returning `{projects, tasks}` to append. Idempotency lives on a `business_transform_seeded` flag on the projects root (defaulted in `DEFAULT_PROJECTS`, mirrored through `loadProjects` / firebase-sync listeners / `initialSync` / the playwright `beforeEach`). The runner `maybeRunBusinessTransformSeed` is wired into `shell.js` right after `maybeRunPMMigration`. Mapping: `todo` → `not-started`, `template` → `not-started` + `[Template]` name prefix, `medium` priority → `normal`, `assignee: 'both'` → `['brad','diana']`, subtask strings → real tasks with `parentTaskId`.
+
+**Tests:** +9 unit cases (~360 total), +3 Playwright tests (161 E2E total) under the `v2.0.1 — Business transformation seed` describe.
+
+---
+
 ## v2.0.0 — 2026-05-24 — Modular monolith + Projects module
 
 Rebranding "Financial Planner" → "Family Planner" and restructuring the app into a modular monolith. The existing finance features become the **Finance** module; a new **Projects** module (Asana-like project management) is added alongside. Future modules slot into the same registry. See [tasks/plan.md](tasks/plan.md) for the full plan.

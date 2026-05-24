@@ -27,6 +27,9 @@ export const DEFAULT_PROJECTS = {
     // Phase 8.1 idempotency flag — set true after the one-shot PM DLBooks
     // migration has appended its projects + tasks to this bucket.
     pm_dlbooks_migrated_to_projects: false,
+    // v2.0.1 idempotency flag — set true after the one-shot SenseAi
+    // "Business transformation & scale" project seed has been imported.
+    business_transform_seeded: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
@@ -1455,6 +1458,7 @@ export function loadProjects() {
                 ? parsed.digest_pending
                 : {},
             pm_dlbooks_migrated_to_projects: parsed.pm_dlbooks_migrated_to_projects === true,
+            business_transform_seeded: parsed.business_transform_seeded === true,
         };
     } catch (e) {
         console.error('loadProjects parse error:', e);
