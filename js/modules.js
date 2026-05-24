@@ -7,7 +7,12 @@
 
 import { mount as mountFinance } from './modules/finance/index.js';
 import { mount as mountProjects } from './modules/projects/index.js';
-import { mount as mountPmLegacy } from './modules/pm-legacy/index.js';
+
+// Task 8.2: the PM DLBooks (legacy) module is retired now that Task 8.1's
+// one-shot migration has copied its data into the Projects module. The
+// `pm-legacy/` source files are intentionally left on disk so the migration
+// runner can still source `loadPM()` on any device that boots fresh after
+// the v2.0.0 upgrade. The legacy `pm_dlbooks` Firebase key is untouched.
 
 export const MODULES = [
     {
@@ -24,11 +29,5 @@ export const MODULES = [
         mount: mountProjects,
         // Single root key holds `{ items: [...] }`; Phase 6 adds `prefs` and `notifications` siblings.
         dataKeys: ['projects'],
-    },
-    {
-        id: 'pm-legacy',
-        label: 'PM DLBooks (legacy)',
-        mount: mountPmLegacy,
-        dataKeys: ['pm_dlbooks'],
     },
 ];

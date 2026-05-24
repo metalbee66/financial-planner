@@ -30,14 +30,12 @@ const HOUSEHOLD_ID = 'family';
 // hard import cycle from sync → ui-render → sync).
 let renderBudgetTab = null;
 let renderAccountsTab = null;
-let renderPMTab = null;
 let renderProjectsTab = null;
 let renderEmailQueueAdmin = null;
 
 export function registerRenderHooks(hooks) {
     renderBudgetTab = hooks.renderBudgetTab;
     renderAccountsTab = hooks.renderAccountsTab;
-    renderPMTab = hooks.renderPMTab;
     renderProjectsTab = hooks.renderProjectsTab;
     renderEmailQueueAdmin = hooks.renderEmailQueueAdmin;
 }
@@ -230,12 +228,10 @@ export function setupRealtimeListeners() {
         }
     });
 
-    fbListen('pm_dlbooks', (data) => {
-        if (data && (data.macro || data.customers)) {
-            state.pmData = data;
-            if (renderPMTab) renderPMTab(state.pmData);
-        }
-    });
+    // Task 8.2: pm_dlbooks listener removed — the PM DLBooks (legacy) tab no
+    // longer renders, so there's no UI to refresh on remote changes. The data
+    // itself is preserved in RTDB; the one-shot Phase 8.1 migration consumes
+    // it once per device and writes a flag to prevent re-running.
 
     fbListen('email_queue', (data) => {
         // n8n drains this key (PATCH sent/attempts/failed/sentAt on each entry,

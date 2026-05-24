@@ -2234,9 +2234,10 @@ test.describe('Phase 6.2 — Notification bell + preferences', () => {
 
     test('bell is visible across all modules, not just Projects', async ({ page }) => {
         // Switch back to Finance and confirm the bell is still in the header.
+        // Task 8.2 retired pm-legacy so there are only two top-level modules now.
         await page.locator('.top-nav-btn[data-module="finance"]').click();
         await expect(page.locator('#notif-bell-btn')).toBeVisible();
-        await page.locator('.top-nav-btn[data-module="pm-legacy"]').click();
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
         await expect(page.locator('#notif-bell-btn')).toBeVisible();
     });
 
@@ -3026,16 +3027,18 @@ test.describe('In-browser data-layer unit suite', () => {
 // ──────────────────────────────────────────────────────────────────────────
 test.describe('Phase 0 — Module shell regression', () => {
 
-    test('all three top-level tabs mount without console errors', async ({ page }) => {
+    test('both top-level tabs mount without console errors', async ({ page }) => {
         const errors = [];
         page.on('pageerror', e => errors.push(e.message));
         page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
-        // Visit each tab
-        for (const id of ['finance', 'projects', 'pm-legacy']) {
+        // Visit each tab. Task 8.2 retired the PM DLBooks (legacy) module
+        // so the nav only renders Finance + Projects now.
+        for (const id of ['finance', 'projects']) {
             await page.locator(`.top-nav-btn[data-module="${id}"]`).click();
             await expect(page.locator(`#module-${id}`)).toBeVisible();
         }
+        await expect(page.locator('.top-nav-btn[data-module="pm-legacy"]')).toHaveCount(0);
         // Filter out the noisy Firebase-unavailable network errors and
         // browser extension chatter — we deliberately blocked Firebase.
         const real = errors.filter(e =>

@@ -29,8 +29,10 @@ import { loadAccounts } from './modules/finance/accounts.js';
 import { loadGlMappings, loadStoredHashes } from './modules/finance/import.js';
 import { renderBudgetTab } from './modules/finance/budget.js';
 import { renderAccountsTab } from './modules/finance/accounts.js';
+// Task 8.2: PM DLBooks module retired. `loadPM` stays imported so the one-shot
+// Phase 8.1 migration can still source pmData on a fresh device that boots
+// after the v2.0.0 upgrade; renderPMTab is no longer wired into anything.
 import { loadPM } from './modules/pm-legacy/pm.js';
-import { renderPMTab } from './modules/pm-legacy/pm.js';
 import { loadProjects, PROJECTS_KEY } from './modules/projects/data.js';
 import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/projects/index.js';
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
@@ -38,7 +40,7 @@ import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
 // cheap and idempotent.
-registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderPMTab, renderProjectsTab, renderEmailQueueAdmin });
+registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderProjectsTab, renderEmailQueueAdmin });
 
 document.addEventListener('DOMContentLoaded', async () => {
     // Load from localStorage first (instant render before Firebase resolves)
