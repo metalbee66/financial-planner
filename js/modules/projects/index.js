@@ -899,7 +899,7 @@ function renderWeeklyBarChart(bars) {
     }).join('');
 
     return `
-        <svg class="dashboard-chart" viewBox="0 0 ${chartW} ${chartH}" preserveAspectRatio="none"
+        <svg class="dashboard-chart" viewBox="0 0 ${chartW} ${chartH}"
             role="img" aria-label="Tasks completed per week, last ${bars.length} weeks">
             ${barsSvg}
         </svg>

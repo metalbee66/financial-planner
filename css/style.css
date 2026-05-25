@@ -3260,8 +3260,10 @@ select.editable { width: 100px; cursor: pointer; }
 }
 .dashboard-chart {
     width: 100%;
-    height: 160px;
+    max-width: 720px;
+    height: auto;
     display: block;
+    margin: 0 auto;
 }
 .dashboard-chart-empty {
     color: var(--text-dim);
