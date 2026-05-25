@@ -1,5 +1,23 @@
 # Family Planner — Changelog
 
+## v2.0.5 — 2026-05-25 — Business-transform extras (recommended additions)
+
+Content-only patch: appends the three "Recommended additions" from the off-repo agent's 2026-05-25 report (§"New work not in the seed — recommend adding"). These were flagged as Optional in v2.0.3 and deliberately skipped; Brad opted them in during the v2.0.5 walkthrough.
+
+**Additions landed (10 new tasks total = 1 parent + 7 children + 1 child + 1 parent):**
+
+- **Stream 4 — AI agents & automation:** new top-level task **"Document Services platform (generic shell + Reed payroll first instance)"** (status `done`, `completedAt: 2026-05-22`), with 7 children: schema + state machine / intake → preview → dispatch / n8n transform + dispatch (echo MVP) / owner magic-link surface / admin Copy Owner Link / /approvals top-level route (all `done`), plus **Phase 1.5: real Xero Payroll AU integration** (`blocked` on sandbox access).
+- **Stream 1 — CRM build:** new child task under "Phase 1: Auth module" called **"Public-surface security hardening"** (`done`, `completedAt: 2026-05-21`) — login audit + lockout alert + Xero token ACL + Caddy security headers + n8n MFA.
+- **Stream 1 — CRM build:** new top-level task **"Header nav IA refactor — Phase 2 (crm → practice module rename + new subdomain)"** (`not-started`). Phase 1 already shipped 2026-05-24; Phase 2 queued.
+
+**Pipeline:** new `add-businesstransform-extras-20260525.js` exposes `applyBusinessTransformExtras20260525(items, tasks)` returning `{items, tasks, report}`. Idempotency flag `business_transform_extras_20260525_applied` lives on the projects root, threaded through `DEFAULT_PROJECTS`, `loadProjects`, the firebase-sync realtime listener, `initialSync`, and the E2E `beforeEach`. Runner `maybeAddBusinessTransformExtras20260525` in `shell.js` is gated on `business_transform_seeded === true` so it never fires on a device that hasn't seeded.
+
+**Idempotency caveat (same as v2.0.3):** if Brad deletes one of the added tasks after the flag flips true, the runner does NOT re-add it on subsequent loads — the flag is per-projects-root, not per-task. (Verified by the `extras runner is idempotent` E2E test.)
+
+**Tests:** +8 unit cases, +5 Playwright tests (171 E2E total) under the `v2.0.5 — Business transform extras 2026-05-25` describe.
+
+---
+
 ## v2.0.4 — 2026-05-25 — Auth hotfix: revert sign-in to popup
 
 Brad hit a sign-in loop in production: clicking **Sign in with Google** redirected to Google, his account picker showed, he selected his Gmail account, Google redirected back to the app — and the login screen reappeared instead of the Projects tab. Repeats indefinitely.

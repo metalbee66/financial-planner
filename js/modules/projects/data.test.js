@@ -136,6 +136,12 @@ import {
     TOP_LEVEL_PATCH_COUNT,
     CHILD_PATCH_COUNT,
 } from './update-businesstransform-20260525.js';
+import {
+    applyBusinessTransformExtras20260525,
+    ADDITIONS,
+    ADDITION_COUNT,
+    TOTAL_TASK_COUNT as EXTRAS_TOTAL_TASK_COUNT,
+} from './add-businesstransform-extras-20260525.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -3933,6 +3939,107 @@ test('applyBusinessTransformUpdate20260525 only writes completedAt for done tran
     const xero = outTasks.find(t => t.projectId === stream4.id && t.name === 'Agent: Xero health sync');
     eq(xero.status, 'in-progress');
     eq(xero.completedAt, null);
+});
+
+// ── Business transformation extras — 2026-05-25 (v2.0.5) ──
+
+test('ADDITIONS shape: three top-level entries (Doc Services, security child, header-nav Phase 2)', () => {
+    eq(ADDITION_COUNT, 3);
+    eq(ADDITIONS[0].kind, 'top-level');
+    eq(ADDITIONS[0].projectName, 'Stream 4 — AI agents & automation');
+    eq(ADDITIONS[1].kind, 'child');
+    eq(ADDITIONS[1].parentTaskName, 'Phase 1: Auth module');
+    eq(ADDITIONS[2].kind, 'top-level');
+    eq(ADDITIONS[2].projectName, 'Stream 1 — CRM build');
+});
+
+test('TOTAL_TASK_COUNT counts parents + children = 10 (1 + 7 children + 1 + 1)', () => {
+    // Stream 4 Document Services: 1 parent + 7 children = 8.
+    // Stream 1 Security hardening: 1 child = 1.
+    // Stream 1 Header nav Phase 2: 1 parent (no children) = 1.
+    eq(EXTRAS_TOTAL_TASK_COUNT, 10);
+});
+
+test('applyBusinessTransformExtras20260525 appends 10 new tasks against a fully seeded dataset', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const taskCountBefore = tasks.length;
+    const { tasks: outTasks, report } = applyBusinessTransformExtras20260525(projects, tasks);
+    eq(report.unmatched, []);
+    eq(report.addedCount, EXTRAS_TOTAL_TASK_COUNT);
+    eq(outTasks.length, taskCountBefore + EXTRAS_TOTAL_TASK_COUNT);
+});
+
+test('Document Services platform lands under Stream 4 with the right child tasks', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { tasks: outTasks } = applyBusinessTransformExtras20260525(projects, tasks);
+    const stream4 = projects.find(p => p.name === 'Stream 4 — AI agents & automation');
+    const docServices = outTasks.find(t =>
+        t.projectId === stream4.id &&
+        /Document Services platform/.test(t.name) &&
+        !t.parentTaskId
+    );
+    truthy(docServices, 'Document Services parent exists');
+    eq(docServices.status, 'done');
+    eq(docServices.completedAt, '2026-05-22T00:00:00.000Z');
+    const children = outTasks.filter(t => t.parentTaskId === docServices.id);
+    eq(children.length, 7);
+    // The Phase 1.5 child should be blocked.
+    const phase15 = children.find(c => /Phase 1\.5/.test(c.name));
+    truthy(phase15, 'Phase 1.5 child exists');
+    eq(phase15.status, 'blocked');
+    eq(phase15.completedAt, null);
+});
+
+test('Public-surface security hardening is a child of the Phase 1 Auth task in Stream 1', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { tasks: outTasks } = applyBusinessTransformExtras20260525(projects, tasks);
+    const stream1 = projects.find(p => p.name === 'Stream 1 — CRM build');
+    const auth = outTasks.find(t => t.projectId === stream1.id && t.name === 'Phase 1: Auth module' && !t.parentTaskId);
+    truthy(auth, 'Auth parent exists');
+    const security = outTasks.find(t => t.parentTaskId === auth.id && /Public-surface security hardening/.test(t.name));
+    truthy(security, 'Security hardening child exists');
+    eq(security.status, 'done');
+    eq(security.completedAt, '2026-05-21T00:00:00.000Z');
+});
+
+test('Header nav IA refactor Phase 2 is a top-level not-started task in Stream 1', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { tasks: outTasks } = applyBusinessTransformExtras20260525(projects, tasks);
+    const stream1 = projects.find(p => p.name === 'Stream 1 — CRM build');
+    const navPhase2 = outTasks.find(t =>
+        t.projectId === stream1.id &&
+        /Header nav IA refactor — Phase 2/.test(t.name) &&
+        !t.parentTaskId
+    );
+    truthy(navPhase2, 'Header nav Phase 2 task exists');
+    eq(navPhase2.status, 'not-started');
+    eq(navPhase2.completedAt, null);
+});
+
+test('applyBusinessTransformExtras20260525 reports unmatched rows when projects are missing', () => {
+    const { report, tasks: outTasks } = applyBusinessTransformExtras20260525([], []);
+    eq(outTasks, []);
+    eq(report.addedCount, 0);
+    // Two top-level adds + one child = 3 unmatched (both project lookups fail).
+    truthy(report.unmatched.length >= ADDITION_COUNT,
+        `expected ≥${ADDITION_COUNT} unmatched, got ${report.unmatched.length}`);
+});
+
+test('applyBusinessTransformExtras20260525 does not mutate the input tasks array', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const lenBefore = tasks.length;
+    applyBusinessTransformExtras20260525(projects, tasks);
+    eq(tasks.length, lenBefore);
+});
+
+test('every added task carries the brad+diana joint assignee default', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { tasks: outTasks } = applyBusinessTransformExtras20260525(projects, tasks);
+    const added = outTasks.slice(tasks.length);
+    truthy(added.every(t => Array.isArray(t.assignees) && t.assignees.length === 2),
+        'every added task has 2 assignees');
+    truthy(added.every(t => t.assignees.includes('brad') && t.assignees.includes('diana')),
+        'every added task is assigned to both brad and diana');
 });
 
 // ── runner ──

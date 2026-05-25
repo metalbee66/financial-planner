@@ -59,6 +59,7 @@ test.beforeEach(async ({ page }) => {
             business_transform_seeded: true,
             pm_dlbooks_cleaned: true,
             business_transform_update_20260525_applied: true,
+            business_transform_extras_20260525_applied: true,
         }));
     });
     await page.reload();
@@ -3200,6 +3201,117 @@ test.describe('v2.0.3 — Business transform status update 2026-05-25', () => {
         // Update did not re-fire — the user's manual revert is preserved.
         expect(after.status).toBe('in-progress');
         expect(after.completedAt).toBeNull();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('v2.0.5 — Business transform extras 2026-05-25', () => {
+
+    // Drives the same seed→extras chain the v2.0.3 helper uses: clears the
+    // seed + extras flags so both runners fire on the next reload.
+    async function seedAndApplyExtras(page) {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                pm_dlbooks_cleaned: true,
+                business_transform_seeded: false,
+                business_transform_update_20260525_applied: true,
+                business_transform_extras_20260525_applied: false,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+    }
+
+    test('Document Services platform top-level task lands under Stream 4 as done', async ({ page }) => {
+        await seedAndApplyExtras(page);
+        const docServices = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            const stream4 = data.items.find(p => p.name === 'Stream 4 — AI agents & automation');
+            return data.tasks.find(t =>
+                t.projectId === stream4.id &&
+                /Document Services platform/.test(t.name) &&
+                !t.parentTaskId
+            );
+        });
+        expect(docServices).toBeTruthy();
+        expect(docServices.status).toBe('done');
+        expect(docServices.completedAt).toBe('2026-05-22T00:00:00.000Z');
+    });
+
+    test('Document Services has 7 children including a blocked Phase 1.5 row', async ({ page }) => {
+        await seedAndApplyExtras(page);
+        const children = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            const stream4 = data.items.find(p => p.name === 'Stream 4 — AI agents & automation');
+            const docServices = data.tasks.find(t =>
+                t.projectId === stream4.id &&
+                /Document Services platform/.test(t.name) &&
+                !t.parentTaskId
+            );
+            return data.tasks.filter(t => t.parentTaskId === docServices.id);
+        });
+        expect(children).toHaveLength(7);
+        const phase15 = children.find(c => /Phase 1\.5/.test(c.name));
+        expect(phase15).toBeTruthy();
+        expect(phase15.status).toBe('blocked');
+        expect(phase15.completedAt).toBeNull();
+    });
+
+    test('Public-surface security hardening is a child of the Phase 1 Auth task', async ({ page }) => {
+        await seedAndApplyExtras(page);
+        const security = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            const stream1 = data.items.find(p => p.name === 'Stream 1 — CRM build');
+            const auth = data.tasks.find(t =>
+                t.projectId === stream1.id &&
+                t.name === 'Phase 1: Auth module' &&
+                !t.parentTaskId
+            );
+            return data.tasks.find(t =>
+                t.parentTaskId === auth.id &&
+                /Public-surface security hardening/.test(t.name)
+            );
+        });
+        expect(security).toBeTruthy();
+        expect(security.status).toBe('done');
+        expect(security.completedAt).toBe('2026-05-21T00:00:00.000Z');
+    });
+
+    test('Header nav IA refactor Phase 2 is a top-level not-started task in Stream 1', async ({ page }) => {
+        await seedAndApplyExtras(page);
+        const navPhase2 = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            const stream1 = data.items.find(p => p.name === 'Stream 1 — CRM build');
+            return data.tasks.find(t =>
+                t.projectId === stream1.id &&
+                /Header nav IA refactor — Phase 2/.test(t.name) &&
+                !t.parentTaskId
+            );
+        });
+        expect(navPhase2).toBeTruthy();
+        expect(navPhase2.status).toBe('not-started');
+        expect(navPhase2.completedAt).toBeNull();
+    });
+
+    test('extras runner is idempotent — reloading after the flag is set does not re-add', async ({ page }) => {
+        await seedAndApplyExtras(page);
+        // Count Document Services parents immediately after the runner fired.
+        const before = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            return data.tasks.filter(t => /Document Services platform/.test(t.name) && !t.parentTaskId).length;
+        });
+        expect(before).toBe(1);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        const after = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            return data.tasks.filter(t => /Document Services platform/.test(t.name) && !t.parentTaskId).length;
+        });
+        expect(after).toBe(1);
     });
 });
 

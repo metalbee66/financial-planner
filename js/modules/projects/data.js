@@ -37,6 +37,12 @@ export const DEFAULT_PROJECTS = {
     // v2.0.3 idempotency flag — set true after applying the 2026-05-25
     // business-transform status update from the off-repo agent's report.
     business_transform_update_20260525_applied: false,
+    // v2.0.5 idempotency flag — set true after appending the three
+    // "Recommended additions" from the 2026-05-25 report (Document
+    // Services platform, public-surface security hardening, header-nav
+    // IA refactor Phase 2). Only runs when business_transform_seeded is
+    // already true.
+    business_transform_extras_20260525_applied: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
@@ -1468,6 +1474,7 @@ export function loadProjects() {
             business_transform_seeded: parsed.business_transform_seeded === true,
             pm_dlbooks_cleaned: parsed.pm_dlbooks_cleaned === true,
             business_transform_update_20260525_applied: parsed.business_transform_update_20260525_applied === true,
+            business_transform_extras_20260525_applied: parsed.business_transform_extras_20260525_applied === true,
         };
     } catch (e) {
         console.error('loadProjects parse error:', e);

@@ -38,6 +38,7 @@ import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/p
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
 import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './modules/projects/seed-businesstransform.js';
 import { applyBusinessTransformUpdate20260525 } from './modules/projects/update-businesstransform-20260525.js';
+import { applyBusinessTransformExtras20260525 } from './modules/projects/add-businesstransform-extras-20260525.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
@@ -74,6 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 maybeRunPMMigration();
                 maybeRunBusinessTransformSeed();
                 maybeApplyBusinessTransformUpdate20260525();
+                maybeAddBusinessTransformExtras20260525();
                 maybeCleanupLegacyPMData();
                 bootModules();
                 setupRealtimeListeners();
@@ -90,6 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         maybeRunPMMigration();
         maybeRunBusinessTransformSeed();
         maybeApplyBusinessTransformUpdate20260525();
+        maybeAddBusinessTransformExtras20260525();
         maybeCleanupLegacyPMData();
         bootModules();
     }
@@ -157,6 +160,33 @@ function maybeApplyBusinessTransformUpdate20260525() {
         );
     }
     console.log(`Business transform update 2026-05-25: touched ${report.touched} task(s).`);
+}
+
+/**
+ * v2.0.5 one-shot append: add the three "Recommended additions" from the
+ * 2026-05-25 off-repo agent report (Document Services platform + 7
+ * children, public-surface security hardening as a Phase 1 Auth child,
+ * header-nav IA refactor Phase 2). Only runs once the v2.0.1 seed is
+ * present. Idempotent via `business_transform_extras_20260525_applied`.
+ */
+function maybeAddBusinessTransformExtras20260525() {
+    if (!state.projectsData) return;
+    if (!state.projectsData.business_transform_seeded) return;
+    if (state.projectsData.business_transform_extras_20260525_applied) return;
+    const { tasks, report } = applyBusinessTransformExtras20260525(
+        state.projectsData.items,
+        state.projectsData.tasks
+    );
+    state.projectsData.tasks = tasks;
+    state.projectsData.business_transform_extras_20260525_applied = true;
+    fbSave(PROJECTS_KEY, state.projectsData);
+    if (report.unmatched.length > 0) {
+        console.warn(
+            `Business transform extras 2026-05-25: could not match ${report.unmatched.length} row(s):`,
+            report.unmatched
+        );
+    }
+    console.log(`Business transform extras 2026-05-25: added ${report.addedCount} task(s).`);
 }
 
 /**
