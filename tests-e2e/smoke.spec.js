@@ -58,6 +58,7 @@ test.beforeEach(async ({ page }) => {
             pm_dlbooks_migrated_to_projects: true,
             business_transform_seeded: true,
             pm_dlbooks_cleaned: true,
+            business_transform_update_20260525_applied: true,
         }));
     });
     await page.reload();
@@ -3131,6 +3132,74 @@ test.describe('v2.0.2 — Legacy pm_dlbooks cleanup', () => {
             !/firebase/i.test(e) && !/net::ERR_FAILED/i.test(e) && !/asynchronous response/i.test(e)
         );
         expect(realErrors).toEqual([]);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('v2.0.3 — Business transform status update 2026-05-25', () => {
+
+    // The update only runs when (a) the seed is present and (b) the update
+    // flag is false. This helper drives both: re-seeds the projects bucket
+    // by flipping the seed flag off, then reloads twice to chain seed→update
+    // through the boot sequence.
+    async function seedAndApplyUpdate(page) {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                pm_dlbooks_cleaned: true,
+                // Seed flag off so the seed runner fires; update flag off
+                // so the update runner fires in the SAME boot.
+                business_transform_seeded: false,
+                business_transform_update_20260525_applied: false,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+    }
+
+    test('after seed + update, Phase 1 auth task is done with the expected completedAt', async ({ page }) => {
+        await seedAndApplyUpdate(page);
+        const tasksState = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            return data.tasks.find(t => t.name === 'Phase 1: Auth module');
+        });
+        expect(tasksState.status).toBe('done');
+        expect(tasksState.completedAt).toBe('2026-04-18T00:00:00.000Z');
+    });
+
+    test('Phase 3 parent task is in-progress with null completedAt', async ({ page }) => {
+        await seedAndApplyUpdate(page);
+        const phase3 = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            return data.tasks.find(t => t.name === 'Phase 3: Quote builder + PDF + pipeline reports');
+        });
+        expect(phase3.status).toBe('in-progress');
+        expect(phase3.completedAt).toBeNull();
+    });
+
+    test('update is idempotent — reloading after the flag is set does not re-patch', async ({ page }) => {
+        await seedAndApplyUpdate(page);
+        // Manually flip the Phase 1 auth task back to in-progress to simulate
+        // a user reverting it; the update must NOT re-overwrite it on reload.
+        await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            const t = data.tasks.find(x => x.name === 'Phase 1: Auth module');
+            t.status = 'in-progress';
+            t.completedAt = null;
+            localStorage.setItem('projects', JSON.stringify(data));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        const after = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem('projects'));
+            return data.tasks.find(t => t.name === 'Phase 1: Auth module');
+        });
+        // Update did not re-fire — the user's manual revert is preserved.
+        expect(after.status).toBe('in-progress');
+        expect(after.completedAt).toBeNull();
     });
 });
 

@@ -34,6 +34,9 @@ export const DEFAULT_PROJECTS = {
     // legacy `pm_dlbooks` Firebase + localStorage key. Only runs when the
     // Phase 8.1 migration has already completed (flag above is true).
     pm_dlbooks_cleaned: false,
+    // v2.0.3 idempotency flag — set true after applying the 2026-05-25
+    // business-transform status update from the off-repo agent's report.
+    business_transform_update_20260525_applied: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
@@ -1464,6 +1467,7 @@ export function loadProjects() {
             pm_dlbooks_migrated_to_projects: parsed.pm_dlbooks_migrated_to_projects === true,
             business_transform_seeded: parsed.business_transform_seeded === true,
             pm_dlbooks_cleaned: parsed.pm_dlbooks_cleaned === true,
+            business_transform_update_20260525_applied: parsed.business_transform_update_20260525_applied === true,
         };
     } catch (e) {
         console.error('loadProjects parse error:', e);

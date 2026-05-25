@@ -279,6 +279,7 @@ export function setupRealtimeListeners() {
                 pm_dlbooks_migrated_to_projects: data.pm_dlbooks_migrated_to_projects === true,
                 business_transform_seeded: data.business_transform_seeded === true,
                 pm_dlbooks_cleaned: data.pm_dlbooks_cleaned === true,
+                business_transform_update_20260525_applied: data.business_transform_update_20260525_applied === true,
             };
             if (renderProjectsTab) renderProjectsTab();
         }
@@ -335,6 +336,7 @@ export async function initialSync() {
                 pm_dlbooks_migrated_to_projects: fbProjects.pm_dlbooks_migrated_to_projects === true,
                 business_transform_seeded: fbProjects.business_transform_seeded === true,
                 pm_dlbooks_cleaned: fbProjects.pm_dlbooks_cleaned === true,
+                business_transform_update_20260525_applied: fbProjects.business_transform_update_20260525_applied === true,
             };
         }
 

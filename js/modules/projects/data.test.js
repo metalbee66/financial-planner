@@ -131,6 +131,11 @@ import {
 } from './local-ai.js';
 import { migratePMDLBooksToProjects } from './migrate-pm.js';
 import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './seed-businesstransform.js';
+import {
+    applyBusinessTransformUpdate20260525,
+    TOP_LEVEL_PATCH_COUNT,
+    CHILD_PATCH_COUNT,
+} from './update-businesstransform-20260525.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -3880,6 +3885,54 @@ test('full seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED) produces 10 pr
     // Every task belongs to one of the created projects.
     const projectIds = new Set(result.projects.map(p => p.id));
     truthy(result.tasks.every(t => projectIds.has(t.projectId)), 'every task has a valid projectId');
+});
+
+// ── Business transformation update — 2026-05-25 (v2.0.3) ──
+
+test('applyBusinessTransformUpdate20260525 patches the seeded tasks by (project, name)', () => {
+    // Build a minimal seeded dataset that mirrors the seed-produced shape.
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { items, tasks: outTasks, report } = applyBusinessTransformUpdate20260525(projects, tasks);
+    // The full seed has every row the update references — zero unmatched.
+    eq(report.unmatched, []);
+    truthy(report.touched > 0, 'at least one task touched');
+    eq(report.touched, TOP_LEVEL_PATCH_COUNT + CHILD_PATCH_COUNT);
+    // The Phase 1 Auth task is now done with the expected completedAt.
+    const stream1 = items.find(p => p.name === 'Stream 1 — CRM build');
+    const auth = outTasks.find(t => t.projectId === stream1.id && t.name === 'Phase 1: Auth module');
+    eq(auth.status, 'done');
+    eq(auth.completedAt, '2026-04-18T00:00:00.000Z');
+    // The Phase 3 quote builder task is in-progress (no completedAt).
+    const phase3 = outTasks.find(t => t.projectId === stream1.id && t.name === 'Phase 3: Quote builder + PDF + pipeline reports');
+    eq(phase3.status, 'in-progress');
+    eq(phase3.completedAt, null);
+});
+
+test('applyBusinessTransformUpdate20260525 reports unmatched rows without crashing', () => {
+    // Empty inputs → everything unmatched, zero touched.
+    const { report } = applyBusinessTransformUpdate20260525([], []);
+    eq(report.touched, 0);
+    truthy(report.unmatched.length >= TOP_LEVEL_PATCH_COUNT,
+        `expected ≥${TOP_LEVEL_PATCH_COUNT} unmatched, got ${report.unmatched.length}`);
+});
+
+test('applyBusinessTransformUpdate20260525 child patch matches the Phase 3 subtask via parent name', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { tasks: outTasks } = applyBusinessTransformUpdate20260525(projects, tasks);
+    const stream1 = projects.find(p => p.name === 'Stream 1 — CRM build');
+    const phase3 = outTasks.find(t => t.projectId === stream1.id && t.name === 'Phase 3: Quote builder + PDF + pipeline reports');
+    const quoteBuilderUi = outTasks.find(t => t.parentTaskId === phase3.id && /Quote builder UI/.test(t.name));
+    truthy(quoteBuilderUi, 'Quote builder UI subtask exists');
+    eq(quoteBuilderUi.status, 'done');
+});
+
+test('applyBusinessTransformUpdate20260525 only writes completedAt for done transitions', () => {
+    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
+    const { tasks: outTasks } = applyBusinessTransformUpdate20260525(projects, tasks);
+    const stream4 = projects.find(p => p.name === 'Stream 4 — AI agents & automation');
+    const xero = outTasks.find(t => t.projectId === stream4.id && t.name === 'Agent: Xero health sync');
+    eq(xero.status, 'in-progress');
+    eq(xero.completedAt, null);
 });
 
 // ── runner ──

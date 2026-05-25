@@ -1,5 +1,24 @@
 # Family Planner — Changelog
 
+## v2.0.3 — 2026-05-25 — Business-transform status update (2026-05-25)
+
+Content-only patch: applies the off-repo agent's progress report from `family-planner-status-update-2026-05-25.md` to the v2.0.1 seeded SenseAi project tree. Only rows with concrete repo evidence are patched; "UNCHANGED — needs Brad confirmation" rows are left alone for verbal review.
+
+**Patches landed (16 total = 15 top-level + 1 child):**
+
+- Stream 1 — CRM build: Phase 1 four tasks done (2026-04-18), Phase 2 two tasks done (2026-04-22 + 2026-05-14), Phase 3 in-progress; "Quote builder UI" child task done.
+- Stream 2 — Tech infrastructure: DNS-to-Cloudflare done (2026-05-14), SEi14 Geekom setup done (2026-05-14). M365 / S12 Pro / SharePoint untouched — off-repo, need Brad's verbal confirmation.
+- Stream 4 — AI agents & automation: n8n setup done (2026-05-14), Xero health sync + health/device monitoring in-progress. Five other agents untouched (off-repo / not built yet).
+- Milestones: "CRM MVP live" done (2026-04-18), "Tech infrastructure complete" in-progress, "SEi14 live" done (2026-05-14) — two weeks ahead of the seed's 2026-05-31 deadline, "AI agents operational" in-progress.
+
+**Pipeline:** new `update-businesstransform-20260525.js` exposes `applyBusinessTransformUpdate20260525(items, tasks)` returning `{items, tasks, report}` so the runner can console-warn any rename-drift unmatched rows. Idempotency flag `business_transform_update_20260525_applied` lives on the projects root, threaded through `DEFAULT_PROJECTS`, `loadProjects`, the firebase-sync listener, `initialSync`, and the E2E `beforeEach`. Runner `maybeApplyBusinessTransformUpdate20260525` in `shell.js` is gated on `business_transform_seeded === true` so it never fires on a device that hasn't seeded yet.
+
+**Idempotency caveat:** if a user manually reverts a status after the update applies, the runner does NOT re-overwrite on subsequent loads — the flag is per-projects-root, not per-task. (Verified by the `update is idempotent` E2E test.)
+
+**Tests:** +4 unit cases (~364 total), +3 Playwright tests (166 E2E total) under the `v2.0.3 — Business transform status update 2026-05-25` describe.
+
+---
+
 ## v2.0.2 — 2026-05-25 — Legacy `pm_dlbooks` cleanup
 
 Removes the legacy `pm_dlbooks` Firebase + localStorage key now that Brad has signed off on the Phase 8.1 migration and Task 8.2 retired the consuming tab. The data has been preserved as migrated projects in the Projects module since v2.0.0; v2.0.2 just deletes the original source.

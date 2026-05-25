@@ -37,6 +37,7 @@ import { loadProjects, PROJECTS_KEY } from './modules/projects/data.js';
 import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/projects/index.js';
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
 import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './modules/projects/seed-businesstransform.js';
+import { applyBusinessTransformUpdate20260525 } from './modules/projects/update-businesstransform-20260525.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
@@ -72,6 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 await initialSync();
                 maybeRunPMMigration();
                 maybeRunBusinessTransformSeed();
+                maybeApplyBusinessTransformUpdate20260525();
                 maybeCleanupLegacyPMData();
                 bootModules();
                 setupRealtimeListeners();
@@ -87,6 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         showApp();
         maybeRunPMMigration();
         maybeRunBusinessTransformSeed();
+        maybeApplyBusinessTransformUpdate20260525();
         maybeCleanupLegacyPMData();
         bootModules();
     }
@@ -129,6 +132,31 @@ function maybeRunBusinessTransformSeed() {
     if (projects.length > 0) {
         console.log(`Business transform seed: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
     }
+}
+
+/**
+ * v2.0.3 one-shot: apply the 2026-05-25 status update from the off-repo
+ * agent's progress report. Only runs when the v2.0.1 seed has already
+ * landed on this projects bucket (otherwise there's nothing to update).
+ * Idempotent via `business_transform_update_20260525_applied`.
+ */
+function maybeApplyBusinessTransformUpdate20260525() {
+    if (!state.projectsData) return;
+    if (!state.projectsData.business_transform_seeded) return;
+    if (state.projectsData.business_transform_update_20260525_applied) return;
+    const { report } = applyBusinessTransformUpdate20260525(
+        state.projectsData.items,
+        state.projectsData.tasks
+    );
+    state.projectsData.business_transform_update_20260525_applied = true;
+    fbSave(PROJECTS_KEY, state.projectsData);
+    if (report.unmatched.length > 0) {
+        console.warn(
+            `Business transform update 2026-05-25: could not match ${report.unmatched.length} row(s):`,
+            report.unmatched
+        );
+    }
+    console.log(`Business transform update 2026-05-25: touched ${report.touched} task(s).`);
 }
 
 /**
