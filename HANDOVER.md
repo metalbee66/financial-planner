@@ -20,7 +20,7 @@
 
 Worth carrying forward — same pattern will apply to any future content seed, data migration, or bulk update.
 
-**One-shot runners.** v2.0.1 / v2.0.2 / v2.0.3 each shipped a one-shot function in `shell.js` (`maybeRunBusinessTransformSeed`, `maybeCleanupLegacyPMData`, `maybeApplyBusinessTransformUpdate20260525`) that fires once per device per release, gated by a flag on the projects root. Phase 8.1's `maybeRunPMMigration` is the original of the pattern. To add a fifth: (1) drop a new pure module under `js/modules/projects/`, (2) add a `*_applied` (or `_seeded` / `_cleaned`) flag to `DEFAULT_PROJECTS` in `data.js`, (3) backfill it in `loadProjects`, (4) mirror it through the realtime listener and `initialSync` in `firebase-sync.js`, (5) wire the runner in `shell.js` after the existing runners in the runner chain, (6) add `<flag>: true` to the E2E `beforeEach` so existing tests don't trip the new auto-runner. The runner chain order matters — `maybeApplyBusinessTransformUpdate20260525` is explicitly gated on `business_transform_seeded === true` so it never fires on a device that hasn't seeded; ordering keeps prereqs deterministic.
+**One-shot runners.** v2.0.1 / v2.0.2 / v2.0.3 / v2.0.5 each shipped a one-shot function in `shell.js` (`maybeRunBusinessTransformSeed`, `maybeCleanupLegacyPMData`, `maybeApplyBusinessTransformUpdate20260525`, `maybeAddBusinessTransformExtras20260525`) that fires once per device per release, gated by a flag on the projects root. Phase 8.1's `maybeRunPMMigration` is the original of the pattern. To add a sixth: (1) drop a new pure module under `js/modules/projects/`, (2) add a `*_applied` (or `_seeded` / `_cleaned`) flag to `DEFAULT_PROJECTS` in `data.js`, (3) backfill it in `loadProjects`, (4) mirror it through the realtime listener and `initialSync` in `firebase-sync.js`, (5) wire the runner in `shell.js` after the existing runners in the runner chain **in BOTH branches** (the Firebase-success path AND the local-only path — the v2.0.5 first-pass missed the local-only branch and all 5 new E2E tests failed; `replace_all` doesn't help because the two branches have different indentation), (6) add `<flag>: true` to the E2E `beforeEach` so existing tests don't trip the new auto-runner. The runner chain order matters — `maybeApplyBusinessTransformUpdate20260525` and `maybeAddBusinessTransformExtras20260525` are both explicitly gated on `business_transform_seeded === true` so they never fire on a device that hasn't seeded; ordering keeps prereqs deterministic.
 
 **Match by name, not source ID.** The seed file generates fresh task IDs via `makeTaskId()`. The `id: 's1_t1'` strings in the source JSON are documentation pointers — they are NOT persisted as `task.id`. v2.0.3's update module matches by `(projectName, taskName)` for top-level patches and `(projectName, parentTaskName, taskName)` for child patches. Future patches should do the same. If a user has manually renamed a project or task in the UI, the patch will fail the match and show up in `report.unmatched` (console.warn) — not silently rewrite the wrong row.
 
@@ -135,14 +135,15 @@ app/
 │       │   ├── migrate-pm.js                       Phase 8.1: one-shot pure mapper from legacy `pm_dlbooks` shape → Projects shape
 │       │   ├── seed-businesstransform.js           v2.0.1: literal SenseAi project payload + pure mapper; produces 10 projects + ~280 tasks on first boot
 │       │   ├── update-businesstransform-20260525.js  v2.0.3: literal patch list + name-based matcher for the 2026-05-25 progress update
-│       │   └── data.test.js                        Unit tests for everything above (run via /tests.html, ~364 cases)
+│       │   ├── add-businesstransform-extras-20260525.js  v2.0.5: append-only helper for the three "Recommended additions" from the 2026-05-25 report — Doc Services platform (+7 children incl. blocked Phase 1.5), public-surface security hardening child of Phase 1 Auth, header-nav Phase 2 stub
+│       │   └── data.test.js                        Unit tests for everything above (run via /tests.html, ~372 cases)
 │       └── pm-legacy/
 │           ├── index.js                            Wrapper for pm.js — retired from the module registry in Task 8.2 but kept on disk
 │           └── pm.js                               DLBooks PM source — migrated into projects in Phase 8.1, deleted from Firebase in v2.0.2; loadPM stays imported so the migration runner can source pmData on a fresh device
 ├── tests-e2e/
-│   └── smoke.spec.js                   Playwright E2E smoke tests (166 tests covering Phase 1 → Phase 8 + v2.0.1 / v2.0.2 / v2.0.3 + unit-suite driver)
-├── playwright.config.js                Chromium-only, reuses dev server on :8080
-├── package.json                        Dev-only deps (Playwright). The deployed site stays vanilla JS.
+│   └── smoke.spec.js                   Playwright E2E smoke tests (171 tests covering Phase 1 → Phase 8 + v2.0.1 / v2.0.2 / v2.0.3 / v2.0.5 + unit-suite driver)
+├── playwright.config.js                Chromium-only, fullyParallel + 4 workers (since 2026-05-25), reuses dev server on :8080
+├── package.json                        Dev-only deps (Playwright). The deployed site stays vanilla JS. Scripts: `test:fast` (9s — unit driver + Phase 0 shell), `test:e2e` (4 min — full 171).
 ├── package-lock.json                   npm lockfile
 ├── server.py                           Local dev server (`python server.py`) — ThreadingHTTPServer, respects FAMILY_PLANNER_NO_BROWSER
 ├── tests.html                          In-browser unit-test runner for data.test.js
@@ -310,20 +311,22 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `master`. **v2.0.4 is the latest tag** (auth hotfix on top of v2.0.0 + 3 content patches). All five tags pushed to origin: `v2.0.0` `v2.0.1` `v2.0.2` `v2.0.3` `v2.0.4`. Live site: https://metalbee66.github.io/financial-planner/.
-- **Latest verified state on the live site (2026-05-25):** Brad signed in OK after the v2.0.4 popup revert. All v2.0.1 → v2.0.3 one-shot runners have fired on his device — projects bucket has the seeded SenseAi content with the 2026-05-25 status patches applied, and `pm_dlbooks` Firebase key is gone.
+- **Active branch:** `master`. **v2.0.5 is the latest tag** (recommended additions on top of v2.0.0 + 3 prior content patches + auth hotfix). All six tags pushed to origin: `v2.0.0` `v2.0.1` `v2.0.2` `v2.0.3` `v2.0.4` `v2.0.5`. Live site: https://metalbee66.github.io/financial-planner/.
+- **Latest verified state on the live site (2026-05-25):** Brad signed in OK after the v2.0.4 popup revert. v2.0.1 → v2.0.3 one-shot runners had already fired by then; v2.0.5 will fire on his next page load (deploys via GitHub Pages ~30s after push, runner appends 10 new tasks to the seeded projects bucket on first reload, idempotency flag flips true).
 - **v2.1 backlog (queued, no work in progress):**
   - **n8n / Outlook delivery layer** — two workflow builds are fully specced in [tasks/user-actions.md](tasks/user-actions.md): the 60-second instant email-queue drainer (Task 6.3) and the daily 08:00 digest sender (Task 6.4). Both block on the Pre-Phase-6 manual ops (n8n container on SEi14 Geekom, M365 Outlook credential, Firebase service-account Bearer, RTDB rules) — none of which are ticked yet. Workflow node graphs + the concurrent-write caveat are documented so an agent can author them via the n8n MCP tools once the Tailscale IP + creds are available.
   - **Checkpoint G** — two-user end-to-end notification flow + daily digest tested live. Blocks on the same n8n infra.
   - **Manual two-tab Firebase smoke** still owed from the 2026-05-21 polish-round close-out.
   - **Business-transform progress updates** — the off-repo agent will likely produce more progress reports (next one likely 2026-06-XX). Each one ships as its own `update-businesstransform-YYYYMMDD.js` + new flag + runner, following the v2.0.3 pattern. The "UNCHANGED — needs Brad confirmation" rows from 2026-05-25 are still in `not-started` waiting for Brad's verbal review.
-  - **Recommended additions from the 2026-05-25 update report** (deliberately skipped in v2.0.3 because the doc flagged them as "Optional"): add a Document Services platform task under Stream 4 (shipped 2026-05-20, Reed first instance smoked 2026-05-22), the public-surface security hardening sub-item, and the header-nav IA refactor Phase 2. Surfaced for the user to opt in to via a future v2.0.x patch if desired.
 - **Resolved this session that was on the v2.1 backlog:**
   - ~~Asana → Projects importer~~ — shipped as v2.0.1 with the literal JSON Brad recovered instead of building a generic fetcher.
+  - ~~Recommended additions from the 2026-05-25 update report~~ — shipped as v2.0.5 (Document Services platform + 7 children, public-surface security hardening child of Phase 1 Auth, header-nav IA refactor Phase 2 stub).
 - **Earlier outstanding items:** Polish round 9-of-9 done (commits up to `8b25366`); PB.4 timeline dep arrows shelved.
 - **Deploy-pipeline incident from 2026-05-15** still relevant: the repo was silently flipped private at some point, disabling Pages from 2026-04-11. Re-enabled by flipping back to public + `POST /repos/.../pages`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
 - **Other handover docs:** [tasks/BUSINESS-TRANSFORM-HANDOVER.md](tasks/BUSINESS-TRANSFORM-HANDOVER.md) orients a different Claude session to the SenseAi project *contents* (10 projects + ~280 tasks) for verbal progress walkthroughs with Brad. That doc is self-contained — readable without repo access — and is separate from this one (which is about the planner's code).
 - **v2.0.x patch commits on master (newest first):**
+  - `1c46c40` — Test infra: parallel workers + tiered `test:fast` script (no tag — infra-only)
+  - `ba873ea` — v2.0.5 Business-transform extras 2026-05-25 (recommended additions)
   - `fbc35c0` — v2.0.4 Auth hotfix: revert sign-in to popup
   - `21260f2` — v2.0.3 Business-transform status update 2026-05-25
   - `11d46cd` — v2.0.2 Delete legacy pm_dlbooks data + business-transform handover doc
