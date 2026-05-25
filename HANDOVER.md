@@ -301,7 +301,7 @@ These predate the v2.0.0 restructure and are still pending:
 2. **Planner charges** — expandable charge entries per planner line (like revisions in budget), populating YTD actuals from those charges
 3. **CSV parsers** for HSBC, ANZ, Westpac, Bankwest statement formats (NAB only currently)
 4. **Bank API** — placeholder exists, no integration yet
-5. **GL mappings Firebase sync** — was localStorage-only; check whether Phase-0 ES-module conversion incidentally fixed this (`saveGlMappings` now calls `fbSave`)
+5. ~~**GL mappings Firebase sync**~~ — **done 2026-05-25** (`30ece9d`). Phase 0 had fixed the write path; the load side was still localStorage-only. Now `initialSync` loads `gl_mappings`, `setupRealtimeListeners` has a listener, and the empty-Firebase branch pushes the local map on first sign-in. Cross-device sync works; a `renderImportTab` hook isn't wired so an open Import sub-tab won't live-refresh on a remote change (only Brad imports, non-issue in practice).
 6. **Contribution auto-calc** — Brad/Diana Regular marked `autoCalc:true` but not yet recalculated when outgoings change
 7. **Mobile polish** — responsive breakpoints exist but could be refined
 
