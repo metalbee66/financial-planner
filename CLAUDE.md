@@ -18,7 +18,11 @@
 
 ## Testing
 - **Data-layer unit tests**: `data.test.js` files run in the browser via `/tests.html`. Pure functions only.
-- **E2E smoke tests** (Playwright, dev-only): `npm run test:e2e` from `app/`. Covers Phase 1 + 2.1 acceptance criteria; ~80s runtime. Firebase is blocked at the network layer so tests run hermetically against localStorage. Add a new block in `tests-e2e/smoke.spec.js` for each phase as it lands.
-- **Manual smoke test still required for**: real Firebase round-trip across tabs, two-user concurrent editing, visual layout sanity. Everything else should be automated in `smoke.spec.js`.
-- Run `npm run test:e2e` before committing any UI change. If a test fails, fix the code or update the test — do not commit red.
+- **E2E smoke tests** (Playwright, dev-only): 171 tests covering every phase + v2.0.x patches. Firebase is blocked at the network layer so tests run hermetically against localStorage. `fullyParallel: true` + `workers: 4` since 2026-05-25 — each test gets its own browser context so localStorage is already isolated. Add a new describe in `tests-e2e/smoke.spec.js` for each phase / patch as it lands.
+- **Manual smoke test still required for**: real Firebase round-trip across tabs, two-user concurrent editing, visual layout sanity.
+- **Three-tier test cadence (use the right one for the situation):**
+  - **Dev iteration** (per change): `npx playwright test --grep "<describe-name>"` — runs only the describe you're touching (~5–40s).
+  - **Pre-commit**: `npm run test:fast` — unit driver + Phase 0 shell regression (~9s). Catches data-layer + boot regressions.
+  - **Pre-tag / pre-push**: `npm run test:e2e` — full 171 tests (~4 min). Required before any commit that touches data shape, runners, or core infra.
+- If a test fails: fix the code or update the test — do not commit red.
 - `node_modules/`, `playwright-report/`, `test-results/` are gitignored. The deployed site does not include them.

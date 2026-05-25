@@ -16,8 +16,12 @@ export default defineConfig({
     testDir: './tests-e2e',
     timeout: 30_000,
     expect: { timeout: 5_000 },
-    fullyParallel: false, // tests share localStorage state per worker; serial keeps blame trivial
-    workers: 1,
+    // Each test gets a fresh browser context (Playwright default), so
+    // localStorage is isolated per test even within a worker. Parallel is
+    // safe; the prior single-worker config was leaving wall-time on the
+    // table (~16 min serial → ~4-5 min on 4 workers).
+    fullyParallel: true,
+    workers: process.env.CI ? 2 : 4,
     reporter: process.env.CI ? 'github' : 'list',
     use: {
         baseURL: 'http://localhost:8080',
