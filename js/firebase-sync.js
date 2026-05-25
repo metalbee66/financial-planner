@@ -89,13 +89,19 @@ export function showApp() {
 }
 
 export async function signInWithGoogle() {
-    // signInWithRedirect (not Popup) avoids the Cross-Origin-Opener-Policy
-    // warnings the Firebase auth iframe used to spam in the console. The page
-    // navigates to Google, then back. The ALLOWED_EMAILS gate lives in shell.js's
-    // onAuthStateChanged listener, which fires on return.
+    // v2.0.4: reverted PB.6's switch to signInWithRedirect — Brad hit a
+    // sign-in loop in production (Google → redirect back → still on login
+    // screen → repeat) because the Firebase compat layer doesn't
+    // auto-consume the redirect result and third-party cookie restrictions
+    // can drop the auth state between hops. Popup is more reliable across
+    // browsers; the Cross-Origin-Opener-Policy warnings PB.6 silenced are
+    // console-only and don't affect functionality. The ALLOWED_EMAILS gate
+    // still lives in shell.js's onAuthStateChanged listener, which fires
+    // when the popup completes.
     const provider = new firebase.auth.GoogleAuthProvider();
     try {
-        await firebaseAuth.signInWithRedirect(provider);
+        const result = await firebaseAuth.signInWithPopup(provider);
+        return result && result.user ? result.user : null;
     } catch (e) {
         console.error('Sign-in error:', e);
         alert('Sign-in failed: ' + e.message);

@@ -1,5 +1,17 @@
 # Family Planner — Changelog
 
+## v2.0.4 — 2026-05-25 — Auth hotfix: revert sign-in to popup
+
+Brad hit a sign-in loop in production: clicking **Sign in with Google** redirected to Google, his account picker showed, he selected his Gmail account, Google redirected back to the app — and the login screen reappeared instead of the Projects tab. Repeats indefinitely.
+
+**Root cause.** PB.6 (2026-05-19, commit `94cbe78`) switched `signInWithGoogle` from `signInWithPopup` to `signInWithRedirect` to silence Cross-Origin-Opener-Policy console warnings. The redirect flow with the Firebase v8 compat layer requires an explicit `firebase.auth().getRedirectResult()` call on app init to consume the post-redirect auth state; without it the user's sign-in is never finalised on the way back, `onAuthStateChanged` sees no user, and the login screen stays mounted. Chrome's tightened third-party cookie behaviour can also drop the in-flight auth state between hops, which makes the failure mode silent and intermittent.
+
+**Fix.** Revert `signInWithGoogle` to `signInWithPopup`. Popup is dramatically more reliable across browsers; the COOP warnings PB.6 silenced are console-only noise that doesn't affect functionality. The ALLOWED_EMAILS gate in `shell.js`'s `onAuthStateChanged` listener is unchanged and still fires when the popup completes.
+
+**Tests:** no test surface — Firebase is blocked at the network layer in the Playwright suite (initFirebase returns false in tests), so signInWithGoogle is never exercised. Bracket-check + manual smoke on the live site after deploy is the verification path.
+
+---
+
 ## v2.0.3 — 2026-05-25 — Business-transform status update (2026-05-25)
 
 Content-only patch: applies the off-repo agent's progress report from `family-planner-status-update-2026-05-25.md` to the v2.0.1 seeded SenseAi project tree. Only rows with concrete repo evidence are patched; "UNCHANGED — needs Brad confirmation" rows are left alone for verbal review.
