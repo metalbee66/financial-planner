@@ -1,6 +1,33 @@
 # Family Planner — Handover Notes
 
-> **State as of 2026-05-24 — v2.0.0 SHIPPED.** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith**. All eight phases are complete: Phase 0 rebrand + ES-modules + module registry, Phase 1 project CRUD, Phase 2 tasks + subtasks, Phase 3 task richness (deps + comments + audit + attachments + milestones), Phase 4 per-project views (List + Timeline + Calendar), Phase 5 cross-project views (Overview + My Tasks + Dashboard + Files), Phase 6 notifications browser-side (bell + prefs + email queue + digest accumulation + admin panel), Phase 7 (celebrations + local AI helpers), Phase 8 (PM DLBooks migration + legacy tab retired). The release was tagged **v2.0.0** at the end of Task 8.3 — see [CHANGELOG.md](CHANGELOG.md) for the full release notes. **Two n8n workflow builds are deferred to v2.1** in [tasks/user-actions.md](tasks/user-actions.md): the instant email-queue drainer (every 60s) and the daily 08:00 digest sender. Both are gated on the SenseAi-shared n8n + M365 Outlook infrastructure on the SEi14 Geekom box. **Checkpoint G (two-user end-to-end notification flow)** therefore blocks on that infra and rolls forward to v2.1. The Playwright E2E harness runs **158 tests** including a `tests.html` driver that executes the in-browser unit suite (**~351 cases**) — single `npm run test:e2e` covers both layers in ~13 min. **`server.py` uses `ThreadingHTTPServer`** which eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake; **a `FAMILY_PLANNER_NO_BROWSER` env var** suppresses the auto-open browser tab during test runs (set automatically by `playwright.config.js`). **Outstanding manual op:** the two-tab Firebase smoke owed from the polish-round close-out (2026-05-21) is still on the v2.1 backlog. **v2.1 work queued:** Asana → Projects importer using the Claude-share URL recorded in user-actions.md (source: a Claude chat the user was locked out of by Asana's subscription gate).
+> **State as of 2026-05-25 — v2.0.0 SHIPPED + four patch releases on top.** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith** across eight phases. v2.0.0 (the modular monolith + Projects module) tagged 2026-05-24. Four content / fix patches followed in 24 hours:
+>
+> - **v2.0.1** — Seeded the SenseAi "Business transformation & scale — SPEC v2.0" project tree (10 projects + ~280 tasks) via `seed-businesstransform.js`. Replaces the deferred Asana importer plan from v2.0.0; the data came from a Claude transcript Brad recovered after Asana subscription-gated him out of the original board.
+> - **v2.0.2** — Deleted the legacy `pm_dlbooks` Firebase + localStorage key now that Brad signed off on the Phase 8.1 migration. Drops the pm_dlbooks load/save from `initialSync`. Also lands `tasks/BUSINESS-TRANSFORM-HANDOVER.md` so a different Claude session can pick up progress on the seeded project content (separate doc from this one — that one's about the planner's *contents*, this one's about the planner's *code*).
+> - **v2.0.3** — Applied an off-repo agent's 2026-05-25 progress report against the v2.0.1 seed: 16 patches (Streams 1/2/4 + 4 milestones) marking what's actually shipped on the SenseAi side. "UNCHANGED — needs Brad confirmation" rows left for verbal review.
+> - **v2.0.4** — Auth hotfix. Brad hit a Google sign-in loop in production. Root cause: PB.6 (2026-05-19) switched `signInWithGoogle` to `signInWithRedirect` to silence COOP warnings, but the Firebase v8 compat layer needs an explicit `getRedirectResult()` call we never added. Reverted to `signInWithPopup`. The COOP console warnings PB.6 fixed are back — they're cosmetic.
+>
+> **Pattern shared across v2.0.1 / v2.0.2 / v2.0.3** — each one is a one-shot runner in `shell.js` gated by a flag on the projects root (`business_transform_seeded`, `pm_dlbooks_cleaned`, `business_transform_update_20260525_applied`). Flags thread through `DEFAULT_PROJECTS` / `loadProjects` / the firebase-sync realtime listener / `initialSync`, so the idempotency survives Firebase round-trips and works across devices. The E2E `beforeEach` pre-sets every flag to `true` so the auto-runners don't pollute existing tests; each release's own describe re-flips the relevant flag.
+>
+> **Test harness:** Playwright E2E now runs **166 tests** (was 154 at v2.0.0) plus a `tests.html` driver that executes the in-browser data-layer unit suite (~364 cases). Single `npm run test:e2e` covers both layers in ~13 min. `server.py` uses `ThreadingHTTPServer` (eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake); `FAMILY_PLANNER_NO_BROWSER` env var suppresses the auto-open browser tab during test runs.
+>
+> **v2.1 work queued in [tasks/user-actions.md](tasks/user-actions.md):** the two n8n workflow builds (instant email-queue drainer every 60s + daily 08:00 digest sender) blocked on the SenseAi-shared n8n + M365 Outlook infra on the SEi14 Geekom box; Checkpoint G two-user end-to-end notification flow; the manual two-tab Firebase smoke owed from the 2026-05-21 polish-round close-out. The Asana importer item is now ticked off via v2.0.1.
+
+---
+
+## v2.0.x architecture notes (one-shot runners + auth)
+
+Worth carrying forward — same pattern will apply to any future content seed, data migration, or bulk update.
+
+**One-shot runners.** v2.0.1 / v2.0.2 / v2.0.3 each shipped a one-shot function in `shell.js` (`maybeRunBusinessTransformSeed`, `maybeCleanupLegacyPMData`, `maybeApplyBusinessTransformUpdate20260525`) that fires once per device per release, gated by a flag on the projects root. Phase 8.1's `maybeRunPMMigration` is the original of the pattern. To add a fifth: (1) drop a new pure module under `js/modules/projects/`, (2) add a `*_applied` (or `_seeded` / `_cleaned`) flag to `DEFAULT_PROJECTS` in `data.js`, (3) backfill it in `loadProjects`, (4) mirror it through the realtime listener and `initialSync` in `firebase-sync.js`, (5) wire the runner in `shell.js` after the existing runners in the runner chain, (6) add `<flag>: true` to the E2E `beforeEach` so existing tests don't trip the new auto-runner. The runner chain order matters — `maybeApplyBusinessTransformUpdate20260525` is explicitly gated on `business_transform_seeded === true` so it never fires on a device that hasn't seeded; ordering keeps prereqs deterministic.
+
+**Match by name, not source ID.** The seed file generates fresh task IDs via `makeTaskId()`. The `id: 's1_t1'` strings in the source JSON are documentation pointers — they are NOT persisted as `task.id`. v2.0.3's update module matches by `(projectName, taskName)` for top-level patches and `(projectName, parentTaskName, taskName)` for child patches. Future patches should do the same. If a user has manually renamed a project or task in the UI, the patch will fail the match and show up in `report.unmatched` (console.warn) — not silently rewrite the wrong row.
+
+**v2.0.3 idempotency caveat.** If a user manually reverts a status after an update has run, the runner does NOT re-overwrite on subsequent loads. The flag is per-projects-root, not per-task — once it's true, the runner short-circuits. Verified by E2E (`update is idempotent` test). Future bulk-update patches inherit this property by design; if you ever want a re-apply path, you'd need a per-task flag.
+
+**Sign-in: `signInWithPopup` (NOT redirect).** v2.0.4 reverted PB.6's redirect switch after a production sign-in loop. The Firebase v8 compat layer doesn't auto-consume `getRedirectResult()` and Chrome's tightening third-party cookie behaviour drops the in-flight auth state between hops. Popup is the right default. The COOP warnings PB.6 silenced are cosmetic — accept them. If you ever revisit the redirect approach, you must call `firebase.auth().getRedirectResult()` explicitly in `initFirebase` (or wrap it as a separate post-init step) to finalise the post-redirect sign-in, AND you need to verify it works across Chrome / Firefox / Safari with strict cookie settings before merging.
+
+**`pm_dlbooks` is gone.** As of v2.0.2 the legacy `pm_dlbooks` Firebase key is deleted on first boot after migration via `deleteLegacyPMData()` in `firebase-sync.js`. The `loadPM` import is still in `shell.js` so the Phase 8.1 migration can source `state.pmData` on the rare fresh-device boot that hasn't migrated yet (gracefully returns DEFAULT_PM, runner short-circuits on the migration flag). The `pm-legacy/` source files stay on disk, archived. `initialSync` no longer loads or pushes `pm_dlbooks` — fresh-Firebase installs don't recreate the key.
 
 ---
 
@@ -99,24 +126,29 @@ app/
 │       │   ├── accounts.js             Accounts render + setupAccountsEditing
 │       │   └── import.js               CSV parse + render + setupImport
 │       ├── projects/
-│       │   ├── index.js                Module entry: list/detail/form views, task panel, subtask + dep + attachment + milestone + bell + admin panel + celebration wiring, activity feed, prefs modal, all event handlers
-│       │   ├── data.js                 Project + task schemas, validation, list mutators, sanitisers, subtask + dep + comment + event + attachment + milestone helpers, load/save (incl. notifications + prefs + digest_pending siblings), email↔participant resolvers, ADMIN_USER_IDS / isAdminUser
-│       │   ├── notifications.js        Notification pipeline: trigger map (6.1) + prefs helpers + read-state (6.2) + email-queue helpers + entry builder (6.3) + digest helpers + summary composer (6.4) + admin queue helpers (6.5)
-│       │   ├── celebrate.js            Celebration animations (7.1): classify, pick variant with anti-repeat, trigger CSS keyframe overlay, opt-in WebAudio chime
-│       │   └── data.test.js            Unit tests for all of the above (run via /tests.html, ~317 cases)
+│       │   ├── index.js                            Module entry: list/detail/form views, task panel, subtask + dep + attachment + milestone + bell + admin panel + celebration wiring, activity feed, prefs modal, all event handlers
+│       │   ├── data.js                             Project + task schemas, validation, list mutators, sanitisers, subtask + dep + comment + event + attachment + milestone helpers, load/save (incl. notifications + prefs + digest_pending siblings + the v2.0.x flag set), email↔participant resolvers, ADMIN_USER_IDS / isAdminUser
+│       │   ├── notifications.js                    Notification pipeline: trigger map (6.1) + prefs helpers + read-state (6.2) + email-queue helpers + entry builder (6.3) + digest helpers + summary composer (6.4) + admin queue helpers (6.5)
+│       │   ├── celebrate.js                        Celebration animations (7.1): classify, pick variant with anti-repeat, trigger CSS keyframe overlay, opt-in WebAudio chime
+│       │   ├── local-ai.js                         Local heuristics (7.2): suggestTaskNames, suggestDueDate, composeDashboardDigest, isProjectStale, smartSortTasks — zero external API calls
+│       │   ├── migrate-pm.js                       Phase 8.1: one-shot pure mapper from legacy `pm_dlbooks` shape → Projects shape
+│       │   ├── seed-businesstransform.js           v2.0.1: literal SenseAi project payload + pure mapper; produces 10 projects + ~280 tasks on first boot
+│       │   ├── update-businesstransform-20260525.js  v2.0.3: literal patch list + name-based matcher for the 2026-05-25 progress update
+│       │   └── data.test.js                        Unit tests for everything above (run via /tests.html, ~364 cases)
 │       └── pm-legacy/
-│           ├── index.js                Wrapper for the existing pm.js
-│           └── pm.js                   DLBooks PM (retired in Phase 8 → migrated into projects)
+│           ├── index.js                            Wrapper for pm.js — retired from the module registry in Task 8.2 but kept on disk
+│           └── pm.js                               DLBooks PM source — migrated into projects in Phase 8.1, deleted from Firebase in v2.0.2; loadPM stays imported so the migration runner can source pmData on a fresh device
 ├── tests-e2e/
-│   └── smoke.spec.js                   Playwright E2E smoke tests (Phase 1 + 2.1 acceptance criteria)
+│   └── smoke.spec.js                   Playwright E2E smoke tests (166 tests covering Phase 1 → Phase 8 + v2.0.1 / v2.0.2 / v2.0.3 + unit-suite driver)
 ├── playwright.config.js                Chromium-only, reuses dev server on :8080
 ├── package.json                        Dev-only deps (Playwright). The deployed site stays vanilla JS.
 ├── package-lock.json                   npm lockfile
-├── server.py                           Local dev server (`python server.py`)
+├── server.py                           Local dev server (`python server.py`) — ThreadingHTTPServer, respects FAMILY_PLANNER_NO_BROWSER
 ├── tests.html                          In-browser unit-test runner for data.test.js
 ├── sample-data/                        Sample CSV for testing import
-├── CHANGELOG.md                        Version history
-├── HANDOVER.md                         This file
+├── CHANGELOG.md                        Version history (v1.0.0 → v2.0.4)
+├── HANDOVER.md                         This file (planner code orientation)
+├── tasks/BUSINESS-TRANSFORM-HANDOVER.md  Sister handover for the seeded SenseAi project *content* (10 projects, ~280 tasks) — for a different Claude session doing verbal progress updates with Brad
 └── CLAUDE.md                           Project rules (deploy, test, code style)
 ```
 
@@ -277,14 +309,25 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 ## Where to pick up
 
-- **Active branch:** `master`. **v2.0.0 SHIPPED — all eight phases done.** Tag `v2.0.0` lives at the end of Task 8.3 with full release notes in [CHANGELOG.md](CHANGELOG.md). Live site: https://metalbee66.github.io/financial-planner/.
+- **Active branch:** `master`. **v2.0.4 is the latest tag** (auth hotfix on top of v2.0.0 + 3 content patches). All five tags pushed to origin: `v2.0.0` `v2.0.1` `v2.0.2` `v2.0.3` `v2.0.4`. Live site: https://metalbee66.github.io/financial-planner/.
+- **Latest verified state on the live site (2026-05-25):** Brad signed in OK after the v2.0.4 popup revert. All v2.0.1 → v2.0.3 one-shot runners have fired on his device — projects bucket has the seeded SenseAi content with the 2026-05-25 status patches applied, and `pm_dlbooks` Firebase key is gone.
 - **v2.1 backlog (queued, no work in progress):**
-  - **Asana → Projects importer** — Brad was locked out of an Asana project by a subscription gate; the original Claude-generated project tree is preserved in a shared chat. Build a one-off `migrate-asana.js` (mirrors `migrate-pm.js`) gated by its own `asana_imported_to_projects` flag. Source URL is recorded in [tasks/user-actions.md → Carried into v2.1 backlog](tasks/user-actions.md).
-  - **n8n / Outlook delivery layer** — two workflow builds are fully specced in user-actions.md: the 60-second instant email-queue drainer (Task 6.3) and the daily 08:00 digest sender (Task 6.4). Both block on the Pre-Phase-6 manual ops (n8n container on SEi14 Geekom, M365 Outlook credential, Firebase service-account Bearer, RTDB rules) — none of which are ticked yet. Workflow node graphs + the concurrent-write caveat are documented so an agent can author them via the n8n MCP tools once the Tailscale IP + creds are available.
+  - **n8n / Outlook delivery layer** — two workflow builds are fully specced in [tasks/user-actions.md](tasks/user-actions.md): the 60-second instant email-queue drainer (Task 6.3) and the daily 08:00 digest sender (Task 6.4). Both block on the Pre-Phase-6 manual ops (n8n container on SEi14 Geekom, M365 Outlook credential, Firebase service-account Bearer, RTDB rules) — none of which are ticked yet. Workflow node graphs + the concurrent-write caveat are documented so an agent can author them via the n8n MCP tools once the Tailscale IP + creds are available.
   - **Checkpoint G** — two-user end-to-end notification flow + daily digest tested live. Blocks on the same n8n infra.
   - **Manual two-tab Firebase smoke** still owed from the 2026-05-21 polish-round close-out.
+  - **Business-transform progress updates** — the off-repo agent will likely produce more progress reports (next one likely 2026-06-XX). Each one ships as its own `update-businesstransform-YYYYMMDD.js` + new flag + runner, following the v2.0.3 pattern. The "UNCHANGED — needs Brad confirmation" rows from 2026-05-25 are still in `not-started` waiting for Brad's verbal review.
+  - **Recommended additions from the 2026-05-25 update report** (deliberately skipped in v2.0.3 because the doc flagged them as "Optional"): add a Document Services platform task under Stream 4 (shipped 2026-05-20, Reed first instance smoked 2026-05-22), the public-surface security hardening sub-item, and the header-nav IA refactor Phase 2. Surfaced for the user to opt in to via a future v2.0.x patch if desired.
+- **Resolved this session that was on the v2.1 backlog:**
+  - ~~Asana → Projects importer~~ — shipped as v2.0.1 with the literal JSON Brad recovered instead of building a generic fetcher.
 - **Earlier outstanding items:** Polish round 9-of-9 done (commits up to `8b25366`); PB.4 timeline dep arrows shelved.
 - **Deploy-pipeline incident from 2026-05-15** still relevant: the repo was silently flipped private at some point, disabling Pages from 2026-04-11. Re-enabled by flipping back to public + `POST /repos/.../pages`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
+- **Other handover docs:** [tasks/BUSINESS-TRANSFORM-HANDOVER.md](tasks/BUSINESS-TRANSFORM-HANDOVER.md) orients a different Claude session to the SenseAi project *contents* (10 projects + ~280 tasks) for verbal progress walkthroughs with Brad. That doc is self-contained — readable without repo access — and is separate from this one (which is about the planner's code).
+- **v2.0.x patch commits on master (newest first):**
+  - `fbc35c0` — v2.0.4 Auth hotfix: revert sign-in to popup
+  - `21260f2` — v2.0.3 Business-transform status update 2026-05-25
+  - `11d46cd` — v2.0.2 Delete legacy pm_dlbooks data + business-transform handover doc
+  - `73595eb` — v2.0.1 SenseAi business-transformation seed
+  - `12ccdc4` — v2.0.0 wrap (Task 8.3)
 - **Phase 8 commits on master (newest first):**
   - `f26b826` — Retire PM DLBooks (legacy) tab (Task 8.2)
   - `d94230f` — PM DLBooks → Projects data migration (Task 8.1)
