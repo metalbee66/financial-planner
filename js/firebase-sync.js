@@ -250,6 +250,12 @@ export function setupRealtimeListeners() {
         }
     });
 
+    fbListen('gl_mappings', (data) => {
+        if (data && typeof data === 'object' && !Array.isArray(data)) {
+            state.glMappings = data;
+        }
+    });
+
     // Task 8.2: pm_dlbooks listener removed — the PM DLBooks (legacy) tab no
     // longer renders, so there's no UI to refresh on remote changes. The data
     // itself is preserved in RTDB; the one-shot Phase 8.1 migration consumes
@@ -316,6 +322,9 @@ export async function initialSync() {
         const fbAcct = await fbLoad('accounts_data');
         if (fbAcct && fbAcct.banking) state.accountsData = fbAcct;
 
+        const fbGl = await fbLoad('gl_mappings');
+        if (fbGl && typeof fbGl === 'object' && !Array.isArray(fbGl)) state.glMappings = fbGl;
+
         // v2.0.2: pm_dlbooks load removed. Brad signed off on the cleanup;
         // the key is deleted on next boot via maybeCleanupLegacyPMData and
         // the migration runner gracefully handles undefined state.pmData.
@@ -377,6 +386,7 @@ export async function initialSync() {
         fbSave('budget_ny27', state.budgetNY);
         fbSave('week_actuals_cy26', state.weekActuals);
         fbSave('accounts_data', state.accountsData);
+        fbSave('gl_mappings', state.glMappings || {});
         fbSave('projects', state.projectsData);
         console.log('Default data pushed to Firebase.');
     }
