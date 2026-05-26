@@ -1,16 +1,17 @@
 # Family Planner — Handover Notes
 
-> **State as of 2026-05-25 — v2.0.0 SHIPPED + five patch releases on top.** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith** across eight phases. v2.0.0 (the modular monolith + Projects module) tagged 2026-05-24. Five content / fix patches followed in 24 hours:
+> **State as of 2026-05-26 — v2.0.0 SHIPPED + five patch releases + v2.1 fully closed + v2.2 architecture-gap fix.** v1.0.0 (Financial Planner) was renamed to **Family Planner** and restructured as a **modular monolith** across eight phases. v2.0.0 (the modular monolith + Projects module) tagged 2026-05-24. Five content / fix patches followed in 24 hours, then v2.1 closed (n8n delivery layer + heartbeats), then v2.2 surfaced and closed one architecture gap from Checkpoint G:
 >
 > - **v2.0.1** — Seeded the SenseAi "Business transformation & scale — SPEC v2.0" project tree (10 projects + ~280 tasks) via `seed-businesstransform.js`. Replaces the deferred Asana importer plan from v2.0.0; the data came from a Claude transcript Brad recovered after Asana subscription-gated him out of the original board.
 > - **v2.0.2** — Deleted the legacy `pm_dlbooks` Firebase + localStorage key now that Brad signed off on the Phase 8.1 migration. Drops the pm_dlbooks load/save from `initialSync`. Also lands `tasks/BUSINESS-TRANSFORM-HANDOVER.md` so a different Claude session can pick up progress on the seeded project content (separate doc from this one — that one's about the planner's *contents*, this one's about the planner's *code*).
 > - **v2.0.3** — Applied an off-repo agent's 2026-05-25 progress report against the v2.0.1 seed: 16 patches (Streams 1/2/4 + 4 milestones) marking what's actually shipped on the SenseAi side. "UNCHANGED — needs Brad confirmation" rows left for verbal review.
 > - **v2.0.4** — Auth hotfix. Brad hit a Google sign-in loop in production. Root cause: PB.6 (2026-05-19) switched `signInWithGoogle` to `signInWithRedirect` to silence COOP warnings, but the Firebase v8 compat layer needs an explicit `getRedirectResult()` call we never added. Reverted to `signInWithPopup`. The COOP console warnings PB.6 fixed are back — they're cosmetic.
 > - **v2.0.5** — Applied the three "Recommended additions" from the 2026-05-25 report that v2.0.3 deliberately skipped (flagged Optional). New `add-businesstransform-extras-20260525.js` appends 10 new tasks: Document Services platform (1 parent + 7 children, incl. blocked Phase 1.5) under Stream 4, public-surface security hardening as a child of Phase 1 Auth under Stream 1, and Header nav IA refactor Phase 2 as a top-level under Stream 1.
+> - **v2.2** (no tag — bundled commits) — Architecture-gap fix surfaced during the 2026-05-26 Checkpoint G smoke: creating a brand-new task **already-assigned** to someone produced no `task_assigned` notification because the new-task submit path bypassed `commitTasksWithTriggers`. Fixed in `ad8a41d` by synthesising an `assignee_changed` trigger at the new-task + subtask submit sites (no audit event written — the initial assignment is implicit at creation). 3 new E2E tests. The originally-paired `dependency_added` notification kind idea was considered and rejected — deps are typically added by the dependent task's own assignee, not worth a noisy bell.
 >
-> **Pattern shared across v2.0.1 / v2.0.2 / v2.0.3 / v2.0.5** — each one is a one-shot runner in `shell.js` gated by a flag on the projects root (`business_transform_seeded`, `pm_dlbooks_cleaned`, `business_transform_update_20260525_applied`, `business_transform_extras_20260525_applied`). Flags thread through `DEFAULT_PROJECTS` / `loadProjects` / the firebase-sync realtime listener / `initialSync`, so the idempotency survives Firebase round-trips and works across devices. The E2E `beforeEach` pre-sets every flag to `true` so the auto-runners don't pollute existing tests; each release's own describe re-flips the relevant flag.
+> **Pattern shared across v2.0.1 / v2.0.2 / v2.0.3 / v2.0.5** — each one is a one-shot runner in `shell.js` gated by a flag on the projects root (`business_transform_seeded`, `pm_dlbooks_cleaned`, `business_transform_update_20260525_applied`, `business_transform_extras_20260525_applied`). Flags thread through `DEFAULT_PROJECTS` / `loadProjects` / the firebase-sync realtime listener / `initialSync`, so the idempotency survives Firebase round-trips and works across devices. The E2E `beforeEach` pre-sets every flag to `true` so the auto-runners don't pollute existing tests; each release's own describe re-flips the relevant flag. (v2.2 doesn't follow this pattern — it's a pure code fix in the submit path, no migration runner needed.)
 >
-> **Test harness:** Playwright E2E now runs **171 tests** (was 154 at v2.0.0) plus a `tests.html` driver that executes the in-browser data-layer unit suite (~372 cases). `fullyParallel: true` + `workers: 4` (config landed 2026-05-25): full suite runs in **~4.3 min** instead of the prior ~16 min serial. Each Playwright test gets its own browser context so localStorage is already isolated — parallel is safe. Two npm scripts: **`npm run test:fast`** (unit driver + Phase 0 shell regression, ~9s — use for every dev iteration) and **`npm run test:e2e`** (full 171, ~4 min — use before commit and before tag/push). For iterating on a single feature, prefer `npx playwright test --grep "<describe-name>"` (e.g. `--grep "v2.0.5"` → 5 tests in 35s). `server.py` uses `ThreadingHTTPServer` (eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake); `FAMILY_PLANNER_NO_BROWSER` env var suppresses the auto-open browser tab during test runs.
+> **Test harness:** Playwright E2E now runs **174 tests** (was 154 at v2.0.0; +3 from the v2.2 new-task notification fix) plus a `tests.html` driver that executes the in-browser data-layer unit suite (~372 cases). `fullyParallel: true` + `workers: 4` (config landed 2026-05-25): full suite runs in **~4.3 min** instead of the prior ~16 min serial. Each Playwright test gets its own browser context so localStorage is already isolated — parallel is safe. Two npm scripts: **`npm run test:fast`** (unit driver + Phase 0 shell regression, ~9s — use for every dev iteration) and **`npm run test:e2e`** (full 174, ~4 min — use before commit and before tag/push). For iterating on a single feature, prefer `npx playwright test --grep "<describe-name>"` (e.g. `--grep "v2.0.5"` → 5 tests in 35s). `server.py` uses `ThreadingHTTPServer` (eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake); `FAMILY_PLANNER_NO_BROWSER` env var suppresses the auto-open browser tab during test runs.
 >
 > **v2.1 delivery layer LIVE (2026-05-26).** Both n8n workflows shipped on the Geekom (`https://n8n.dlbooks.com.au`): `FamilyPlanner: instant email drainer` (every 30 min, was specced as 60s — bumped because per-minute fires spammed the n8n execution log; SLA tolerates the longer delay) and `FamilyPlanner: daily digest sender` (daily 08:00 Australia/Melbourne). Both use the existing `Gmail SMTP (bradsmyrkai)` cred (D3 fallback, sending from `bradsmyrkai@gmail.com` until/if M365 Azure AD App Reg replaces it). Firebase REST auth via the legacy Database Secret as the n8n `Family Planner - Firebase RTDB` Query Auth credential — bypasses RTDB rules so no rules update needed. **Checkpoint G end-to-end verified** (5/5 browser-side checks 2026-05-25 + 3/3 delivery-side checks 2026-05-26). Manual two-tab Firebase smoke also done 2026-05-25.
 >
@@ -31,6 +32,35 @@ Worth carrying forward — same pattern will apply to any future content seed, d
 **Sign-in: `signInWithPopup` (NOT redirect).** v2.0.4 reverted PB.6's redirect switch after a production sign-in loop. The Firebase v8 compat layer doesn't auto-consume `getRedirectResult()` and Chrome's tightening third-party cookie behaviour drops the in-flight auth state between hops. Popup is the right default. The COOP warnings PB.6 silenced are cosmetic — accept them. If you ever revisit the redirect approach, you must call `firebase.auth().getRedirectResult()` explicitly in `initFirebase` (or wrap it as a separate post-init step) to finalise the post-redirect sign-in, AND you need to verify it works across Chrome / Firefox / Safari with strict cookie settings before merging.
 
 **`pm_dlbooks` is gone.** As of v2.0.2 the legacy `pm_dlbooks` Firebase key is deleted on first boot after migration via `deleteLegacyPMData()` in `firebase-sync.js`. The `loadPM` import is still in `shell.js` so the Phase 8.1 migration can source `state.pmData` on the rare fresh-device boot that hasn't migrated yet (gracefully returns DEFAULT_PM, runner short-circuits on the migration flag). The `pm-legacy/` source files stay on disk, archived. `initialSync` no longer loads or pushes `pm_dlbooks` — fresh-Firebase installs don't recreate the key.
+
+---
+
+## v2.2 architecture note — create-time notifications
+
+Worth carrying forward — applies to any future new-entity creation site that should fire a notification.
+
+**Synthetic trigger, no audit event.** When wiring a brand-new entity (task / subtask / future: project / participant) to fire a notification because of an initial property value (assigned to someone, marked milestone, etc.), route the new-entity submit site through `commitTasksWithTriggers` with an inline-built trigger, but do **NOT** append the corresponding event to `task.events[]`. The activity feed at creation time already reflects the initial state (the assignee field IS the assignment record at birth); writing a synthetic `assignee_changed` event with `before: []` would make the audit feed read incoherently ("Diana assigned this to Brad" sitting next to the very first row). This mirrors the existing `applyAddComment` shape (synthetic `comment_added` trigger, no audit event written since `comment_added` isn't audit-tracked). Mutations on existing entities still write events because there's a real before→after to record.
+
+**Shape at the submit site** (see [index.js:1502-1530](js/modules/projects/index.js#L1502) for the canonical example):
+```js
+const triggers = t.assignees.length > 0
+    ? [{
+        event: createEvent({
+            kind: 'assignee_changed',
+            by: currentUserEmail(),
+            before: [],
+            after: t.assignees.slice(),
+        }),
+        task: t,
+        project,
+    }]
+    : [];
+commitTasksWithTriggers(addTaskToList(getTasks(), t), triggers);
+```
+
+**No seeder gating needed.** The bulk-import seeders (v2.0.1 / .3 / .5 business-transform runners + Phase 8.1 PM migration) write the full task list directly via `state.projectsData.tasks = ...; fbSave(...)` — they bypass the submit path entirely. Adding a trigger at the submit site does NOT risk firing ~280 notifications during a seed. The original Checkpoint G smoke speculated about needing seeder gating; this was verified moot by reading `shell.js`'s `maybeRun*` functions.
+
+**Self-action suppression** continues to flow through `isSelfAction` downstream of the trigger — no custom check at the create-site. When Brad creates a task assigned to himself, the trigger fires but the recipient resolution + self-action filter drops the bell entry for Brad. External assignees with no email on file get a bell entry but no email-queue entry (`participantEmail` returns null → `enqueueEmail` short-circuits).
 
 ---
 
@@ -143,9 +173,9 @@ app/
 │           ├── index.js                            Wrapper for pm.js — retired from the module registry in Task 8.2 but kept on disk
 │           └── pm.js                               DLBooks PM source — migrated into projects in Phase 8.1, deleted from Firebase in v2.0.2; loadPM stays imported so the migration runner can source pmData on a fresh device
 ├── tests-e2e/
-│   └── smoke.spec.js                   Playwright E2E smoke tests (171 tests covering Phase 1 → Phase 8 + v2.0.1 / v2.0.2 / v2.0.3 / v2.0.5 + unit-suite driver)
+│   └── smoke.spec.js                   Playwright E2E smoke tests (174 tests covering Phase 1 → Phase 8 + v2.0.1 / v2.0.2 / v2.0.3 / v2.0.5 + unit-suite driver)
 ├── playwright.config.js                Chromium-only, fullyParallel + 4 workers (since 2026-05-25), reuses dev server on :8080
-├── package.json                        Dev-only deps (Playwright). The deployed site stays vanilla JS. Scripts: `test:fast` (9s — unit driver + Phase 0 shell), `test:e2e` (4 min — full 171).
+├── package.json                        Dev-only deps (Playwright). The deployed site stays vanilla JS. Scripts: `test:fast` (9s — unit driver + Phase 0 shell), `test:e2e` (4 min — full 174).
 ├── package-lock.json                   npm lockfile
 ├── server.py                           Local dev server (`python server.py`) — ThreadingHTTPServer, respects FAMILY_PLANNER_NO_BROWSER
 ├── tests.html                          In-browser unit-test runner for data.test.js
@@ -328,6 +358,17 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 - **Earlier outstanding items:** Polish round 9-of-9 done (commits up to `8b25366`); PB.4 timeline dep arrows shelved.
 - **Deploy-pipeline incident from 2026-05-15** still relevant: the repo was silently flipped private at some point, disabling Pages from 2026-04-11. Re-enabled by flipping back to public + `POST /repos/.../pages`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
 - **Other handover docs:** [tasks/BUSINESS-TRANSFORM-HANDOVER.md](tasks/BUSINESS-TRANSFORM-HANDOVER.md) orients a different Claude session to the SenseAi project *contents* (10 projects + ~280 tasks) for verbal progress walkthroughs with Brad. That doc is self-contained — readable without repo access — and is separate from this one (which is about the planner's code).
+- **v2.2 + v2.1-close commits on master (newest first, no tag):**
+  - `8313e90` — Docs: n8n cron heartbeats wired — v2.1 fully closed
+  - `69361b2` — Docs: drop forward-looking off-repo agent references
+  - `02bd104` — Docs: spec n8n cron heartbeats for the email drainer + daily digest
+  - `ad8a41d` — v2.2: new-task creation fires task_assigned notification (+ subtask submit consistency, +3 E2E)
+  - `36fa47f` — Docs: v2.1 delivery layer live (n8n drainer + digest workflows + Checkpoint G end-to-end)
+  - `5d04f93` — Checkpoint G: browser-side half verified (2026-05-25)
+  - `905f661` — Handover: GL mappings Firebase sync done (close item 5)
+  - `30ece9d` — Finance: wire gl_mappings into Firebase load / listener / initial push
+  - `19640cc` — Tick off the two-tab Firebase smoke (2026-05-25)
+  - `d31ad98` — Polish: dashboard chart no longer stretches on wide screens
 - **v2.0.x patch commits on master (newest first):**
   - `1c46c40` — Test infra: parallel workers + tiered `test:fast` script (no tag — infra-only)
   - `ba873ea` — v2.0.5 Business-transform extras 2026-05-25 (recommended additions)
