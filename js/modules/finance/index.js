@@ -32,7 +32,7 @@ const TEMPLATE = `
     <div class="budget-container">
         <div class="section-card">
             <h2 class="section-header income-header">CY 2026 - Income</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th>Source</th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th></tr></thead>
                 <tbody id="cy-income-body"></tbody>
                 <tfoot><tr class="total-row">
@@ -52,7 +52,7 @@ const TEMPLATE = `
         </div>
         <div class="section-card">
             <h2 class="section-header outgoing-header">Outgoings</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th>Item</th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th><th>Pay Cycle</th><th>First Payment</th></tr></thead>
                 <tbody id="cy-outgoing-body"></tbody>
                 <tfoot><tr class="total-row">
@@ -68,14 +68,14 @@ const TEMPLATE = `
         </div>
         <div class="section-card">
             <h2 class="section-header split-header">Contribution Split</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th></th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th></tr></thead>
                 <tbody id="cy-split-body"></tbody>
             </table>
         </div>
         <div class="section-card">
             <h2 class="section-header residual-header">Residual Income</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th></th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th></tr></thead>
                 <tbody id="cy-residual-body"></tbody>
             </table>
@@ -88,7 +88,7 @@ const TEMPLATE = `
     <div class="budget-container">
         <div class="section-card">
             <h2 class="section-header income-header">CY 2027 - Income</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th>Source</th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th></tr></thead>
                 <tbody id="ny-income-body"></tbody>
                 <tfoot><tr class="total-row">
@@ -108,7 +108,7 @@ const TEMPLATE = `
         </div>
         <div class="section-card">
             <h2 class="section-header outgoing-header">Outgoings</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th>Item</th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th><th>Pay Cycle</th><th>First Payment</th></tr></thead>
                 <tbody id="ny-outgoing-body"></tbody>
                 <tfoot><tr class="total-row">
@@ -124,14 +124,14 @@ const TEMPLATE = `
         </div>
         <div class="section-card">
             <h2 class="section-header split-header">Contribution Split</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th></th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th></tr></thead>
                 <tbody id="ny-split-body"></tbody>
             </table>
         </div>
         <div class="section-card">
             <h2 class="section-header residual-header">Residual Income</h2>
-            <table class="budget-table">
+            <table class="budget-table" data-money>
                 <thead><tr><th></th><th>Weekly</th><th>Monthly</th><th>Quarterly</th><th>Annual</th></tr></thead>
                 <tbody id="ny-residual-body"></tbody>
             </table>

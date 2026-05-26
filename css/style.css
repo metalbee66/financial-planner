@@ -144,6 +144,30 @@ main { padding: 16px; max-width: 100%; }
 .budget-table { width: 100%; border-collapse: collapse; }
 .budget-table td:first-child { min-width: 180px; }
 
+/* Money tables (Income, Outgoings, Split, Residual) share fixed column widths
+   so columns line up across the four cards. Outgoings has 2 extra cols on the
+   right; the others stop after col 5 and leave the remainder empty. Bonuses
+   keeps its auto layout (2 cols, different shape). */
+.budget-table[data-money] {
+    table-layout: fixed;
+    width: max-content;
+    max-width: 100%;
+}
+.budget-table[data-money] th:nth-child(1),
+.budget-table[data-money] td:nth-child(1) { width: 220px; min-width: 220px; }
+.budget-table[data-money] th:nth-child(2),
+.budget-table[data-money] td:nth-child(2),
+.budget-table[data-money] th:nth-child(3),
+.budget-table[data-money] td:nth-child(3),
+.budget-table[data-money] th:nth-child(4),
+.budget-table[data-money] td:nth-child(4),
+.budget-table[data-money] th:nth-child(5),
+.budget-table[data-money] td:nth-child(5) { width: 110px; }
+.budget-table[data-money] th:nth-child(6),
+.budget-table[data-money] td:nth-child(6) { width: 100px; }
+.budget-table[data-money] th:nth-child(7),
+.budget-table[data-money] td:nth-child(7) { width: 130px; }
+
 .budget-table th {
     background: var(--surface2);
     padding: 6px 8px;
@@ -1469,6 +1493,11 @@ select.editable { width: 100px; cursor: pointer; }
     main { padding: 8px; }
     .module-content { padding: 8px; }
     .budget-table td, .budget-table th { padding: 3px 5px; font-size: 0.75rem; }
+    /* Drop fixed money-table layout on mobile so the tables stay within the
+       viewport. Alignment across cards is sacrificed for readability. */
+    .budget-table[data-money] { table-layout: auto; width: 100%; }
+    .budget-table[data-money] th,
+    .budget-table[data-money] td { width: auto !important; min-width: 0 !important; }
     select.editable { width: 85px; }
     .accounts-grid { grid-template-columns: 1fr; }
     .planner-summary { grid-template-columns: repeat(2, 1fr); }
