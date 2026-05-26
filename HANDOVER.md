@@ -12,7 +12,9 @@
 >
 > **Test harness:** Playwright E2E now runs **171 tests** (was 154 at v2.0.0) plus a `tests.html` driver that executes the in-browser data-layer unit suite (~372 cases). `fullyParallel: true` + `workers: 4` (config landed 2026-05-25): full suite runs in **~4.3 min** instead of the prior ~16 min serial. Each Playwright test gets its own browser context so localStorage is already isolated — parallel is safe. Two npm scripts: **`npm run test:fast`** (unit driver + Phase 0 shell regression, ~9s — use for every dev iteration) and **`npm run test:e2e`** (full 171, ~4 min — use before commit and before tag/push). For iterating on a single feature, prefer `npx playwright test --grep "<describe-name>"` (e.g. `--grep "v2.0.5"` → 5 tests in 35s). `server.py` uses `ThreadingHTTPServer` (eliminated the `ERR_CONNECTION_REFUSED` / `ERR_ABORTED` flake); `FAMILY_PLANNER_NO_BROWSER` env var suppresses the auto-open browser tab during test runs.
 >
-> **v2.1 work queued in [tasks/user-actions.md](tasks/user-actions.md):** the two n8n workflow builds (instant email-queue drainer every 60s + daily 08:00 digest sender) blocked on the SenseAi-shared n8n + M365 Outlook infra on the SEi14 Geekom box; Checkpoint G two-user end-to-end notification flow; the manual two-tab Firebase smoke owed from the 2026-05-21 polish-round close-out. The Asana importer item is now ticked off via v2.0.1.
+> **v2.1 delivery layer LIVE (2026-05-26).** Both n8n workflows shipped on the Geekom (`https://n8n.dlbooks.com.au`): `FamilyPlanner: instant email drainer` (every 30 min, was specced as 60s — bumped because per-minute fires spammed the n8n execution log; SLA tolerates the longer delay) and `FamilyPlanner: daily digest sender` (daily 08:00 Australia/Melbourne). Both use the existing `Gmail SMTP (bradsmyrkai)` cred (D3 fallback, sending from `bradsmyrkai@gmail.com` until/if M365 Azure AD App Reg replaces it). Firebase REST auth via the legacy Database Secret as the n8n `Family Planner - Firebase RTDB` Query Auth credential — bypasses RTDB rules so no rules update needed. **Checkpoint G end-to-end verified** (5/5 browser-side checks 2026-05-25 + 3/3 delivery-side checks 2026-05-26). Manual two-tab Firebase smoke also done 2026-05-25.
+>
+> **v2.1 remaining (not blocking, but open):** n8n cron heartbeat for the 30-min drainer (the SenseAi healthchecks pattern is "ping per fire" which doesn't suit 1,440 fires/day — open question parked); next business-transform progress report when it arrives from the off-repo agent. New v2.2 backlog items surfaced in the smoke: new-task creation doesn't fire `task_assigned` notifications (slips through `setTasks(addTaskToList(...))` without going through `commitTasksWithTriggers`); `dependency_added` has no notification kind in the canonical NOTIFICATION_KINDS — only `dependency_unblocked` is wired.
 
 ---
 
@@ -313,14 +315,19 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 
 - **Active branch:** `master`. **v2.0.5 is the latest tag** (recommended additions on top of v2.0.0 + 3 prior content patches + auth hotfix). All six tags pushed to origin: `v2.0.0` `v2.0.1` `v2.0.2` `v2.0.3` `v2.0.4` `v2.0.5`. Live site: https://metalbee66.github.io/financial-planner/.
 - **Latest verified state on the live site (2026-05-25):** Brad signed in OK after the v2.0.4 popup revert. v2.0.1 → v2.0.3 one-shot runners had already fired by then; v2.0.5 will fire on his next page load (deploys via GitHub Pages ~30s after push, runner appends 10 new tasks to the seeded projects bucket on first reload, idempotency flag flips true).
-- **v2.1 backlog (queued, no work in progress):**
-  - **n8n / Outlook delivery layer** — two workflow builds are fully specced in [tasks/user-actions.md](tasks/user-actions.md): the 60-second instant email-queue drainer (Task 6.3) and the daily 08:00 digest sender (Task 6.4). Both block on the Pre-Phase-6 manual ops (n8n container on SEi14 Geekom, M365 Outlook credential, Firebase service-account Bearer, RTDB rules) — none of which are ticked yet. Workflow node graphs + the concurrent-write caveat are documented so an agent can author them via the n8n MCP tools once the Tailscale IP + creds are available.
-  - **Checkpoint G** — two-user end-to-end notification flow + daily digest tested live. **Browser-side half verified 2026-05-25** (bell cross-tab, instant→email_queue, digest→bypass, master-off, self-action). Remaining: n8n drains + real email delivered to inbox. Still blocks on the Geekom n8n infra.
-  - **Manual two-tab Firebase smoke** still owed from the 2026-05-21 polish-round close-out.
+- **v2.1 closed (2026-05-26):**
+  - ~~n8n delivery layer~~ — both workflows live on the Geekom, see top-of-file status block + `routines.md` for the live inventory.
+  - ~~Checkpoint G~~ — end-to-end verified.
+  - ~~Manual two-tab Firebase smoke~~ — 7/7 passed 2026-05-25, see `tasks/user-actions.md`.
+  - ~~Asana → Projects importer~~ — shipped as v2.0.1.
+  - ~~Recommended additions from the 2026-05-25 report~~ — shipped as v2.0.5.
+  - ~~GL mappings Firebase sync~~ — wired 2026-05-25 (`30ece9d`).
+- **v2.1 remaining (small, non-blocking):**
+  - **n8n cron heartbeat** for the 30-min drainer — open question on cadence; not wired. SenseAi's per-fire heartbeat pattern doesn't suit 1,440 fires/day. Either a throttled heartbeat (ping once per N fires using n8n workflow static data) or a separate hourly "queue-stuck check" workflow that alerts if any entry has `sent:false` AND `queuedAt > now() - 1h`.
   - **Business-transform progress updates** — the off-repo agent will likely produce more progress reports (next one likely 2026-06-XX). Each one ships as its own `update-businesstransform-YYYYMMDD.js` + new flag + runner, following the v2.0.3 pattern. The "UNCHANGED — needs Brad confirmation" rows from 2026-05-25 are still in `not-started` waiting for Brad's verbal review.
-- **Resolved this session that was on the v2.1 backlog:**
-  - ~~Asana → Projects importer~~ — shipped as v2.0.1 with the literal JSON Brad recovered instead of building a generic fetcher.
-  - ~~Recommended additions from the 2026-05-25 update report~~ — shipped as v2.0.5 (Document Services platform + 7 children, public-surface security hardening child of Phase 1 Auth, header-nav IA refactor Phase 2 stub).
+- **v2.2 backlog seeded:**
+  - **Architecture gap — new-task creation doesn't fire `task_assigned` notifications** ([index.js:1513](js/modules/projects/index.js#L1513) calls plain `setTasks(addTaskToList(...))` instead of `commitTasksWithTriggers`). Confirmed 2026-05-26 in the Checkpoint G smoke when Diana created 3 tasks already-assigned to Brad and Brad's bell didn't move. Workaround: assign-after-create. Fix candidate: synthesise `task_assigned` trigger in the new-task path when assignees ≠ actor; gate against bulk-import seeders (business-transform runner).
+  - **`dependency_added` not in NOTIFICATION_KINDS** — only `dependency_unblocked` is. So when a dependency is added between two existing tasks, the dependent task's assignee gets no signal. Lower impact than the new-task gap but worth a kind for cross-assignee dep setups.
 - **Earlier outstanding items:** Polish round 9-of-9 done (commits up to `8b25366`); PB.4 timeline dep arrows shelved.
 - **Deploy-pipeline incident from 2026-05-15** still relevant: the repo was silently flipped private at some point, disabling Pages from 2026-04-11. Re-enabled by flipping back to public + `POST /repos/.../pages`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
 - **Other handover docs:** [tasks/BUSINESS-TRANSFORM-HANDOVER.md](tasks/BUSINESS-TRANSFORM-HANDOVER.md) orients a different Claude session to the SenseAi project *contents* (10 projects + ~280 tasks) for verbal progress walkthroughs with Brad. That doc is self-contained — readable without repo access — and is separate from this one (which is about the planner's code).
@@ -395,7 +402,7 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
   - `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
   - `fd8055d` — Participant management on a project (Task 1.2)
   - `0c93b0f` — Project entity CRUD with tests (Task 1.1)
-- **Next task:** none in v2.0.0 — release is shipped. v2.1 picks up from the backlog above (Asana importer + n8n delivery layer + Checkpoint G + the two-tab smoke).
+- **Next task:** v2.1 essentially closed as of 2026-05-26. v2.2 picks up from the architecture-gap backlog above (new-task notification gap is the meaningful one) plus next business-transform progress report when it arrives.
 - **Branch convention:** L/M-sized tasks went direct to master with scoped per-task commits and a green test suite before push from Task 3.2 onward. Same pattern continues into v2.1.
 
 ### Manual smoke on the deployed site (Checkpoint F — Phase 5 feature-complete)

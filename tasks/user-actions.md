@@ -24,24 +24,19 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [x] Confirmed editable copy of the plans; Brad reviewed [plan.md](plan.md) + [todo.md](todo.md) throughout.
 - [x] Confirmed happy with **native ES modules** as the JS architecture (no bundler, no build step). Shipped in Task 0.2.
 
-## Pre-Phase-6 (n8n + M365 infrastructure for email) — DEFERRED to v2.1
+## Pre-Phase-6 (n8n infrastructure for email) — DONE 2026-05-26
 
-> Status: still gated on the SenseAi `Business_Project_Plan.md` setup. Family Planner's browser-side work is done; the n8n / Outlook layer ships alongside the SenseAi backend whenever that infra lands. The two queued workflow builds are at the bottom of this file.
+> All Pre-Phase-6 infra prerequisites cleared in the 2026-05-25/26 session. Both n8n workflows live; Checkpoint G end-to-end verified. See `routines.md` for the live workflow inventory + the auth credential.
 
-- [ ] **n8n container running on SEi14 Geekom** (Docker Desktop / WSL2)
-- [ ] **n8n reachable via Tailscale** from the family-planner browser context (CORS allowed, or rely on Firebase as the bridge so n8n only needs outbound)
-- [ ] **n8n admin account created** (not default credentials)
-- [ ] **n8n base URL recorded** somewhere I can read when I build the workflow (Tailscale IP + port)
-- [ ] **M365 Outlook credential configured in n8n** with `Mail.Send` Graph API scope
-- [x] **D3 resolved** (above) — M365 once the mailbox exists; Gmail SMTP until then
-- [ ] **Firebase REST API service-account key** exported and added to n8n as an HTTP Bearer credential, scoped to `/household/family/email_queue/*` and `/household/family/projects/*`
-- [ ] **Firebase RTDB rules updated** to allow:
-    - `email_queue` writes from authed brad/diana
-    - `email_queue` writes from the n8n service-account principal (PATCH for `sent`, `attempts`, `sentAt`, `failed`)
-    - `projects/notifications/{user}` write from authed user
-    - `projects/prefs/{user}` write from authed user
-    - `projects/digest_pending/{user}` write from authed user + service-account read
-- [ ] **Test email arrives end-to-end** before relying on it for real notifications
+- [x] **n8n container running on Geekom** — shared with SenseAi (`https://n8n.dlbooks.com.au/`, Caddy reverse-proxy to `127.0.0.1:5678`, container TZ Australia/Melbourne since 2026-05-26 via `GENERIC_TIMEZONE`).
+- [x] **n8n reachable via Tailscale / HTTPS** — `https://n8n.dlbooks.com.au` (Caddy + Cloudflare DNS-01 cert).
+- [x] **n8n admin account** — SenseAi-owned, pre-existed.
+- [x] **n8n base URL recorded** — `routines.md`.
+- [ ] **M365 Outlook credential** — **deferred** (using D3 fallback). The drainer + digest workflows both use the existing `Gmail SMTP (bradsmyrkai)` credential, sending from `bradsmyrkai@gmail.com`. If/when an Azure AD App Registration with `Mail.Send` Graph scope is set up, swap the credential on the two `Send an Email` nodes — no other workflow changes needed.
+- [x] **D3 resolved** — using Gmail SMTP fallback in production. Migrate to M365 mailbox when convenient.
+- [x] **Firebase REST API auth** — used the legacy **Database Secret** (40-char shared secret) rather than a service-account JSON. Wired in n8n as the HTTP Query Auth credential **`Family Planner - Firebase RTDB`** (param `auth`). Secret was generated 2026-05-25 via Firebase Console → Project Settings → Service Accounts → Database secrets. Note: deprecated by Firebase but still works; revisit if it stops working someday.
+- [x] **Firebase RTDB rules** — **no change needed** under the Database Secret auth path. The secret bypasses rules entirely, so n8n has admin-level read/write without per-path rule grants. The browser already has the right brad/diana auth scope.
+- [x] **Test email arrives end-to-end** — verified 2026-05-26 in the Checkpoint G end-to-end test (see below).
 
 ## Pre-Phase-8 (migration sign-off)
 
@@ -66,33 +61,36 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [ ] **2026-MM-DD** — During Task X.Y: <action>. Why it matters: <reason>.
 -->
 
-### Deferred to v2.1 (n8n / Outlook layer)
+### Shipped 2026-05-26 (n8n delivery layer)
 
-- [ ] **2026-05-21** — During Task 6.3: **build the n8n workflow that drains `/household/family/email_queue/`**. The browser-side enqueue is live (writes one queue entry per "instant" notification, mirrored to a localStorage `email_queue` map for offline-mode visibility). The n8n half is deferred until the Pre-Phase-6 infra above is up. Workflow shape per plan §6.3:
-  1. **Schedule Trigger** — every 60s
-  2. **HTTP Request (GET)** — Firebase REST API `https://<rtdb-host>/household/family/email_queue.json?orderBy=%22sent%22&equalTo=false` with the service-account Bearer creds, then filter results where `failed !== true`
-  3. **Loop / SplitInBatches** — one item per iteration
-  4. **Microsoft Outlook (Send Email)** — `to`, `subject`, `bodyHtml` from the entry (using D3-decided from-address)
-  5. **HTTP Request (PATCH)** — on send success: PATCH `/household/family/email_queue/{id}.json` with `{ "sent": true, "sentAt": "<iso>" }`
-  6. **Error branch** — on send failure: PATCH the same path with `{ "attempts": <attempts+1> }`; when `attempts >= 3` also set `"failed": true` so the loop stops retrying that entry. The Phase 6.5 admin panel will surface failed items for manual retry.
+- [x] **2026-05-21 → done 2026-05-26** — Task 6.3: **n8n workflow draining `/household/family/email_queue/`** is **live as `FamilyPlanner: instant email drainer`**. Bumped from the originally-specced 60s cadence to **every 30 min** because per-minute fires were spamming the n8n execution log — the family-planner SLA tolerates the longer delay. Implementation note: instead of a Loop / SplitInBatches step, the workflow uses a single Code node that splits the Firebase map into items AND filters `sent !== true && failed !== true` in one pass. Uses the existing `Gmail SMTP (bradsmyrkai)` cred (D3 fallback), not the M365 Outlook node. Per-iteration shape:
+  1. **Schedule Trigger** — every 30 min (Australia/Melbourne).
+  2. **HTTP Request (GET)** — `https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app/household/family/email_queue.json` via the `Family Planner - Firebase RTDB` Query Auth credential.
+  3. **Code in JavaScript** — splits the map into items, filters unsent + unfailed, adds `_id` (the Firebase key) for the PATCH.
+  4. **Send an Email** — Gmail SMTP cred, From `bradsmyrkai@gmail.com`, To/Subject/HTML from each item.
+  5. **HTTP Request (success branch)** — PATCH `email_queue/{_id}.json` with `{ "sent": true, "sentAt": "<iso>" }`.
+  6. **HTTP Request (error branch)** — PATCH `email_queue/{_id}.json` with `{ "attempts": <n+1>, "failed": <n+1 >= 3> }`. Reach 3 → `failed: true` → Code filter drops it next cycle. Admin sub-tab surfaces the failure.
 
-  Why it matters: without n8n the queue grows unboundedly in Firebase RTDB — emails never send. Use the n8n MCP tools to author the workflow once SEi14 is reachable, M365 credentials are in place, and the Firebase service-account Bearer is configured.
+  **Old (still-true) why-it-matters:** without n8n the queue grows unboundedly. Now flushed every 30 min.
 
-- [ ] **2026-05-21** — During Task 6.4: **build the daily-8am n8n workflow that drains `/household/family/projects/digest_pending/{user}`**. Browser side accumulates one digest entry per "digest"-mode notification (alongside the bell entry); the email queue is bypassed for these users. The daily roll-up itself is deferred. Workflow shape per plan §6.4:
-  1. **Schedule Trigger** — daily at 08:00 Australia/Melbourne
-  2. **HTTP Request (GET)** — Firebase REST `/household/family/projects/digest_pending.json` with the service-account Bearer creds
-  3. **Loop / SplitInBatches** — one user per iteration (`brad`, `diana`)
-  4. **Filter** — skip when the user's entries array is empty / missing
-  5. **Compose email** — subject `[Family Planner] Daily digest — <summary>` where `<summary>` is the comma-joined grouped counts (e.g. `3 tasks assigned, 2 tasks overdue, 1 milestone completed`); body is a `<ul>` of `<title> — <summary>` bullets + an "Open Family Planner" link. The browser-side `composeDigestSummary` / `buildDigestEmail` helpers in `notifications.js` are the reference shape — n8n can mirror them with a Code node, or recompose via Function nodes.
-  6. **Microsoft Outlook (Send Email)** — to `participantEmail(user)`
-  7. **HTTP Request (PATCH)** — on send success: PATCH `/household/family/projects/digest_pending/{user}.json` with `null` (or an empty array) to clear the bucket
-  8. **Error branch** — log + skip the user on send failure; next day's run picks up the same entries (idempotent — no double-send because the bucket only clears on success)
+- [x] **2026-05-21 → done 2026-05-26** — Task 6.4: **daily-8am n8n workflow draining `/household/family/projects/digest_pending/{user}`** is **live as `FamilyPlanner: daily digest sender`**. Schedule Trigger daily 08:00 Australia/Melbourne. Code node mirrors the browser-side `composeDigestSummary` + `buildDigestEmail` helpers (same canonical NOTIFICATION_KINDS order, same plural-aware labels, same HTML structure with bullets + Open Family Planner link). PATCH clears each user's bucket only on send success.
 
-  Why it matters: this is the entire delivery channel for digest-mode users. Without the workflow they see bell entries but never receive a summary email. **Concurrent-write caveat**: the browser writes the whole `projects` subtree via `fbSave('projects', ...)` on every user-driven mutation, which can race with the n8n PATCH that clears `digest_pending/{user}` — to be safe, run the daily workflow at 08:00 (low-traffic window) and accept that an edge-case overlap will replay last night's entries the next day. Phase 6.5 admin panel can surface manual override if it ever bites.
+  **Concurrent-write caveat still applies** (browser writes whole `projects` subtree, can race with n8n PATCH that clears `digest_pending/{user}` — edge-case overlap replays last night's entries the next day). Monitor `digest_pending/` in the Firebase console occasionally for stuck buckets.
+
+### Deferred to v2.1 (n8n / Outlook layer) — superseded
+
+- [x] ~~**2026-05-21** — During Task 6.3~~ — superseded by the 2026-05-26 build above.
+- [x] ~~**2026-05-21** — During Task 6.4~~ — superseded by the 2026-05-26 build above.
 
 ### Carried into v2.1 backlog
 
-- [ ] **Checkpoint G** — two-user end-to-end notification flow + daily digest tested end-to-end. Blocks on the n8n infra above.
-  - **Browser-side half verified 2026-05-25** in the same session as the polish-round Firebase smoke. 5/5 passed across Brad + Diana tabs: (1) bell badge cross-tab + dropdown + deep-link; (2) instant-mode writes email_queue with `to`/`subject`/`status:pending`; (3) digest-mode bypasses email_queue while bell still fires; (4) master-off short-circuits both bell and queue; (5) self-action excludes the actor while still notifying co-assignees on a joint task. Remaining work: n8n drainer + n8n daily digest workflow + an actual delivered email to inbox — all gated on the Geekom n8n / Azure AD App Registration setup.
+- [x] **Checkpoint G** — **DONE 2026-05-26.** Both halves verified end-to-end.
+  - **Browser-side half (5/5 pass, 2026-05-25):** (1) bell badge cross-tab + dropdown + deep-link; (2) instant-mode writes email_queue with `to`/`subject`/`status:pending`; (3) digest-mode bypasses email_queue while bell still fires; (4) master-off short-circuits both bell and queue; (5) self-action excludes the actor while still notifying co-assignees on a joint task.
+  - **n8n delivery half (3/3 pass, 2026-05-26):** (1) drainer end-to-end — Diana posts a comment, Brad's bell ticks live, drainer fires within ~30 min, real email lands in `metalbee66@gmail.com`, Admin sub-tab flips that row to "sent"; (2) digest manual-execute — `composeDigestSummary` mirrored correctly (subject "1 new comment", body lists the comment as a bullet with the Family Planner deep link), `digest_pending/brad` cleared after; (3) bucket-bypass — flipping prefs back to Instant routes the next event to email_queue without entering `digest_pending`.
+
+### New gaps surfaced 2026-05-26 (added to v2.2 backlog)
+
+- [ ] **Architecture gap — new-task creation doesn't fire notifications.** Confirmed 2026-05-26: when Diana creates a brand-new task **already assigned to Brad in one step**, no `task_assigned` notification fires. Root cause: the new-task code path at [index.js:1513](../js/modules/projects/index.js#L1513) calls plain `setTasks(addTaskToList(...))` and never goes through `commitTasksWithTriggers`. The audit-event-driven notification model only fires on *mutations* to existing tasks (assignee_changed, status_changed, comment_added, etc.). Workaround for now: assignor creates the task unassigned, saves, then re-opens it and assigns — that fires `assignee_changed` → `task_assigned`. Fix candidate: in the new-task code path, if `t.assignees` is non-empty AND none of the assignees match the actor, synthesise a `task_assigned` trigger and route through `commitTasksWithTriggers`. Risk: bulk task imports (like the 2026-05-21 SenseAi business-transformation seed) would fire ~280 notifications. Mitigation: skip the synthetic trigger when the actor is the seeder/migration-runner (detectable from the runner context flag).
+- [ ] **Architecture gap — dependency_added doesn't fire a notification.** The 7 canonical NOTIFICATION_KINDS include `dependency_unblocked` (fires when a prerequisite goes to `done`) but NOT a "new dependency added" event. So when a dependency is added between two existing tasks, the assignee of the dependent task gets no signal that they're now blocked. Less impactful than the new-task gap — usually the dependency is added by the task's own assignee — but worth a `dependency_added` kind for cross-assignee dependency setups.
 - [x] **Manual two-tab Firebase smoke** owed from the polish-round close-out (2026-05-21) — **done 2026-05-25.** Chrome regular (Brad) + Incognito (Diana) on live site. 7/7 checks passed: real-Firebase round-trip persisted comments + inline file + URL ref + milestone + dep; cross-tab realtime sync (deps clear on done, comments + milestone toggles propagate ~2 sec); PB.9 joint-assignee Joint chip + `Joint · 1` group + intersection-filter cross-tab; PB.7 status-derive ON→on-hold + OFF→snap-to-derived cross-tab; PB.8 Dashboard drill-down on Open tasks + Completed (last 30d) + Active-projects-correctly-inert + live re-render on Diana's status change. Surfaced one polish bug: Dashboard chart was stretching vertically on wide screens (preserveAspectRatio="none" + fixed height) — fixed in `d31ad98`.
 - [x] **2026-05-24** — During Task 8.3 walkthrough: **build a one-off Asana → Projects importer**. Brad was locked out of his Asana project by a subscription gate; the original Claude-generated project tree lived in the shared chat at `https://claude.ai/share/d162fea2-bb74-48f1-a15a-4525bcb143e4`. **Resolved in v2.0.1.** Brad pasted the recovered JSON inline; instead of building a generic Asana fetcher, we embedded the literal payload in `seed-businesstransform.js` and applied the same `migrate-pm.js` idempotency pattern. The 9-stream + Milestones import shipped under the `business_transform_seeded` flag.
