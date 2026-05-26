@@ -14,7 +14,7 @@
 >
 > **v2.1 delivery layer LIVE (2026-05-26).** Both n8n workflows shipped on the Geekom (`https://n8n.dlbooks.com.au`): `FamilyPlanner: instant email drainer` (every 30 min, was specced as 60s — bumped because per-minute fires spammed the n8n execution log; SLA tolerates the longer delay) and `FamilyPlanner: daily digest sender` (daily 08:00 Australia/Melbourne). Both use the existing `Gmail SMTP (bradsmyrkai)` cred (D3 fallback, sending from `bradsmyrkai@gmail.com` until/if M365 Azure AD App Reg replaces it). Firebase REST auth via the legacy Database Secret as the n8n `Family Planner - Firebase RTDB` Query Auth credential — bypasses RTDB rules so no rules update needed. **Checkpoint G end-to-end verified** (5/5 browser-side checks 2026-05-25 + 3/3 delivery-side checks 2026-05-26). Manual two-tab Firebase smoke also done 2026-05-25.
 >
-> **v2.1 remaining (not blocking, but open):** n8n cron heartbeats — the "ping per fire doesn't suit 1,440 fires/day" concern was tied to the original 60s drainer spec; at the live 30-min cadence the drainer fires 48×/day, so the standard SenseAi per-fire pattern applies. Manual steps for Brad to add `FamilyPlanner-InstantDrainerCron` (30 min × 30 min grace) and `FamilyPlanner-DailyDigestCron` (1 day × 2 h grace) are in `tasks/user-actions.md` → **Open — n8n cron heartbeats (v2.2)**. New-task `task_assigned` notification gap surfaced in the Checkpoint G smoke — **fixed 2026-05-26** by routing the new-task and subtask submit paths through `commitTasksWithTriggers` with a synthetic `assignee_changed` trigger built from `t.assignees`; no event written to `task.events[]` since the initial assignment is implicit at creation. Seeders (v2.0.1/.3/.5) bypass the submit path via direct `state.projectsData.tasks = …` + `fbSave`, so no seeder gating was needed.
+> **v2.1 fully closed 2026-05-26.** n8n cron heartbeats wired — `FamilyPlanner-InstantDrainerCron` (30 min × 30 min grace) and `FamilyPlanner-DailyDigestCron` (1 day × 2 h grace) under the `metalbee66@gmail.com` healthchecks.io account, trailing `Heartbeat` HTTP Request nodes on both workflows. New-task `task_assigned` notification gap surfaced in the Checkpoint G smoke — fixed by routing the new-task and subtask submit paths through `commitTasksWithTriggers` with a synthetic `assignee_changed` trigger built from `t.assignees`; no event written to `task.events[]` since the initial assignment is implicit at creation. Seeders (v2.0.1/.3/.5) bypass the submit path via direct `state.projectsData.tasks = …` + `fbSave`, so no seeder gating was needed.
 
 ---
 
@@ -322,8 +322,8 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
   - ~~Asana → Projects importer~~ — shipped as v2.0.1.
   - ~~Recommended additions from the 2026-05-25 report~~ — shipped as v2.0.5.
   - ~~GL mappings Firebase sync~~ — wired 2026-05-25 (`30ece9d`).
-- **v2.1 remaining (small, non-blocking):**
-  - **n8n cron heartbeats** — spec'd 2026-05-26, manual UI work pending. Per-fire pattern matches `SenseAi-RecurringTasksCron`. Full steps in [tasks/user-actions.md](tasks/user-actions.md) → **Open — n8n cron heartbeats (v2.2)**.
+- **v2.1 fully closed 2026-05-26:**
+  - ~~**n8n cron heartbeats**~~ — wired 2026-05-26; `FamilyPlanner-InstantDrainerCron` (30 min × 30 min) + `FamilyPlanner-DailyDigestCron` (1 day × 2 h) under the `metalbee66@gmail.com` healthchecks.io account. See `routines.md` for the live inventory.
 - **v2.2 backlog:** Closed — the new-task `task_assigned` gap is fixed (see top-of-file status block). The `dependency_added` notification-kind idea was considered and rejected: deps are typically added by the dependent task's own assignee, and a noisy "you have a new dependency" bell wasn't worth the surface area.
 - **Earlier outstanding items:** Polish round 9-of-9 done (commits up to `8b25366`); PB.4 timeline dep arrows shelved.
 - **Deploy-pipeline incident from 2026-05-15** still relevant: the repo was silently flipped private at some point, disabling Pages from 2026-04-11. Re-enabled by flipping back to public + `POST /repos/.../pages`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
@@ -399,7 +399,7 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
   - `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
   - `fd8055d` — Participant management on a project (Task 1.2)
   - `0c93b0f` — Project entity CRUD with tests (Task 1.1)
-- **Next task:** v2.1 essentially closed as of 2026-05-26 (heartbeats spec'd, awaiting Brad's n8n UI work). v2.2 architecture-gap backlog is closed — new-task notification gap fixed in `ad8a41d`; `dependency_added` notification kind considered and rejected. Pick the next thing from the pre-Phase-1 Finance backlog below, or whatever surfaces next.
+- **Next task:** v2.1 fully closed 2026-05-26 — both n8n workflows live + heartbeats wired + new-task notification gap fixed (`ad8a41d`); `dependency_added` notification kind considered and rejected. Pick the next thing from the pre-Phase-1 Finance backlog below, or whatever surfaces next.
 - **Branch convention:** L/M-sized tasks went direct to master with scoped per-task commits and a green test suite before push from Task 3.2 onward. Same pattern continues into v2.1.
 
 ### Manual smoke on the deployed site (Checkpoint F — Phase 5 feature-complete)
