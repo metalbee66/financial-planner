@@ -379,7 +379,10 @@ function buildSection(title, type, allItems, weekIdx, wa, weekActuals) {
     });
 
     table.appendChild(tbody);
-    card.appendChild(table);
+    const scroll = document.createElement('div');
+    scroll.className = 'table-scroll';
+    scroll.appendChild(table);
+    card.appendChild(scroll);
     return card;
 }
 
@@ -474,7 +477,10 @@ function buildContribSection(allContribs, weekIdx, wa, weekActuals) {
         tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    card.appendChild(table);
+    const scroll = document.createElement('div');
+    scroll.className = 'table-scroll';
+    scroll.appendChild(table);
+    card.appendChild(scroll);
     return card;
 }
 

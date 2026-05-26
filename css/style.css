@@ -436,7 +436,10 @@ select.editable { width: 100px; cursor: pointer; }
 .acct-balance-input:hover { border-color: var(--border); }
 .acct-balance-input:focus { border-color: var(--accent); outline: none; background: rgba(0,176,240,0.08); }
 
-/* Planner week tables */
+/* Planner week tables. Wrapped in .table-scroll so the 8-col layout can
+   scroll horizontally on narrow viewports without breaking the rounded
+   card edges (the section-card itself stays overflow: hidden). */
+.table-scroll { overflow-x: auto; }
 .planner-week-table { width: 100%; border-collapse: collapse; }
 .planner-week-table th {
     background: var(--surface2); padding: 6px 8px;
