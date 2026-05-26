@@ -6,6 +6,7 @@ import {
     getWeekDates, getCurrentWeekIndex, getEffectiveWeekly, cycleToPeriodAmount,
     fmt, fmtPlain, fmtSigned,
     parseCurrency, saveBudgetCY, saveWeekActuals,
+    sumCharges, makeCharge,
 } from '../../data.js';
 import { state } from '../../state.js';
 
@@ -13,6 +14,11 @@ let currentWeekIdx = 0;
 let realCurrentWeek = 0;
 export let weekDates = [];
 export let allSchedules = null;
+
+// Open charge-detail rows survive re-renders within the same week.
+// Keys: `${type}|${itemName}` (e.g. "items|Power", "contributions|Brad Regular").
+// Cleared by week change so each week starts collapsed.
+const openChargeDetails = new Set();
 
 export function initPlanner(budgetData, weekActuals) {
     const year = budgetData.year || 2026;
@@ -43,6 +49,7 @@ export function initPlanner(budgetData, weekActuals) {
 
 function onWeekChange(budgetData, weekActuals) {
     document.getElementById('week-select').value = currentWeekIdx;
+    openChargeDetails.clear();
     buildWeekStrip(weekActuals);
     renderWeek(budgetData, weekActuals);
 }
@@ -363,7 +370,8 @@ function buildSection(title, type, allItems, weekIdx, wa, weekActuals) {
     const tbody = document.createElement('tbody');
 
     due.forEach(({ item, schedule }) => {
-        tbody.appendChild(buildItemRow(item, schedule, weekIdx, wa, weekActuals, false));
+        buildItemRow(item, schedule, weekIdx, wa, weekActuals, false)
+            .forEach(r => tbody.appendChild(r));
     });
 
     if (notDue.length > 0 && due.length > 0) {
@@ -375,7 +383,8 @@ function buildSection(title, type, allItems, weekIdx, wa, weekActuals) {
     }
 
     notDue.forEach(({ item, schedule }) => {
-        tbody.appendChild(buildItemRow(item, schedule, weekIdx, wa, weekActuals, true));
+        buildItemRow(item, schedule, weekIdx, wa, weekActuals, true)
+            .forEach(r => tbody.appendChild(r));
     });
 
     table.appendChild(tbody);
@@ -389,23 +398,34 @@ function buildSection(title, type, allItems, weekIdx, wa, weekActuals) {
 function buildItemRow(item, schedule, weekIdx, wa, weekActuals, isDimmed) {
     const expected = schedule[weekIdx];
     const saved = wa.items?.[item.name];
-    const actual = saved ? saved.actual : expected;
+    const charges = saved?.charges || [];
+    const hasCharges = charges.length > 0;
+    const actual = hasCharges ? sumCharges(charges) : (saved ? saved.actual : expected);
     const status = expected === 0 && !saved ? 'none' : (saved ? saved.status : 'pending');
     const comment = saved ? (saved.comment || '') : '';
     const wkVar = actual - expected;
     const isDue = expected > 0;
+    const detailOpen = openChargeDetails.has(`items|${item.name}`);
 
     const ytd = computeYtdVariance(item.name, 'items', weekIdx, allSchedules, weekActuals);
 
     const tr = document.createElement('tr');
     if (isDimmed) tr.className = 'not-due';
     tr.innerHTML = `
-        <td class="col-item">${item.name}</td>
+        <td class="col-item">
+            ${isDue ? `<span class="expand-toggle planner-expand" title="${detailOpen ? 'Hide charges' : 'Show charges'}">${detailOpen ? '&#9660;' : '&#9654;'}</span>` : ''}
+            ${item.name}
+            ${hasCharges ? `<span class="charges-badge">${charges.length} charge${charges.length === 1 ? '' : 's'}</span>` : ''}
+        </td>
         <td class="col-cycle">${item.cycle}</td>
         <td class="col-amount">${fmt(expected)}</td>
         <td class="col-amount">
-            ${isDue ? `<input class="actual-input" type="text" value="${fmtPlain(actual)}"
-                data-item="${esc(item.name)}" data-type="items" data-expected="${expected}" data-week="${weekIdx}">` : ''}
+            ${isDue
+                ? (hasCharges
+                    ? `<span class="actual-derived" title="Sum of charges below">${fmt(actual)}</span>`
+                    : `<input class="actual-input" type="text" value="${fmtPlain(actual)}"
+                        data-item="${esc(item.name)}" data-type="items" data-expected="${expected}" data-week="${weekIdx}">`)
+                : ''}
         </td>
         <td class="col-variance ${wkVar > 0 ? 'negative' : wkVar < 0 ? 'positive' : ''}">${isDue && wkVar !== 0 ? fmtSigned(wkVar) : '—'}</td>
         <td class="col-variance ${ytd.ytdVariance > 0 ? 'negative' : ytd.ytdVariance < 0 ? 'positive' : ''}">${ytd.ytdVariance !== 0 ? fmtSigned(ytd.ytdVariance) : '—'}</td>
@@ -414,11 +434,64 @@ function buildItemRow(item, schedule, weekIdx, wa, weekActuals, isDimmed) {
                 title="Click to confirm">${statusLabel(status)}</button>` : ''}
         </td>
         <td class="col-comment">
-            ${isDue ? `<textarea class="comment-input" rows="1" placeholder="Charges..."
+            ${isDue ? `<textarea class="comment-input" rows="1" placeholder="Notes..."
                 data-item="${esc(item.name)}" data-type="items" data-week="${weekIdx}">${esc(comment)}</textarea>` : ''}
         </td>
     `;
+
+    const detailTr = buildChargesDetailRow(item.name, weekIdx, charges, 'items', isDue);
+    if (isDimmed) detailTr.classList.add('not-due');
+    return [tr, detailTr];
+}
+
+/**
+ * Build the always-present (but hidden by default) detail row containing
+ * the charges list + add-charge form. One detail row per main row; the
+ * chevron in the main row toggles visibility.
+ */
+function buildChargesDetailRow(itemName, weekIdx, charges, type, isDue) {
+    const tr = document.createElement('tr');
+    tr.className = 'detail-row planner-detail-row';
+    tr.dataset.detailKey = `${type}|${itemName}`;
+    const open = openChargeDetails.has(`${type}|${itemName}`);
+    tr.style.display = open ? 'table-row' : 'none';
+    tr.innerHTML = `<td colspan="8">${chargesPanelHtml(itemName, weekIdx, charges, type, isDue)}</td>`;
     return tr;
+}
+
+function chargesPanelHtml(itemName, weekIdx, charges, type, isDue) {
+    const today = new Date().toISOString().slice(0, 10);
+    let html = '<div class="charges-panel">';
+
+    if (charges.length > 0) {
+        html += '<table class="charges-table"><thead><tr><th>Date</th><th>Payee</th><th class="charges-amount-col">Amount</th><th>Note</th><th></th></tr></thead><tbody>';
+        charges.forEach(ch => {
+            html += `<tr>
+                <td>${esc(ch.date || '')}</td>
+                <td>${esc(ch.payee || '')}</td>
+                <td class="charges-amount-col">${fmt(ch.amount || 0)}</td>
+                <td>${esc(ch.comment || '')}</td>
+                <td><button class="charge-delete" title="Remove charge"
+                    data-charge-id="${esc(ch.id)}" data-item="${esc(itemName)}" data-type="${type}" data-week="${weekIdx}">&times;</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+    } else {
+        html += '<div class="charges-empty">No charges yet. Add one below to populate this week’s actual.</div>';
+    }
+
+    if (isDue) {
+        html += `<div class="charges-add" data-item="${esc(itemName)}" data-type="${type}" data-week="${weekIdx}">
+            <input class="charge-input charge-date" type="date" value="${today}" title="Date">
+            <input class="charge-input charge-payee" type="text" placeholder="Payee" title="Payee">
+            <input class="charge-input charge-amount" type="text" placeholder="Amount" title="Amount">
+            <input class="charge-input charge-comment" type="text" placeholder="Note (optional)" title="Note">
+            <button class="charge-submit">+ Add charge</button>
+        </div>`;
+    }
+
+    html += '</div>';
+    return html;
 }
 
 function buildContribSection(allContribs, weekIdx, wa, weekActuals) {
@@ -445,23 +518,34 @@ function buildContribSection(allContribs, weekIdx, wa, weekActuals) {
     allContribs.forEach(({ item, schedule }) => {
         const expected = schedule[weekIdx]; // may be 0 if not due this week
         const saved = wa.contributions?.[item.name];
-        const actual = saved ? saved.actual : expected;
+        const charges = saved?.charges || [];
+        const hasCharges = charges.length > 0;
+        const actual = hasCharges ? sumCharges(charges) : (saved ? saved.actual : expected);
         const status = expected === 0 && !saved ? 'none' : (saved ? saved.status : 'pending');
         const comment = saved ? (saved.comment || '') : '';
         const wkVar = actual - expected;
 
         const ytd = computeYtdVariance(item.name, 'contributions', weekIdx, allSchedules, weekActuals);
         const isDue = expected > 0;
+        const detailOpen = openChargeDetails.has(`contributions|${item.name}`);
 
         const tr = document.createElement('tr');
         tr.className = 'contribution-row' + (isDue ? '' : ' not-due');
         tr.innerHTML = `
-            <td class="col-item">${item.name}</td>
+            <td class="col-item">
+                ${isDue ? `<span class="expand-toggle planner-expand" title="${detailOpen ? 'Hide charges' : 'Show charges'}">${detailOpen ? '&#9660;' : '&#9654;'}</span>` : ''}
+                ${item.name}
+                ${hasCharges ? `<span class="charges-badge">${charges.length} charge${charges.length === 1 ? '' : 's'}</span>` : ''}
+            </td>
             <td class="col-cycle">${item.cycle}</td>
             <td class="col-amount">${fmt(expected)}</td>
             <td class="col-amount">
-                ${isDue ? `<input class="actual-input" type="text" value="${fmtPlain(actual)}"
-                    data-item="${esc(item.name)}" data-type="contributions" data-expected="${expected}" data-week="${weekIdx}">` : fmt(0)}
+                ${isDue
+                    ? (hasCharges
+                        ? `<span class="actual-derived" title="Sum of charges below">${fmt(actual)}</span>`
+                        : `<input class="actual-input" type="text" value="${fmtPlain(actual)}"
+                            data-item="${esc(item.name)}" data-type="contributions" data-expected="${expected}" data-week="${weekIdx}">`)
+                    : fmt(0)}
             </td>
             <td class="col-variance ${wkVar > 0 ? 'positive' : wkVar < 0 ? 'negative' : ''}">${wkVar !== 0 ? fmtSigned(wkVar) : '—'}</td>
             <td class="col-variance ${ytd.ytdVariance > 0 ? 'positive' : ytd.ytdVariance < 0 ? 'negative' : ''}">${ytd.ytdVariance !== 0 ? fmtSigned(ytd.ytdVariance) : '—'}</td>
@@ -475,6 +559,9 @@ function buildContribSection(allContribs, weekIdx, wa, weekActuals) {
             </td>
         `;
         tbody.appendChild(tr);
+        const detailTr = buildChargesDetailRow(item.name, weekIdx, charges, 'contributions', isDue);
+        if (!isDue) detailTr.classList.add('not-due');
+        tbody.appendChild(detailTr);
     });
     table.appendChild(tbody);
     const scroll = document.createElement('div');
@@ -672,10 +759,11 @@ export function setupPlannerEditing() {
         const expected = match ? match.schedule[weekIdx] : 0;
 
         if (!bucket[itemName]) {
-            bucket[itemName] = { actual: expected, status: 'confirmed', comment: '' };
+            bucket[itemName] = { actual: expected, status: 'confirmed', comment: '', charges: [] };
         } else {
             bucket[itemName].status = bucket[itemName].status === 'confirmed' ? 'pending' : 'confirmed';
-            if (bucket[itemName].status === 'confirmed') {
+            // Don't clobber actual when the row is being driven by charges.
+            if (bucket[itemName].status === 'confirmed' && !(bucket[itemName].charges && bucket[itemName].charges.length > 0)) {
                 bucket[itemName].actual = expected;
             }
         }
@@ -684,6 +772,100 @@ export function setupPlannerEditing() {
         renderWeek(state.budgetCY, state.weekActuals);
         buildWeekStrip(state.weekActuals);
     });
+
+    // Charge detail expand/collapse
+    planner.addEventListener('click', (e) => {
+        const toggle = e.target.closest('.planner-expand');
+        if (!toggle) return;
+        const mainTr = toggle.closest('tr');
+        if (!mainTr) return;
+        const detailTr = mainTr.nextElementSibling;
+        if (!detailTr || !detailTr.classList.contains('planner-detail-row')) return;
+        const key = detailTr.dataset.detailKey;
+        const wasOpen = detailTr.style.display !== 'none';
+        detailTr.style.display = wasOpen ? 'none' : 'table-row';
+        toggle.innerHTML = wasOpen ? '&#9654;' : '&#9660;';
+        toggle.title = wasOpen ? 'Show charges' : 'Hide charges';
+        if (wasOpen) openChargeDetails.delete(key);
+        else openChargeDetails.add(key);
+    });
+
+    // Add a charge
+    planner.addEventListener('click', (e) => {
+        const submit = e.target.closest('.charge-submit');
+        if (!submit) return;
+        const form = submit.closest('.charges-add');
+        if (!form) return;
+        const itemName = form.dataset.item;
+        const type = form.dataset.type;
+        const weekIdx = parseInt(form.dataset.week);
+        const date = form.querySelector('.charge-date').value;
+        const amountStr = form.querySelector('.charge-amount').value;
+        const amount = parseCurrency(amountStr);
+        if (!date || amount <= 0) {
+            // Inline silent reject — focus the amount field if invalid.
+            form.querySelector('.charge-amount').focus();
+            return;
+        }
+        const payee = form.querySelector('.charge-payee').value;
+        const comment = form.querySelector('.charge-comment').value;
+
+        ensureWeekActual(weekIdx);
+        const bucket = state.weekActuals[weekIdx][type];
+        if (!bucket[itemName]) {
+            bucket[itemName] = { actual: 0, status: 'pending', comment: '', charges: [] };
+        }
+        if (!Array.isArray(bucket[itemName].charges)) bucket[itemName].charges = [];
+        bucket[itemName].charges.push(makeCharge({ date, amount, payee, comment }));
+        recomputeFromCharges(bucket[itemName], weekIdx, itemName, type);
+
+        openChargeDetails.add(`${type}|${itemName}`);
+        saveWeekActuals(state.weekActuals);
+        renderWeek(state.budgetCY, state.weekActuals);
+        buildWeekStrip(state.weekActuals);
+    });
+
+    // Delete a charge
+    planner.addEventListener('click', (e) => {
+        const del = e.target.closest('.charge-delete');
+        if (!del) return;
+        const itemName = del.dataset.item;
+        const type = del.dataset.type;
+        const weekIdx = parseInt(del.dataset.week);
+        const chargeId = del.dataset.chargeId;
+
+        const bucket = state.weekActuals[weekIdx]?.[type];
+        const entry = bucket?.[itemName];
+        if (!entry || !Array.isArray(entry.charges)) return;
+        entry.charges = entry.charges.filter(c => c.id !== chargeId);
+        recomputeFromCharges(entry, weekIdx, itemName, type);
+
+        openChargeDetails.add(`${type}|${itemName}`);
+        saveWeekActuals(state.weekActuals);
+        renderWeek(state.budgetCY, state.weekActuals);
+        buildWeekStrip(state.weekActuals);
+    });
+}
+
+/**
+ * Sync `actual` and `status` on a bucket entry to its charges. If charges
+ * is empty, snap `actual` back to the scheduled expected and clear to
+ * pending. Otherwise actual = sumCharges and status reflects the
+ * |actual - expected| < 0.01 rule used by the manual input flow.
+ */
+function recomputeFromCharges(entry, weekIdx, itemName, type) {
+    const allItems = [...allSchedules.primary, ...allSchedules.secondary, ...allSchedules.contributions];
+    const match = allItems.find(s => s.item.name === itemName);
+    const expected = match ? match.schedule[weekIdx] : 0;
+    const charges = Array.isArray(entry.charges) ? entry.charges : [];
+    if (charges.length === 0) {
+        entry.actual = expected;
+        entry.status = 'pending';
+        return;
+    }
+    const sum = sumCharges(charges);
+    entry.actual = sum;
+    entry.status = Math.abs(sum - expected) < 0.01 ? 'confirmed' : 'adjusted';
 }
 
 function ensureWeekActual(weekIdx) {

@@ -12,7 +12,7 @@
  */
 
 import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
-import { migrateOutgoing, DEFAULT_CY, DEFAULT_NY } from './data.js';
+import { migrateOutgoing, migrateWeekActuals, DEFAULT_CY, DEFAULT_NY } from './data.js';
 import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
 // v2.0.2: DEFAULT_PM import removed; firebase-sync no longer reads or writes
 // the legacy `pm_dlbooks` key.
@@ -317,7 +317,7 @@ export async function initialSync() {
         }
 
         const fbWA = await fbLoad('week_actuals_cy26');
-        if (fbWA) state.weekActuals = fbWA;
+        if (fbWA) state.weekActuals = migrateWeekActuals(fbWA);
 
         const fbAcct = await fbLoad('accounts_data');
         if (fbAcct && fbAcct.banking) state.accountsData = fbAcct;

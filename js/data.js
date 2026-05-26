@@ -142,6 +142,43 @@ export function migrateItem(item) {
 export const migrateOutgoing = migrateItem;
 
 /**
+ * Charges — expandable per-row entries inside a planner weekActuals item.
+ * Each charge is a single transaction (e.g. a power bill payment) that
+ * contributes to the row's Actual. When a row has any charges, its
+ * Actual = sumCharges(charges) and the Actual input is read-only.
+ */
+export function sumCharges(charges) {
+    if (!Array.isArray(charges)) return 0;
+    return charges.reduce((s, c) => s + (typeof c.amount === 'number' ? c.amount : 0), 0);
+}
+
+export function makeCharge({ date, amount, payee = '', comment = '' } = {}) {
+    return {
+        id: 'ch_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        date: date || new Date().toISOString().slice(0, 10),
+        amount: Number(amount) || 0,
+        payee: String(payee || ''),
+        comment: String(comment || ''),
+    };
+}
+
+/** Backfill .charges = [] on any weekActuals item / contribution entry. */
+export function migrateWeekActuals(weekActuals) {
+    if (!weekActuals || typeof weekActuals !== 'object') return weekActuals;
+    Object.values(weekActuals).forEach(wa => {
+        if (!wa || typeof wa !== 'object') return;
+        ['items', 'contributions'].forEach(bucket => {
+            if (!wa[bucket]) return;
+            Object.values(wa[bucket]).forEach(entry => {
+                if (!entry || typeof entry !== 'object') return;
+                if (!Array.isArray(entry.charges)) entry.charges = [];
+            });
+        });
+    });
+    return weekActuals;
+}
+
+/**
  * Per-person rounded contribution split, derived from outgoings minus rent
  * contributions (the existing renderSplit formula). The "auto" contribution
  * items (Brad Regular / Diana Regular by default) target this value.
@@ -295,7 +332,9 @@ export function loadBudgetCY() {
 export function loadBudgetNY() {
     return migrateBudget(loadData('budget_ny27') || JSON.parse(JSON.stringify(DEFAULT_NY)));
 }
-export function loadWeekActuals() { return loadData('week_actuals_cy26') || {}; }
+export function loadWeekActuals() {
+    return migrateWeekActuals(loadData('week_actuals_cy26') || {});
+}
 
 export function saveBudgetCY(data) {
     recomputeAutoCalcContributions(data);
