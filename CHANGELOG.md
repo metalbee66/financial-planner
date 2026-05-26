@@ -1,5 +1,27 @@
 # Family Planner — Changelog
 
+## v2.3 — 2026-05-26 — Pre-Phase-1 Finance backlog round (4 of 6)
+
+Closed four of the six remaining pre-Phase-1 Finance backlog items in a single session. Each item shipped as its own scoped commit; bundled under tag `v2.3`. Remaining backlog: #3 (CSV parsers for HSBC/ANZ/Westpac/Bankwest — needs sample CSVs from Brad) and #4 (Bank API — needs vendor + auth model research before code).
+
+**#1 Section alignment (`a4be072`).** Money tables (Income / Outgoings / Split / Residual × CY + NY) now share fixed column widths via `table-layout: fixed` + a new `data-money` HTML attribute. Cols 1–5 line up across cards (col 1 = 220px, money cols = 110px each); Outgoings keeps its extra Pay Cycle (100px) + First Payment (130px) cols on the right. Tables use `width: max-content; max-width: 100%` so 5-col tables end at col 5 with empty space on the right — alignment preserved without stretching narrower tables out of register. Bonuses keeps auto layout (2 cols, different shape). Mobile (<768px) reverts to `table-layout: auto; width: 100%` so tables stay within the viewport — alignment sacrificed for readability at that breakpoint.
+
+**#6 Contribution auto-calc (`2304cb6`).** `saveBudgetCY` / `saveBudgetNY` now call `recomputeAutoCalcContributions(data)` before `fbSave`. Helper sets `item.weekly = Math.ceil((totalOut − rent) / 2)` on every `contributionItem` with `autoCalc: true` — matches the `renderSplit` "Contribution Split (rounded)" formula. Brad Regular and Diana Regular were flagged `autoCalc: true` from v1; the recompute never fired until now. Auto rows render the weekly as static `fmt(w)` (no input); a new "Auto-calculate from contribution split" checkbox in the detail panel toggles `item.autoCalc` and unlocks manual editing. Initial load reflects whatever's persisted — first edit syncs everything via the save hook (no silent mutation on load).
+
+**#7 Mobile polish (`1a589e2`).** Planner week-table (8 cols, min-widths sum to ~800px) was clipped on phone-width viewports by `.section-card { overflow: hidden }`. Now wrapped in a `.table-scroll { overflow-x: auto }` div so the table scrolls horizontally while the section card keeps its rounded edges. Applies to both liabilities and contributions tables.
+
+**#2 Planner charges (`952ccb7`).** Each `weekActuals[w].items[name]` / `.contributions[name]` bucket entry can carry `charges: [{id, date, amount, payee, comment}]`. New pure helpers in `data.js`: `sumCharges(charges)` (sum of amounts), `makeCharge({date, amount, payee, comment})` (id = `ch_<base36-time>_<4 base36>`), `migrateWeekActuals(weekActuals)` (backfills `charges: []` on every existing entry). When a row has charges: `actual = sumCharges(charges)` (read-only `.actual-derived` span replaces the input), a "N charges" `.charges-badge` appears next to the name, status auto-syncs (`|actual − expected| < 0.01 ? 'confirmed' : 'adjusted'`), and YTD Var rolls up via the existing `computeYtdVariance` helper (which sums `saved.actual`) — charges-driven rows feed through unchanged.
+
+UI: a chevron in col-item opens a detail row immediately below the main row, showing the charges list (Date / Payee / Amount / Note / Delete) plus a sticky add-charge form (date / payee / amount / note / submit). Open state survives `renderWeek` re-renders within the same week via a module-level `openChargeDetails` Set; resets to collapsed when navigating weeks. Detail row uses `<tr class="detail-row planner-detail-row">` with `colspan="8"`; `nextElementSibling` from a chevron click finds it — no key map needed.
+
+`recomputeFromCharges(entry, weekIdx, itemName, type)` syncs `actual` + `status` whenever charges change; also snaps `actual` back to `expected` and clears status to `pending` when charges drops to zero (deleting the last charge resets the row). The status-button click path skips the actual-clobber when charges are present (so manually flipping "confirmed" doesn't overwrite the derived total).
+
+Data migration: `migrateWeekActuals` is called by `loadWeekActuals` (localStorage) AND by `firebase-sync.js` `initialSync` (`state.weekActuals = migrateWeekActuals(fbWA)`). **There is no realtime listener for `week_actuals_cy26`** — never has been; peer edits still require a page reload. Pre-existing behaviour, not regressed by v2.3.
+
+**Tests:** no new automated tests in v2.3 — 174 E2E + 372 unit cases unchanged. Helpers are pure and small enough to verify by inspection; UI flows manually smoked locally. Adding a `v2.3 — Finance backlog round` describe block in `tests-e2e/smoke.spec.js` is flagged as the top follow-up task (see HANDOVER).
+
+---
+
 ## v2.0.5 — 2026-05-25 — Business-transform extras (recommended additions)
 
 Content-only patch: appends the three "Recommended additions" from the off-repo agent's 2026-05-25 report (§"New work not in the seed — recommend adding"). These were flagged as Optional in v2.0.3 and deliberately skipped; Brad opted them in during the v2.0.5 walkthrough.
