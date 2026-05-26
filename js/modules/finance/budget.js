@@ -168,10 +168,10 @@ function renderSplit(data, pfx) {
             <td>
                 <span class="expand-toggle" data-pfx="${pfx}" data-index="${i}" data-section="contributionItems">${hasDetail ? '&#9660;' : '&#9654;'}</span>
                 ${item.name}
-                ${item.autoCalc ? '<span class="auto-badge">auto</span>' : ''}
+                ${item.autoCalc ? '<span class="auto-badge" title="Auto-calculated from outgoings split">auto</span>' : ''}
                 ${item.revisions.length > 0 ? '<span class="revision-badge">' + item.revisions.length + ' rev</span>' : ''}
             </td>
-            <td>${currencyInput(w, pfx, 'contributionItems', i, 'weekly')}</td>
+            <td>${item.autoCalc ? fmt(w) : currencyInput(w, pfx, 'contributionItems', i, 'weekly')}</td>
             <td>${fmt(weeklyToMonthly(w))}</td>
             <td>${fmt(weeklyToQuarterly(w))}</td>
             <td>${fmt(weeklyToAnnual(w))}</td>
@@ -218,6 +218,17 @@ function renderResidual(data, pfx) {
 
 function buildDetailPanel(item, pfx, idx, section, cycle) {
     let html = '<div class="detail-panel">';
+
+    if (section === 'contributionItems') {
+        html += `<div class="detail-section">
+            <label class="detail-label autocalc-toggle-label">
+                <input type="checkbox" class="contrib-autocalc-toggle"
+                    data-pfx="${pfx}" data-index="${idx}" data-section="${section}"
+                    ${item.autoCalc ? 'checked' : ''}>
+                Auto-calculate from contribution split
+            </label>
+        </div>`;
+    }
 
     // Comment
     html += `<div class="detail-section">
@@ -416,6 +427,18 @@ export function setupBudgetEditing(sectionId, prefix, data, saveFn) {
             saveFn(data);
         }
     }, true);
+
+    // Auto-calc toggle on contribution items
+    section.addEventListener('change', (e) => {
+        const el = e.target;
+        if (!el.classList.contains('contrib-autocalc-toggle')) return;
+        const idx = parseInt(el.dataset.index);
+        const sec = el.dataset.section;
+        getSection(data, sec)[idx].autoCalc = el.checked;
+        saveFn(data); // save triggers recomputeAutoCalcContributions
+        renderBudgetTab(data, prefix);
+        reopenDetail(sec, idx);
+    });
 
     // Revision date / reason
     section.addEventListener('change', (e) => {

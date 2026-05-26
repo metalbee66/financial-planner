@@ -587,6 +587,18 @@ select.editable { width: 100px; cursor: pointer; }
     margin-bottom: 4px;
     display: block;
 }
+.autocalc-toggle-label {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.82rem;
+    color: var(--text);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    margin-bottom: 0;
+}
 
 .detail-comment {
     background: transparent;

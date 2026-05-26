@@ -141,6 +141,34 @@ export function migrateItem(item) {
 }
 export const migrateOutgoing = migrateItem;
 
+/**
+ * Per-person rounded contribution split, derived from outgoings minus rent
+ * contributions (the existing renderSplit formula). The "auto" contribution
+ * items (Brad Regular / Diana Regular by default) target this value.
+ */
+export function computeAutoCalcContribution(data) {
+    const totalOutW = (data.outgoings || []).reduce((s, o) => s + getCurrentWeekly(o), 0);
+    const items = data.contributionItems || [];
+    const rentW = items
+        .filter(c => c.name.startsWith('Rent'))
+        .reduce((s, c) => s + getCurrentWeekly(c), 0);
+    return Math.ceil((totalOutW - rentW) / 2);
+}
+
+/**
+ * Recompute weekly for every contributionItem flagged autoCalc. Mutates in
+ * place; safe to call on every save (idempotent). Called from saveBudgetCY /
+ * saveBudgetNY so any outgoings edit propagates without each call-site
+ * having to remember.
+ */
+export function recomputeAutoCalcContributions(data) {
+    const target = computeAutoCalcContribution(data);
+    (data.contributionItems || []).forEach(item => {
+        if (item.autoCalc) item.weekly = target;
+    });
+    return data;
+}
+
 /** Migrate old flat contributions object to new array format */
 export function migrateBudget(data) {
     data.outgoings.forEach(migrateItem);
@@ -270,10 +298,12 @@ export function loadBudgetNY() {
 export function loadWeekActuals() { return loadData('week_actuals_cy26') || {}; }
 
 export function saveBudgetCY(data) {
+    recomputeAutoCalcContributions(data);
     fbSave('budget_cy26', data);
     showToast('Saved');
 }
 export function saveBudgetNY(data) {
+    recomputeAutoCalcContributions(data);
     fbSave('budget_ny27', data);
     showToast('Saved');
 }
