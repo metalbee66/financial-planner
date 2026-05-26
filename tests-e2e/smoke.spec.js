@@ -3316,6 +3316,73 @@ test.describe('v2.0.5 — Business transform extras 2026-05-25', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+test.describe('v2.2 — New-task task_assigned notification', () => {
+
+    async function readEmailQueue(page) {
+        return await page.evaluate(() => {
+            const raw = localStorage.getItem('email_queue');
+            if (!raw) return {};
+            try { return JSON.parse(raw); } catch { return {}; }
+        });
+    }
+
+    test('creating a task already-assigned to Diana writes a task_assigned email entry for her', async ({ page }) => {
+        await createProject(page, { name: 'New-task notif' });
+        await page.locator('#task-add-name').fill('Site survey');
+        await page.locator('#task-add-assignee').selectOption('diana');
+        await page.locator('#task-add-submit').click();
+
+        const entries = Object.values(await readEmailQueue(page));
+        expect(entries.length).toBe(1);
+        expect(entries[0].to).toBe('dianaleshcheva@gmail.com');
+        expect(entries[0].kind).toBe('task_assigned');
+        expect(entries[0].subject).toBe('[Family Planner] Task assigned: Site survey');
+        expect(entries[0].sent).toBe(false);
+    });
+
+    test('creating an unassigned task writes no email queue entry', async ({ page }) => {
+        await createProject(page, { name: 'No-assignee' });
+        await page.locator('#task-add-name').fill('Drafting');
+        await page.locator('#task-add-submit').click();
+
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+        await expect(page.locator('#notif-bell-btn .notif-bell-badge')).toHaveCount(0);
+    });
+
+    test('digest-mode recipient gets a digest_pending entry, no email_queue', async ({ page }) => {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {},
+                prefs: { diana: { master: true, mode: 'digest', kinds: {} } },
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                business_transform_seeded: true,
+                pm_dlbooks_cleaned: true,
+                business_transform_update_20260525_applied: true,
+                business_transform_extras_20260525_applied: true,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+
+        await createProject(page, { name: 'Digest at create' });
+        await page.locator('#task-add-name').fill('Quiet drop');
+        await page.locator('#task-add-assignee').selectOption('diana');
+        await page.locator('#task-add-submit').click();
+
+        expect(Object.keys(await readEmailQueue(page)).length).toBe(0);
+        const digest = await page.evaluate(() => {
+            const raw = localStorage.getItem('projects');
+            return raw ? (JSON.parse(raw).digest_pending || {}) : {};
+        });
+        expect(Array.isArray(digest.diana)).toBe(true);
+        expect(digest.diana.length).toBe(1);
+        expect(digest.diana[0].kind).toBe('task_assigned');
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 test.describe('In-browser data-layer unit suite', () => {
 
     test('tests.html runs all data-layer tests with 0 failures', async ({ page }) => {

@@ -1510,7 +1510,24 @@ function renderAddTaskRow(root, project) {
         });
         const err = validateTask(t);
         if (err) { alert(err); return; }
-        setTasks(addTaskToList(getTasks(), t));
+        // v2.2: synthesise an assignee_changed trigger so creating a task
+        // already-assigned to someone fires task_assigned (self-action is
+        // filtered downstream by isSelfAction). No event written to
+        // task.events[] — the initial assignment is implicit at creation,
+        // not an audit-worthy mutation. Seeders bypass this path entirely.
+        const triggers = t.assignees.length > 0
+            ? [{
+                event: createEvent({
+                    kind: 'assignee_changed',
+                    by: currentUserEmail(),
+                    before: [],
+                    after: t.assignees.slice(),
+                }),
+                task: t,
+                project,
+            }]
+            : [];
+        commitTasksWithTriggers(addTaskToList(getTasks(), t), triggers);
         render();
         // Restore focus to the name input for rapid entry
         const nx = host.querySelector('#task-add-name');
@@ -2446,7 +2463,19 @@ function wireSubtaskSection(panel, parent) {
         });
         const err = validateTask(sub);
         if (err) { alert(err); return; }
-        setTasks(addTaskToList(getTasks(), sub));
+        const triggers = sub.assignees.length > 0
+            ? [{
+                event: createEvent({
+                    kind: 'assignee_changed',
+                    by: currentUserEmail(),
+                    before: [],
+                    after: sub.assignees.slice(),
+                }),
+                task: sub,
+                project: findProject(getProjects(), sub.projectId),
+            }].filter(tg => tg.project)
+            : [];
+        commitTasksWithTriggers(addTaskToList(getTasks(), sub), triggers);
         nameEl.value = '';
         // Re-render the panel so the new subtask appears in its list, then
         // refocus the input so the user can keep adding.
