@@ -327,15 +327,18 @@ This replaced the pre-Phase-0 cross-file globals. ES module bindings are read-on
 
 ## Outstanding Items (pre-Phase-1 backlog)
 
-These predate the v2.0.0 restructure and are still pending:
+These predate the v2.0.0 restructure. Four items closed 2026-05-26 in a finance
+polish round (commits `a4be072` → `952ccb7`). Remaining items still need real
+bank statement samples (#3) or vendor research (#4); they don't fit a code-only
+session.
 
-1. **Section alignment** — columns don't perfectly align between Income/Outgoings/Split/Residual sections
-2. **Planner charges** — expandable charge entries per planner line (like revisions in budget), populating YTD actuals from those charges
-3. **CSV parsers** for HSBC, ANZ, Westpac, Bankwest statement formats (NAB only currently)
-4. **Bank API** — placeholder exists, no integration yet
+1. ~~**Section alignment**~~ — **done 2026-05-26** (`a4be072`). The four money tables (Income / Outgoings / Split / Residual × CY + NY) now share fixed column widths via `table-layout: fixed` + a new `data-money` attribute. Cols 1–5 line up across cards; Outgoings keeps its extra Pay Cycle / First Payment cols on the right. Bonuses keeps auto layout (2 cols, different shape). Mobile (<768px) reverts to auto-layout so tables stay within the viewport — alignment sacrificed for readability at that breakpoint.
+2. ~~**Planner charges**~~ — **done 2026-05-26** (`952ccb7`). Each weekActuals entry can carry a `charges: []` array of `{id, date, amount, payee, comment}`. When a row has charges, Actual = sumCharges (read-only span replaces the input), a "N charges" badge appears, and status auto-syncs against expected. A chevron in col-item opens a detail row with the charges list + an add-charge form; open state survives re-renders within the same week. YTD Var rolls up via the existing helper which sums `saved.actual` — charges-driven rows feed through unchanged. Data migration: `migrateWeekActuals` backfills `charges: []` on load (localStorage + Firebase initialSync). No realtime listener exists for `week_actuals_cy26`, so peer edits still need a reload — pre-existing behaviour, not regressed.
+3. **CSV parsers** for HSBC, ANZ, Westpac, Bankwest statement formats (NAB only currently) — needs real CSV samples from Brad for each bank.
+4. **Bank API** — placeholder exists, no integration yet — vendor research + auth model decision before any coding.
 5. ~~**GL mappings Firebase sync**~~ — **done 2026-05-25** (`30ece9d`). Phase 0 had fixed the write path; the load side was still localStorage-only. Now `initialSync` loads `gl_mappings`, `setupRealtimeListeners` has a listener, and the empty-Firebase branch pushes the local map on first sign-in. Cross-device sync works; a `renderImportTab` hook isn't wired so an open Import sub-tab won't live-refresh on a remote change (only Brad imports, non-issue in practice).
-6. **Contribution auto-calc** — Brad/Diana Regular marked `autoCalc:true` but not yet recalculated when outgoings change
-7. **Mobile polish** — responsive breakpoints exist but could be refined
+6. ~~**Contribution auto-calc**~~ — **done 2026-05-26** (`2304cb6`). `saveBudgetCY` / `saveBudgetNY` now run `recomputeAutoCalcContributions` which sets `weekly = Math.ceil((totalOut − rent) / 2)` for every contributionItem with `autoCalc: true`. Brad Regular and Diana Regular (the two flagged from v1) now stay in sync with outgoings without manual entry. Auto rows render the value as static text instead of an input; a new "Auto-calculate from contribution split" checkbox in the detail panel toggles the flag if the user wants to enter manually. Initial load reflects whatever's persisted; first edit syncs everything via the recompute hook.
+7. ~~**Mobile polish**~~ — **done 2026-05-26** (`1a589e2`). Narrowest pain point fixed: the 8-col planner-week-table now sits inside a `.table-scroll` wrapper (`overflow-x: auto`) so it scrolls horizontally on phones instead of being clipped by `.section-card { overflow: hidden }`. Section-card rounded corners are preserved. Budget tables on mobile drop their data-money fixed layout (see #1) so they stay within the viewport at the small breakpoint.
 
 The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI, celebrations, migration) lives in [tasks/plan.md](tasks/plan.md) and [tasks/todo.md](tasks/todo.md).
 
@@ -358,6 +361,11 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
 - **Earlier outstanding items:** Polish round 9-of-9 done (commits up to `8b25366`); PB.4 timeline dep arrows shelved.
 - **Deploy-pipeline incident from 2026-05-15** still relevant: the repo was silently flipped private at some point, disabling Pages from 2026-04-11. Re-enabled by flipping back to public + `POST /repos/.../pages`. Captured in [tasks/lessons.md → L1](tasks/lessons.md).
 - **Other handover docs:** [tasks/BUSINESS-TRANSFORM-HANDOVER.md](tasks/BUSINESS-TRANSFORM-HANDOVER.md) orients a different Claude session to the SenseAi project *contents* (10 projects + ~280 tasks) for verbal progress walkthroughs with Brad. That doc is self-contained — readable without repo access — and is separate from this one (which is about the planner's code).
+- **Pre-Phase-1 finance backlog close-out commits on master (newest first, no tag):**
+  - `952ccb7` — Finance: planner row charges with expandable detail + YTD rollup (backlog #2)
+  - `1a589e2` — Finance: planner week-table scrolls horizontally on narrow viewports (backlog #7)
+  - `2304cb6` — Finance: contribution auto-calc respects autoCalc flag on every save (backlog #6)
+  - `a4be072` — Finance: align money-table columns across Income / Outgoings / Split / Residual (backlog #1)
 - **v2.2 + v2.1-close commits on master (newest first, no tag):**
   - `8313e90` — Docs: n8n cron heartbeats wired — v2.1 fully closed
   - `69361b2` — Docs: drop forward-looking off-repo agent references
@@ -440,7 +448,7 @@ The much larger v2.0.0 backlog (Projects module: CRUD, views, notifications, AI,
   - `0a50020` — Docs: log Phase 1 in CHANGELOG + update HANDOVER
   - `fd8055d` — Participant management on a project (Task 1.2)
   - `0c93b0f` — Project entity CRUD with tests (Task 1.1)
-- **Next task:** v2.1 fully closed 2026-05-26 — both n8n workflows live + heartbeats wired + new-task notification gap fixed (`ad8a41d`); `dependency_added` notification kind considered and rejected. Pick the next thing from the pre-Phase-1 Finance backlog below, or whatever surfaces next.
+- **Next task:** Pre-Phase-1 Finance backlog 4-item round closed 2026-05-26 (commits `a4be072` → `952ccb7`): section alignment, planner charges, contribution auto-calc, mobile polish. Remaining backlog items #3 (CSV parsers for HSBC/ANZ/Westpac/Bankwest) and #4 (Bank API) need real bank samples or vendor research before they're code-actionable. Pick whatever surfaces next.
 - **Branch convention:** L/M-sized tasks went direct to master with scoped per-task commits and a green test suite before push from Task 3.2 onward. Same pattern continues into v2.1.
 
 ### Manual smoke on the deployed site (Checkpoint F — Phase 5 feature-complete)
