@@ -92,5 +92,38 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 
 - [x] **Architecture gap — new-task creation doesn't fire notifications** — **fixed 2026-05-26.** New-task and subtask submit paths now route through `commitTasksWithTriggers` with a synthetic `assignee_changed` trigger built from `t.assignees`; no event written to `task.events[]` (initial assignment is implicit). Self-action suppression handled downstream by `isSelfAction`. Seeder gating concern was moot — `maybeRunBusinessTransformSeed` etc. write the full task list via direct `state.projectsData.tasks = … ; fbSave(...)` and never enter the submit path.
 - [x] **dependency_added notification kind** — **decided not to ship.** Considered as a v2.2 candidate; rejected because dependencies are typically added by the dependent task's own assignee, and a "you have a new dependency" bell wasn't worth the surface area.
+
+### Open — n8n cron heartbeats (v2.2)
+
+> The original "ping per fire doesn't suit 1,440 fires/day" concern was tied to the 60s drainer cadence. At the current **30-min** cadence the drainer fires 48×/day, well within healthchecks.io free-tier (no per-check rate cap; 20-check account limit; SenseAi uses 2 of those today). Per-fire heartbeat is fine; matches the existing `SenseAi-RecurringTasksCron` pattern in `routines.md`.
+
+- [ ] **Wire heartbeats on both Family Planner workflows.** Two healthchecks.io checks + one trailing `Heartbeat` HTTP Request node per workflow. **The digest workflow is the more important one** (a silent 08:00 failure means Diana just doesn't get her digest and nobody notices for days). About 10 min of UI work.
+
+  **Step 1 — healthchecks.io.** Sign in at <https://healthchecks.io> (Google SSO as `metalbee66@gmail.com` — same account as the SenseAi checks). Create two new checks via **Add Check**:
+
+  | Check name | Schedule type | Period | Grace |
+  |------------|---------------|--------|-------|
+  | `FamilyPlanner-InstantDrainerCron` | Simple | 30 min | 30 min |
+  | `FamilyPlanner-DailyDigestCron` | Simple | 1 day | 2 hours |
+
+  Period+grace tuning: drainer alerts after ~1h of silence (two missed fires); digest alerts at ~10:00 if the 08:00 fire didn't ping. Each check returns a ping URL of the form `https://hc-ping.com/<uuid>`. Copy the URL from each check's **Settings → Ping URLs** panel — the URL itself is the secret, so keep it out of any committed file.
+
+  **Step 2 — n8n drainer workflow.** Open `https://n8n.dlbooks.com.au/`, edit `FamilyPlanner: instant email drainer`. Add a new node at the **very end** of the success path (downstream of every other node):
+  - Type: **HTTP Request**
+  - Name: `Heartbeat`
+  - Method: `GET`
+  - URL: the `FamilyPlanner-InstantDrainerCron` ping URL from Step 1
+  - Authentication: None
+  - Leave all other defaults
+
+  Position it so a workflow-level error (Firebase REST 500, n8n container restart mid-execution, etc.) prevents it from running — that's what makes it a dead-man's-switch. If the workflow does per-item branching, place `Heartbeat` after the branches converge (or off a "workflow finished" anchor) so it fires regardless of whether individual emails succeeded — what we're monitoring is **the schedule trigger ran the workflow to completion**, not per-email outcomes.
+
+  **Step 3 — n8n digest workflow.** Same as Step 2 on `FamilyPlanner: daily digest sender`, using the `FamilyPlanner-DailyDigestCron` ping URL.
+
+  **Step 4 — verify.** For each workflow: click **Execute Workflow** in n8n. Within ~5 seconds the corresponding healthchecks.io check should flip green ("up"). Wait for the next scheduled fire (~30 min for the drainer, next 08:00 for the digest) and confirm the check stays green. Then deliberately break the workflow once (e.g. temporarily disable the Firebase REST credential) and execute — the run should error before reaching `Heartbeat`, and healthchecks.io should email `metalbee66@gmail.com` after the grace window. Re-enable, execute, confirm green again.
+
+  **Step 5 — update `routines.md`.** Flip the `**Healthchecks heartbeat:** not yet wired` paragraph in the Family Planner section to list both live checks (name + period × grace), matching the SenseAi pattern at the top of the file.
+
+  **Defer:** the separate "queue-stuck check" workflow (hourly GET of `email_queue`, alert if any entry has `sent:false` AND `queuedAt > now() - 1h`). That's a different failure mode (drainer runs but Gmail SMTP is broken → silent backlog). For a household-volume app the in-UI bell badge already surfaces backlog visibility; revisit if it ever actually bites.
 - [x] **Manual two-tab Firebase smoke** owed from the polish-round close-out (2026-05-21) — **done 2026-05-25.** Chrome regular (Brad) + Incognito (Diana) on live site. 7/7 checks passed: real-Firebase round-trip persisted comments + inline file + URL ref + milestone + dep; cross-tab realtime sync (deps clear on done, comments + milestone toggles propagate ~2 sec); PB.9 joint-assignee Joint chip + `Joint · 1` group + intersection-filter cross-tab; PB.7 status-derive ON→on-hold + OFF→snap-to-derived cross-tab; PB.8 Dashboard drill-down on Open tasks + Completed (last 30d) + Active-projects-correctly-inert + live re-render on Diana's status change. Surfaced one polish bug: Dashboard chart was stretching vertically on wide screens (preserveAspectRatio="none" + fixed height) — fixed in `d31ad98`.
 - [x] **2026-05-24** — During Task 8.3 walkthrough: **build a one-off Asana → Projects importer**. Brad was locked out of his Asana project by a subscription gate; the original Claude-generated project tree lived in the shared chat at `https://claude.ai/share/d162fea2-bb74-48f1-a15a-4525bcb143e4`. **Resolved in v2.0.1.** Brad pasted the recovered JSON inline; instead of building a generic Asana fetcher, we embedded the literal payload in `seed-businesstransform.js` and applied the same `migrate-pm.js` idempotency pattern. The 9-stream + Milestones import shipped under the `business_transform_seeded` flag.
