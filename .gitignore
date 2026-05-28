@@ -2,3 +2,14 @@ node_modules/
 playwright-report/
 test-results/
 .playwright/
+
+# Real bank-data samples must NOT be committed (the repo is public). Use
+# C:\Vault\fp-samples\ for parser development against real exports.
+# The historical Transactions.csv (NAB sample) is exempted because it's
+# already in public git history — removing it from HEAD doesn't unring that
+# bell; what matters is no NEW sensitive files slip in.
+sample-data/*.csv
+sample-data/*.pdf
+sample-data/*.qif
+sample-data/*.qfx
+!sample-data/Transactions.csv
