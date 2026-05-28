@@ -112,6 +112,68 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **v2.0.4** Auth hotfix: revert `signInWithGoogle` to popup — _done 2026-05-25, Brad hit a sign-in loop in production after PB.6's redirect switch; Firebase compat layer didn't consume `getRedirectResult` and Chrome third-party cookie policy was dropping the in-flight auth state. Popup is more reliable; the COOP warnings PB.6 silenced are cosmetic. No test surface (Firebase blocked in E2E); released as tag `v2.0.4`_
 - [x] **v2.0.5** Business-transform extras: three "Recommended additions" from the 2026-05-25 report — _done 2026-05-25, `add-businesstransform-extras-20260525.js` + `maybeAddBusinessTransformExtras20260525` runner gated by `business_transform_extras_20260525_applied`; 10 new tasks: Document Services platform (parent + 7 children incl. blocked Phase 1.5) under Stream 4, Public-surface security hardening child under Stream 1 / Phase 1 Auth, Header nav IA refactor Phase 2 top-level under Stream 1 (+8 unit / +5 E2E, now 171 E2E); released as tag `v2.0.5`_
 
+## v2.1 hotfix — n8n cron heartbeats short-circuit on empty queue
+
+- [ ] **v2.1.1** Fix `FamilyPlanner-InstantDrainerCron` heartbeat — XS
+  - **Bug:** healthchecks.io fired DOWN at 2026-05-26 17:22 +1000. Workflow active and executing every 30 min without errors, but Total Pings = 1 (just the manual test ping when wired). n8n's per-item model: when the Code-node filter outputs 0 items (queue empty, or all items already `sent`/`failed`), the Send Email → PATCH → Heartbeat chain runs against 0 items so `Heartbeat` never fires. n8n still reports the run as Success.
+  - **Fix:** between the last PATCH branch and `Heartbeat`, insert a Merge (Append) → Set (Always Output Data = true, Execute Once = true), then wire `Heartbeat` after the Set. Heartbeat now fires exactly once per execution regardless of queue size, and still only pings when the workflow completes end-to-end without errors (matches the SenseAi `recurring-tasks cron` intent).
+  - **Verify:** trigger manual run with empty queue → check Total Pings increments; let one scheduled fire pass → Total Pings increments again; healthchecks.io flips back to UP.
+- [ ] **v2.1.2** Audit `FamilyPlanner-DailyDigestCron` for the same bug — XS — same architecture (GET digest_pending → Code → Send Email → PATCH → Heartbeat); `digest_pending` will often be empty so the bug is almost certainly latent. Apply the same Merge → Set → Heartbeat tail if confirmed.
+- [ ] **v2.1.3** Update [routines.md](file:///C:/Users/brads/.claude/routines.md) "n8n cron monitoring pattern" note to call out the empty-items pitfall + the Merge/Set tail as the standard shape — XS — prevents the same bug in future cron workflows.
+
+---
+
+## v2.4 — Browser-automated scraping pilot: HSBC + Selfwealth + AMP
+
+> Pivoted twice in 24 hours: original PocketSmith plan abandoned (HSBC loans not CDR-shareable); CSV-parser-only plan replaced when Brad opted for browser-automated scraping from the Geekom. Plan at [`C:\Users\brads\.claude\plans\i-want-to-discuss-dapper-trinket.md`](file:///C:/Users/brads/.claude/plans/i-want-to-discuss-dapper-trinket.md). 3 scrapers covering 3 architectural patterns (multi-account transactions, balance-only, hybrid) — pilot validates the approach before scaling to the other 6 logins (NAB1, NAB2, Westpac, ANZ, Bankwest, IBKR).
+>
+> See [memory: project_bank_api_decisions.md](file:///C:/Users/brads/.claude/projects/e--Projects-Family-Planner/memory/project_bank_api_decisions.md) for the full discovery trail (Basiq → PocketSmith → CSV → scraping) and the rationale.
+
+**Stack:** Playwright (headless) + Windows Task Scheduler + KeePass CLI + n8n on Geekom + Firebase `bank_inbox/{transactions,balances}/` + browser realtime listener → Import tab (transactions) / `accounts.js` (balances).
+
+### Phase 0 — Brad's setup (no app code)
+
+- [ ] **UA1** Confirm KeePass flavour (KeePass2 vs KeePassXC) — affects CLI choice
+- [ ] **UA2** Create 3 KeePass entries: `Family Planner - HSBC netbank`, `Family Planner - Selfwealth`, `Family Planner - AMP`
+- [ ] **UA3** Headed-browser login to each of HSBC, Selfwealth, AMP from the Geekom + enroll trusted-device where offered (establishes the `storageState` baseline)
+- [ ] **UA4** Create 3 healthchecks.io checks: `FamilyPlanner-{Hsbc,Selfwealth,Amp}ScraperCron` (1d × 2h grace)
+- [ ] **UA5** Create folders: `C:\BankScrapes\{hsbc,selfwealth,amp}\`, `C:\BankScrapes\logs\`, `C:\Vault\fp-state\`
+- [ ] **Checkpoint J** — three throwaway scripts confirm KeePass read + healthcheck POST work
+
+### Phase 1 — Scrapers (server-side)
+
+- [ ] **T1** Bootstrap `scrapers/` top-level folder (sibling of `app/`); `package.json`; `npm install @playwright/test`; `npx playwright install chromium`; smoke-test `hello.spec.js` — M
+- [ ] **T2** `scrapers/hsbc.spec.js` — login + 6-account randomised-order loop + per-account CSV export to `C:\BankScrapes\hsbc\YYYY-MM-DD\<slug>.csv`; partial-run exit code 5 — M
+- [ ] **T2.5** `scrapers/selfwealth.spec.js` — login + 2-account balance loop + JSON per account — S
+- [ ] **T2.6** `scrapers/amp.spec.js` — login + balance extraction + transactions CSV export (hybrid) — S
+- [ ] **T3** `scrapers/lib/keepass.js` — CLI wrapper, password never logged — S
+- [ ] **T4** `scrapers/lib/healthcheck.js` — POST to healthchecks.io URL on success — S
+- [ ] **T5** Three PowerShell wrappers (`run-{hsbc,selfwealth,amp}.ps1`) with 0–90 min jitter sleep + shared `lib/wrapper-common.ps1` — S
+- [ ] **T6** Three Windows Task Scheduler entries at 06:00 daily — S
+- [ ] **Checkpoint K** — manual-trigger each scraper end-to-end; expected files present in dated folders; KeePass read works; healthchecks fire on success
+
+### Phase 2 — Ingestion pipeline + browser UI
+
+- [ ] **T7** Three n8n workflows (hsbc-ingest CSV, selfwealth-ingest balance, amp-ingest hybrid) polling per-bank folders every 15 min — M
+- [ ] **T8** Data layer in `app/js/data.js`: `DEFAULT_BANK_INBOX`, `sanitiseBankInbox`, `parseHsbcCsv`, `parseAmpCsv`, `isValidBalanceRecord` + ≥10 unit cases — S
+- [ ] **T9** `app/js/firebase-sync.js` realtime listener + initialSync + `state.bankInbox` init + render hooks — S
+- [ ] **T10** Browser Import tab Bank inbox sub-section (`renderBankInboxTab` + `markBankInboxApplied`) — M
+- [ ] **T10.5** Browser `accounts.js` auto-populate from `state.bankInbox.balances` with "auto" tag + asOf + manual-override behaviour — S
+- [ ] **T11** E2E `bank-api — HSBC inbox` (3 scenarios) + `bank-api — auto-populated balances` (2 scenarios) — S
+- [ ] **Checkpoint L** — Firebase shows bank_inbox rows from real scraper runs; browser surfaces them; Apply-to-Planner flips applied:true; manual balance override works
+
+### Phase 3 — Burn-in (4 weeks)
+
+- [ ] **UA6** Manual trigger all 3 scrapers end-to-end; verify CSVs/JSONs → Firebase → UI flow
+- [ ] **UA7** 4-week burn-in: per-bank daily flow; watch for partial-runs, MFA expiry, UI changes, anti-bot signals
+- [ ] **UA8** Week-4 per-bank decision gate: ship working scrapers, fall back to manual for fragile ones, write follow-up plan for remaining 6 logins if architecture validates
+
+### Phase 4 — Wrap (only after Phase 3 decision gate)
+
+- [ ] **T12** `routines.md` + `HANDOVER.md` v2.4 section + `CHANGELOG.md` + tag `v2.4` + two-tab Firebase smoke — XS
+
+**Estimated effort:** ~18–22 hr for the 3-scraper pilot end-to-end; future bank rollouts amortise ~3–5 hr per added login.
+
 ---
 
 ## Resolved decisions (from review)
