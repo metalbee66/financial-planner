@@ -98,6 +98,118 @@ function parseNabDate(str) {
     return new Date(year, month, day);
 }
 
+/**
+ * Parse a single CSV row that may contain quoted fields with embedded
+ * commas (HSBC and others quote amounts like "-1,181.24"). Trims each
+ * field. Tolerates trailing empty columns (lines ending in `,`).
+ */
+function parseCsvLine(line) {
+    const fields = [];
+    let i = 0;
+    while (i <= line.length) {
+        if (line[i] === '"') {
+            // Quoted field — scan to closing quote
+            let end = i + 1;
+            while (end < line.length && line[end] !== '"') end++;
+            fields.push(line.slice(i + 1, end));
+            i = end + 1;
+            // Skip the comma after the closing quote (if present)
+            if (line[i] === ',') i++;
+        } else {
+            // Unquoted field — scan to next comma or EOL
+            let end = i;
+            while (end < line.length && line[end] !== ',') end++;
+            fields.push(line.slice(i, end));
+            i = end + 1;
+        }
+    }
+    // The while-condition `i <= line.length` runs one extra iteration to
+    // catch a trailing empty field (e.g. "a,b," → ['a','b','']). Trim each.
+    return fields.map(f => f.trim());
+}
+
+function parseHsbcDate(str) {
+    const months = {
+        'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+        'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11,
+    };
+    const parts = str.trim().split(/\s+/);
+    if (parts.length !== 3) return null;
+    const day = parseInt(parts[0], 10);
+    const month = months[parts[1]];
+    const year = parseInt(parts[2], 10);
+    if (isNaN(day) || month === undefined || isNaN(year)) return null;
+    return new Date(year, month, day);
+}
+
+function parseHsbcAmount(str) {
+    // Format examples: "-1,181.24" / "4,522.00" / " -317,932.42"
+    // (quoted, may have leading whitespace, comma thousands separator).
+    // Strip quotes, whitespace, and commas before parseFloat.
+    if (str === undefined || str === null) return null;
+    const cleaned = String(str).replace(/[\s",]/g, '');
+    if (cleaned.length === 0) return null;
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : n;
+}
+
+/**
+ * Parse an HSBC transaction-export CSV. HSBC's format differs from NAB:
+ *   - Header: ` Transaction Date,Description,Amount,Balance,` (leading space
+ *     on every value; trailing comma → empty 5th column)
+ *   - Date: `D MMM YYYY` or `DD MMM YYYY` (e.g. `25 May 2026`, `01 May 2026`)
+ *   - Amount: quoted string with comma thousands separator, signed (debit
+ *     negative, credit positive). Loan accounts produce mostly negatives.
+ *   - Balance: same format as amount; loan accounts can be negative.
+ *   - No category or merchant columns (unlike NAB).
+ *
+ * `accountSlug` identifies which HSBC account this CSV came from — written
+ * to the output's `account` field so downstream dedup can distinguish
+ * same-day-same-amount rows across different HSBC accounts. Defaults to
+ * 'hsbc-unknown' if not supplied (mostly for test convenience).
+ */
+export function parseHsbcCsv(text, accountSlug = 'hsbc-unknown') {
+    if (!text || typeof text !== 'string') return [];
+    const lines = text.split(/\r?\n/);
+    const transactions = [];
+
+    // Skip first line (header). Empty/header-only input returns [].
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = parseCsvLine(line);
+        if (cols.length < 3) continue;  // need at least date, description, amount
+
+        const date = parseHsbcDate(cols[0]);
+        if (!date) continue;  // skip malformed rows silently
+
+        const amount = parseHsbcAmount(cols[2]);
+        if (amount === null) continue;
+
+        const details = cols[1];
+        const isRefund = amount > 0;
+
+        transactions.push({
+            date,
+            dateStr: cols[0].trim(),
+            amount: Math.abs(amount),
+            isRefund,
+            account: accountSlug,
+            source: 'HSBC',
+            txType: '',
+            details,
+            category: '',
+            merchant: details.substring(0, 30).trim(),
+            glLine: '',
+            isDuplicate: false,
+        });
+    }
+
+    transactions.sort((a, b) => a.date - b.date);
+    return transactions;
+}
+
 function getWeekIndex(date) {
     const year = date.getFullYear();
     const dates = getWeekDates(year);

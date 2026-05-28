@@ -356,3 +356,53 @@ export function showToast(msg) {
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 1500);
 }
+
+// ── Bank inbox (v2.4 — automated scraping pipeline) ──
+// Pure data helpers for the bank_inbox Firebase key (transactions + balances
+// siblings). Bank-specific CSV parsers (parseHsbcCsv etc.) live alongside
+// parseNabCsv in js/modules/finance/import.js for cohesion.
+
+export const DEFAULT_BANK_INBOX = Object.freeze({
+    transactions: {},
+    balances: {},
+});
+
+export const BALANCE_CATEGORIES = Object.freeze(['banking', 'super', 'investment']);
+
+/**
+ * Backfill a bank_inbox snapshot loaded from Firebase / localStorage.
+ * Tolerates null / undefined / wrong-shape input — returns the empty default
+ * rather than crashing the realtime listener.
+ */
+export function sanitiseBankInbox(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        return { transactions: {}, balances: {} };
+    }
+    const transactions = (obj.transactions && typeof obj.transactions === 'object' && !Array.isArray(obj.transactions))
+        ? obj.transactions
+        : {};
+    const balances = (obj.balances && typeof obj.balances === 'object' && !Array.isArray(obj.balances))
+        ? obj.balances
+        : {};
+    return { transactions, balances };
+}
+
+/**
+ * Validate a balance record before it's written to bank_inbox/balances/{slug}
+ * or rendered in the accounts view. Required shape:
+ *   { accountSlug: non-empty string,
+ *     balance: finite number,
+ *     asOf: ISO 8601 string parseable by Date.parse,
+ *     institution: non-empty string,
+ *     category: 'banking' | 'super' | 'investment' }
+ */
+export function isValidBalanceRecord(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    if (typeof obj.accountSlug !== 'string' || obj.accountSlug.length === 0) return false;
+    if (typeof obj.balance !== 'number' || !Number.isFinite(obj.balance)) return false;
+    if (typeof obj.asOf !== 'string' || obj.asOf.length === 0) return false;
+    if (Number.isNaN(Date.parse(obj.asOf))) return false;
+    if (typeof obj.institution !== 'string' || obj.institution.length === 0) return false;
+    if (!BALANCE_CATEGORIES.includes(obj.category)) return false;
+    return true;
+}

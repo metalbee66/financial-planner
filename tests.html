@@ -31,9 +31,11 @@
 
     <script type="module">
         import { runProjectsDataTests } from './js/modules/projects/data.test.js';
+        import { runDataTests } from './js/data.test.js';
 
         const sections = [
             { title: 'Projects — data layer', run: runProjectsDataTests },
+            { title: 'Family Planner — bank inbox + HSBC parser', run: runDataTests },
         ];
 
         const out = document.getElementById('test-output');
