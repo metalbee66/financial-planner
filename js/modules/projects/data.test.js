@@ -78,7 +78,9 @@ import {
     participantEmail,
     ADMIN_USER_IDS,
     isAdminUser,
+    DEFAULT_PROJECTS,
 } from './data.js';
+import { PROJECT_SEEDS, applyProjectSeed } from './seeds-registry.js';
 import {
     NOTIFICATION_KINDS,
     MAX_NOTIFICATIONS_PER_USER,
@@ -4040,6 +4042,67 @@ test('every added task carries the brad+diana joint assignee default', () => {
         'every added task has 2 assignees');
     truthy(added.every(t => t.assignees.includes('brad') && t.assignees.includes('diana')),
         'every added task is assigned to both brad and diana');
+});
+
+// ── seeds-registry: applyProjectSeed + PROJECT_SEEDS ──
+
+function fakeSeed(flag) {
+    return {
+        id: flag,
+        flag,
+        label: 'Fake',
+        description: 'fake seed',
+        run: () => ({ projects: [{ id: 'fp1' }], tasks: [{ id: 'ft1' }, { id: 'ft2' }] }),
+    };
+}
+
+test('applyProjectSeed appends projects+tasks, sets flag, returns ran:true for a pending seed', () => {
+    const pd = { items: [], tasks: [] };
+    const seed = fakeSeed('test_seed_flag');
+    const result = applyProjectSeed(pd, seed);
+    eq(result.ran, true, 'ran should be true on first apply');
+    eq(pd.items.length, 1, 'one project appended');
+    eq(pd.tasks.length, 2, 'two tasks appended');
+    eq(pd.test_seed_flag, true, 'flag flipped true');
+    eq(result.added.projects.length, 1, 'added.projects reported');
+    eq(result.added.tasks.length, 2, 'added.tasks reported');
+});
+
+test('applyProjectSeed is idempotent — a second call is a no-op', () => {
+    const pd = { items: [], tasks: [] };
+    const seed = fakeSeed('test_seed_flag');
+    applyProjectSeed(pd, seed);
+    const second = applyProjectSeed(pd, seed);
+    eq(second.ran, false, 'second apply is a no-op');
+    eq(pd.items.length, 1, 'still one project (no duplicate append)');
+    eq(pd.tasks.length, 2, 'still two tasks (no duplicate append)');
+});
+
+test('applyProjectSeed no-ops when the flag is already set', () => {
+    const pd = { items: [], tasks: [], already_flag: true };
+    const seed = fakeSeed('already_flag');
+    const result = applyProjectSeed(pd, seed);
+    eq(result.ran, false, 'no-op when flag preset');
+    eq(pd.items.length, 0, 'nothing appended');
+});
+
+test('applyProjectSeed tolerates missing items/tasks arrays', () => {
+    const pd = {};
+    const result = applyProjectSeed(pd, fakeSeed('fresh_flag'));
+    eq(result.ran, true);
+    eq(pd.items.length, 1, 'items array created + project appended');
+    eq(pd.tasks.length, 2, 'tasks array created + tasks appended');
+});
+
+test('PROJECT_SEEDS entries are well-formed and their flags exist in DEFAULT_PROJECTS', () => {
+    truthy(PROJECT_SEEDS.length >= 2, 'at least the two known seeds are registered');
+    for (const s of PROJECT_SEEDS) {
+        truthy(typeof s.id === 'string' && s.id, `seed has id (${s.id})`);
+        truthy(typeof s.flag === 'string' && s.flag, `seed ${s.id} has flag`);
+        truthy(typeof s.label === 'string' && s.label, `seed ${s.id} has label`);
+        truthy(typeof s.run === 'function', `seed ${s.id} has run()`);
+        truthy(s.flag in DEFAULT_PROJECTS, `flag ${s.flag} is declared in DEFAULT_PROJECTS`);
+    }
 });
 
 // ── runner ──
