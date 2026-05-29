@@ -36,8 +36,7 @@ import { loadPM } from './modules/pm-legacy/pm.js';
 import { loadProjects, PROJECTS_KEY } from './modules/projects/data.js';
 import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/projects/index.js';
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
-import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './modules/projects/seed-businesstransform.js';
-import { seedSubpoenaBrauerProject } from './modules/projects/seed-subpoena-brauer.js';
+import { PROJECT_SEEDS, applyProjectSeed } from './modules/projects/seeds-registry.js';
 import { applyBusinessTransformUpdate20260525 } from './modules/projects/update-businesstransform-20260525.js';
 import { applyBusinessTransformExtras20260525 } from './modules/projects/add-businesstransform-extras-20260525.js';
 
@@ -74,8 +73,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 await initialSync();
                 maybeRunPMMigration();
-                maybeRunBusinessTransformSeed();
-                maybeRunSubpoenaBrauerSeed();
+                runPendingProjectSeeds();
                 maybeApplyBusinessTransformUpdate20260525();
                 maybeAddBusinessTransformExtras20260525();
                 maybeCleanupLegacyPMData();
@@ -92,8 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // No Firebase — run locally
         showApp();
         maybeRunPMMigration();
-        maybeRunBusinessTransformSeed();
-        maybeRunSubpoenaBrauerSeed();
+        runPendingProjectSeeds();
         maybeApplyBusinessTransformUpdate20260525();
         maybeAddBusinessTransformExtras20260525();
         maybeCleanupLegacyPMData();
@@ -124,36 +121,25 @@ function maybeRunPMMigration() {
 }
 
 /**
- * v2.0.1 one-time seed: imports the SenseAi "Business transformation & scale"
- * project tree (8 streams + a Milestones cross-cut) into the Projects module.
- * Idempotent via the `business_transform_seeded` flag.
+ * Apply any not-yet-run project seeds from the registry. Each seed is
+ * idempotent via its own DEFAULT_PROJECTS flag (handled by applyProjectSeed),
+ * so this is a no-op once every seed has landed. The admin "Project seeds"
+ * panel runs the same applyProjectSeed against the same registry, so a manual
+ * pull and a boot-time apply are identical. Seeds run in registry order, which
+ * keeps `business_transform_seeded` set before the dependent update/extras
+ * one-shots below run.
  */
-function maybeRunBusinessTransformSeed() {
-    if (!state.projectsData || state.projectsData.business_transform_seeded) return;
-    const { projects, tasks } = seedBusinessTransformProjects(BUSINESS_TRANSFORM_SEED);
-    state.projectsData.items = (state.projectsData.items || []).concat(projects);
-    state.projectsData.tasks = (state.projectsData.tasks || []).concat(tasks);
-    state.projectsData.business_transform_seeded = true;
-    fbSave(PROJECTS_KEY, state.projectsData);
-    if (projects.length > 0) {
-        console.log(`Business transform seed: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
+function runPendingProjectSeeds() {
+    if (!state.projectsData) return;
+    let appliedAny = false;
+    for (const seed of PROJECT_SEEDS) {
+        const { ran, added } = applyProjectSeed(state.projectsData, seed);
+        if (ran) {
+            appliedAny = true;
+            console.log(`Seed "${seed.id}": appended ${added.projects.length} project(s) and ${added.tasks.length} task(s) to Projects.`);
+        }
     }
-}
-
-/**
- * Subpoena Brauer legal matter project — court proceedings (hearing 1 Jul).
- * Idempotent via the `subpoena_brauer_seeded` flag.
- */
-function maybeRunSubpoenaBrauerSeed() {
-    if (!state.projectsData || state.projectsData.subpoena_brauer_seeded) return;
-    const { projects, tasks } = seedSubpoenaBrauerProject();
-    state.projectsData.items = (state.projectsData.items || []).concat(projects);
-    state.projectsData.tasks = (state.projectsData.tasks || []).concat(tasks);
-    state.projectsData.subpoena_brauer_seeded = true;
-    fbSave(PROJECTS_KEY, state.projectsData);
-    if (projects.length > 0) {
-        console.log(`Subpoena Brauer seed: appended ${projects.length} project(s) and ${tasks.length} task(s) to Projects.`);
-    }
+    if (appliedAny) fbSave(PROJECTS_KEY, state.projectsData);
 }
 
 /**
