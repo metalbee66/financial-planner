@@ -36,7 +36,6 @@ import { loadPM } from './modules/pm-legacy/pm.js';
 import { loadProjects, PROJECTS_KEY } from './modules/projects/data.js';
 import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/projects/index.js';
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
-import { PROJECT_SEEDS, applyProjectSeed } from './modules/projects/seeds-registry.js';
 import { applyBusinessTransformUpdate20260525 } from './modules/projects/update-businesstransform-20260525.js';
 import { applyBusinessTransformExtras20260525 } from './modules/projects/add-businesstransform-extras-20260525.js';
 
@@ -73,7 +72,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 await initialSync();
                 maybeRunPMMigration();
-                runPendingProjectSeeds();
                 maybeApplyBusinessTransformUpdate20260525();
                 maybeAddBusinessTransformExtras20260525();
                 maybeCleanupLegacyPMData();
@@ -90,7 +88,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // No Firebase — run locally
         showApp();
         maybeRunPMMigration();
-        runPendingProjectSeeds();
         maybeApplyBusinessTransformUpdate20260525();
         maybeAddBusinessTransformExtras20260525();
         maybeCleanupLegacyPMData();
@@ -120,27 +117,10 @@ function maybeRunPMMigration() {
     }
 }
 
-/**
- * Apply any not-yet-run project seeds from the registry. Each seed is
- * idempotent via its own DEFAULT_PROJECTS flag (handled by applyProjectSeed),
- * so this is a no-op once every seed has landed. The admin "Project seeds"
- * panel runs the same applyProjectSeed against the same registry, so a manual
- * pull and a boot-time apply are identical. Seeds run in registry order, which
- * keeps `business_transform_seeded` set before the dependent update/extras
- * one-shots below run.
- */
-function runPendingProjectSeeds() {
-    if (!state.projectsData) return;
-    let appliedAny = false;
-    for (const seed of PROJECT_SEEDS) {
-        const { ran, added } = applyProjectSeed(state.projectsData, seed);
-        if (ran) {
-            appliedAny = true;
-            console.log(`Seed "${seed.id}": appended ${added.projects.length} project(s) and ${added.tasks.length} task(s) to Projects.`);
-        }
-    }
-    if (appliedAny) fbSave(PROJECTS_KEY, state.projectsData);
-}
+// Project seeds are NOT auto-applied on boot. They are pulled on demand from
+// the admin "Project seeds" panel (Projects → Admin), which runs the same
+// applyProjectSeed against the registry in `modules/projects/seeds-registry.js`.
+// This lets a newly-deployed project be added explicitly without a relogin.
 
 /**
  * v2.0.3 one-shot: apply the 2026-05-25 status update from the off-repo

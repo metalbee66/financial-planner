@@ -1227,6 +1227,8 @@ select.editable { width: 100px; cursor: pointer; }
 .admin-status-pending { background: rgba(255,152,0,0.15); color: var(--orange); border: 1px solid var(--orange); }
 .admin-status-sent { background: rgba(0,200,83,0.15); color: var(--green); border: 1px solid var(--green); }
 .admin-status-failed { background: rgba(255,82,82,0.15); color: var(--red); border: 1px solid var(--red); }
+.seed-label { font-weight: 600; }
+.seed-desc { font-size: 0.8rem; color: var(--text-dim); margin-top: 2px; }
 .admin-actions { white-space: nowrap; }
 .admin-retry-btn {
     background: transparent;

@@ -2633,7 +2633,9 @@ test.describe('Phase 6.5 — Email-queue admin panel', () => {
 
     test('admin tab renders empty state when the queue is empty', async ({ page }) => {
         await page.locator('.projects-subtab[data-subtab="admin"]').click();
-        await expect(page.locator('.admin-title')).toHaveText('Email queue');
+        // Two admin panels now share .admin-title (Project seeds + Email queue);
+        // target the heading by its accessible name.
+        await expect(page.getByRole('heading', { name: 'Email queue' })).toBeVisible();
         await expect(page.locator('.admin-empty-row')).toContainText('Email queue is empty.');
     });
 
@@ -3011,8 +3013,9 @@ test.describe('Phase 8.1 — PM DLBooks → Projects migration', () => {
 // ──────────────────────────────────────────────────────────────────────────
 test.describe('v2.0.1 — Business transformation seed', () => {
 
-    // Same beforeEach-flip pattern as Phase 8.1 — clear the seed flag so the
-    // shell's `maybeRunBusinessTransformSeed` runs against a clean bucket.
+    // Seeds no longer auto-apply on boot — they are pulled from the admin
+    // "Project seeds" panel. Start from a clean bucket with the seed pending,
+    // pull it via Run now, then return to the overview to see the cards.
     async function resetSeedFlagAndReload(page) {
         await page.evaluate(() => {
             localStorage.setItem('projects', JSON.stringify({
@@ -3025,6 +3028,9 @@ test.describe('v2.0.1 — Business transformation seed', () => {
         await page.reload();
         await page.waitForSelector('#module-host', { state: 'attached' });
         await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+        await page.locator('.seed-row[data-seed-id="business-transform"] .seed-run-btn').click();
+        await page.locator('.projects-subtab[data-subtab="overview"]').click();
     }
 
     test('first boot seeds the Milestones + 8 stream projects', async ({ page }) => {
@@ -3052,6 +3058,70 @@ test.describe('v2.0.1 — Business transformation seed', () => {
         await expect(parentRow).toBeVisible();
         // Subtask from the JSON appears indented under its parent.
         await expect(page.locator('.task-row', { hasText: 'auth/routes.py — login/logout Blueprint' })).toBeVisible();
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Admin — Project seeds queue (manual pull)', () => {
+
+    async function openSeedsPanelUnseeded(page) {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                business_transform_seeded: false,
+                subpoena_brauer_seeded: false,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+    }
+
+    test('lists registered seeds as pending with a Run now action when unseeded', async ({ page }) => {
+        await openSeedsPanelUnseeded(page);
+        await expect(page.locator('table[aria-label="Project seeds"]')).toBeVisible();
+        const brauer = page.locator('.seed-row[data-seed-id="subpoena-brauer"]');
+        await expect(brauer.locator('.admin-status-pill')).toHaveText('Pending');
+        await expect(brauer.locator('.seed-run-btn')).toBeVisible();
+        await expect(page.locator('#seed-run-all-btn')).toContainText('Run 2 pending');
+    });
+
+    test('Run now applies a pending seed live (no reload) and flips it to Applied', async ({ page }) => {
+        await openSeedsPanelUnseeded(page);
+        await page.locator('.seed-row[data-seed-id="subpoena-brauer"] .seed-run-btn').click();
+        const brauer = page.locator('.seed-row[data-seed-id="subpoena-brauer"]');
+        await expect(brauer.locator('.admin-status-pill')).toHaveText('Applied');
+        await expect(brauer.locator('.seed-run-btn')).toHaveCount(0);
+        // Flag persisted + the project landed in storage, without a reload.
+        const stored = await page.evaluate(() => {
+            const d = JSON.parse(localStorage.getItem('projects'));
+            return { flag: d.subpoena_brauer_seeded, hasProject: d.items.some(p => /Brauer/i.test(p.name)) };
+        });
+        expect(stored.flag).toBe(true);
+        expect(stored.hasProject).toBe(true);
+    });
+
+    test('applied seeds show Applied with no action and Run-all is disabled at 0 pending', async ({ page }) => {
+        await page.evaluate(() => {
+            localStorage.setItem('projects', JSON.stringify({
+                items: [], tasks: [], notifications: {}, prefs: {},
+                digest_pending: {},
+                pm_dlbooks_migrated_to_projects: true,
+                business_transform_seeded: true,
+                subpoena_brauer_seeded: true,
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+        await expect(page.locator('.seed-row .admin-status-pill', { hasText: 'Pending' })).toHaveCount(0);
+        await expect(page.locator('.seed-run-btn')).toHaveCount(0);
+        await expect(page.locator('#seed-run-all-btn')).toBeDisabled();
+        await expect(page.locator('#seed-run-all-btn')).toContainText('Run 0 pending');
     });
 });
 
@@ -3139,10 +3209,11 @@ test.describe('v2.0.2 — Legacy pm_dlbooks cleanup', () => {
 // ──────────────────────────────────────────────────────────────────────────
 test.describe('v2.0.3 — Business transform status update 2026-05-25', () => {
 
-    // The update only runs when (a) the seed is present and (b) the update
-    // flag is false. This helper drives both: re-seeds the projects bucket
-    // by flipping the seed flag off, then reloads twice to chain seed→update
-    // through the boot sequence.
+    // The update only runs on boot when (a) the seed is present and (b) the
+    // update flag is false. Seeds no longer auto-apply on boot, so: start with
+    // both flags off, pull the seed via the admin panel (sets the seed flag +
+    // adds the projects), then reload so the boot-time update one-shot patches
+    // the freshly-seeded tasks.
     async function seedAndApplyUpdate(page) {
         await page.evaluate(() => {
             localStorage.setItem('projects', JSON.stringify({
@@ -3150,12 +3221,15 @@ test.describe('v2.0.3 — Business transform status update 2026-05-25', () => {
                 digest_pending: {},
                 pm_dlbooks_migrated_to_projects: true,
                 pm_dlbooks_cleaned: true,
-                // Seed flag off so the seed runner fires; update flag off
-                // so the update runner fires in the SAME boot.
                 business_transform_seeded: false,
                 business_transform_update_20260525_applied: false,
             }));
         });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+        await page.locator('.seed-row[data-seed-id="business-transform"] .seed-run-btn').click();
         await page.reload();
         await page.waitForSelector('#module-host', { state: 'attached' });
         await page.locator('.top-nav-btn[data-module="projects"]').click();
@@ -3207,8 +3281,9 @@ test.describe('v2.0.3 — Business transform status update 2026-05-25', () => {
 // ──────────────────────────────────────────────────────────────────────────
 test.describe('v2.0.5 — Business transform extras 2026-05-25', () => {
 
-    // Drives the same seed→extras chain the v2.0.3 helper uses: clears the
-    // seed + extras flags so both runners fire on the next reload.
+    // Same shape as the v2.0.3 helper: seeds no longer auto-apply on boot, so
+    // pull the seed via the admin panel, then reload so the boot-time extras
+    // one-shot appends its rows to the freshly-seeded tasks.
     async function seedAndApplyExtras(page) {
         await page.evaluate(() => {
             localStorage.setItem('projects', JSON.stringify({
@@ -3221,6 +3296,11 @@ test.describe('v2.0.5 — Business transform extras 2026-05-25', () => {
                 business_transform_extras_20260525_applied: false,
             }));
         });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.projects-subtab[data-subtab="admin"]').click();
+        await page.locator('.seed-row[data-seed-id="business-transform"] .seed-run-btn').click();
         await page.reload();
         await page.waitForSelector('#module-host', { state: 'attached' });
         await page.locator('.top-nav-btn[data-module="projects"]').click();

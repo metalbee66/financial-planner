@@ -1461,7 +1461,7 @@ export function loadProjects() {
         if (!parsed || !Array.isArray(parsed.items)) {
             return JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
         }
-        return {
+        const out = {
             items: parsed.items.map(sanitiseProject).filter(Boolean),
             tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(sanitiseTask).filter(Boolean) : [],
             notifications: (parsed.notifications && typeof parsed.notifications === 'object' && !Array.isArray(parsed.notifications))
@@ -1473,12 +1473,16 @@ export function loadProjects() {
             digest_pending: (parsed.digest_pending && typeof parsed.digest_pending === 'object' && !Array.isArray(parsed.digest_pending))
                 ? parsed.digest_pending
                 : {},
-            pm_dlbooks_migrated_to_projects: parsed.pm_dlbooks_migrated_to_projects === true,
-            business_transform_seeded: parsed.business_transform_seeded === true,
-            pm_dlbooks_cleaned: parsed.pm_dlbooks_cleaned === true,
-            business_transform_update_20260525_applied: parsed.business_transform_update_20260525_applied === true,
-            business_transform_extras_20260525_applied: parsed.business_transform_extras_20260525_applied === true,
         };
+        // Preserve every idempotency flag declared in DEFAULT_PROJECTS (all
+        // boolean, default false). Generic so new seed flags persist without
+        // editing this whitelist — the seed registry + DEFAULT_PROJECTS are
+        // the single source of truth.
+        for (const key of Object.keys(DEFAULT_PROJECTS)) {
+            if (key in out) continue;
+            out[key] = parsed[key] === true;
+        }
+        return out;
     } catch (e) {
         console.error('loadProjects parse error:', e);
         return JSON.parse(JSON.stringify(DEFAULT_PROJECTS));

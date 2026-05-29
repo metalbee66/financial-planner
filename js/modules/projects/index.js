@@ -88,6 +88,7 @@ import {
     isCelebrationSoundEnabled,
     setCelebrationSoundEnabled,
 } from './celebrate.js';
+import { PROJECT_SEEDS, applyProjectSeed } from './seeds-registry.js';
 import {
     suggestTaskNames,
     suggestDueDate,
@@ -3196,9 +3197,77 @@ function loadEmailQueueMap() {
 }
 
 /**
- * Render the admin sub-tab inside Projects. Lists the last 50 queue entries,
- * status-filterable, with a Retry button on failed items and a "Clear sent
- * older than N days" sweep button at the bottom.
+ * Build the "Project seeds" admin panel HTML. Lists every seed from the
+ * registry with its applied/pending status and a "Run now" action on pending
+ * ones. Labels/descriptions are developer-controlled registry constants;
+ * escaped anyway to match this file's rendering convention.
+ */
+function renderProjectSeedsPanelHtml() {
+    const pd = state.projectsData || {};
+    const rows = PROJECT_SEEDS.map(s => ({
+        id: s.id,
+        label: s.label,
+        description: s.description,
+        applied: pd[s.flag] === true,
+    }));
+    const pending = rows.filter(r => !r.applied).length;
+
+    const body = rows.length === 0
+        ? `<tr class="admin-empty-row"><td colspan="3">No project seeds registered.</td></tr>`
+        : rows.map(r => `
+            <tr class="seed-row" data-seed-id="${escapeAttr(r.id)}">
+                <td>
+                    <div class="seed-label">${escapeHtml(r.label)}</div>
+                    ${r.description ? `<div class="seed-desc">${escapeHtml(r.description)}</div>` : ''}
+                </td>
+                <td><span class="admin-status-pill admin-status-${r.applied ? 'sent' : 'pending'}">${r.applied ? 'Applied' : 'Pending'}</span></td>
+                <td class="admin-actions">${r.applied
+                    ? ''
+                    : `<button type="button" class="btn-secondary seed-run-btn" data-seed-id="${escapeAttr(r.id)}">Run now</button>`}</td>
+            </tr>`).join('');
+
+    return `
+        <div class="admin-toolbar">
+            <h2 class="admin-title">Project seeds</h2>
+            <button type="button" id="seed-run-all-btn" class="btn-secondary"${pending === 0 ? ' disabled' : ''}>Run ${pending} pending</button>
+        </div>
+        <div class="admin-table-wrap">
+            <table class="admin-table" aria-label="Project seeds">
+                <thead><tr><th>Project</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="seed-table-body">${body}</tbody>
+            </table>
+        </div>
+        <div class="admin-foot">
+            <span class="admin-hint">Applying is one-shot per project — your manual edits afterwards are preserved.</span>
+        </div>
+    `;
+}
+
+/** Apply one pending seed live (no reload), persist, and refresh the panel. */
+function onSeedRun(seedId) {
+    const seed = PROJECT_SEEDS.find(s => s.id === seedId);
+    if (!seed || !state.projectsData) return;
+    const { ran } = applyProjectSeed(state.projectsData, seed);
+    if (ran) saveProjects(state.projectsData);
+    refreshAdminView();
+}
+
+/** Apply every pending seed in registry order, persist once, refresh. */
+function onRunAllSeeds() {
+    if (!state.projectsData) return;
+    let ranAny = false;
+    for (const seed of PROJECT_SEEDS) {
+        if (applyProjectSeed(state.projectsData, seed).ran) ranAny = true;
+    }
+    if (ranAny) saveProjects(state.projectsData);
+    refreshAdminView();
+}
+
+/**
+ * Render the admin sub-tab inside Projects. A "Project seeds" panel sits above
+ * the email queue. The queue lists the last 50 entries, status-filterable,
+ * with a Retry button on failed items and a "Clear sent older than N days"
+ * sweep button at the bottom.
  */
 function renderAdminBody(root) {
     const map = loadEmailQueueMap();
@@ -3223,6 +3292,7 @@ function renderAdminBody(root) {
     const sentToClear = countSentOlderThan(map, sevenDaysAgo);
 
     root.innerHTML = `
+        ${renderProjectSeedsPanelHtml()}
         <div class="admin-toolbar">
             <h2 class="admin-title">Email queue</h2>
             <button type="button" id="admin-refresh-btn" class="btn-secondary" title="Refresh from storage">Refresh</button>
@@ -3260,6 +3330,11 @@ function renderAdminBody(root) {
         });
     });
     root.querySelector('#admin-refresh-btn').addEventListener('click', () => renderAdminBody(root));
+    root.querySelectorAll('.seed-run-btn').forEach(btn => {
+        btn.addEventListener('click', () => onSeedRun(btn.dataset.seedId));
+    });
+    const runAllSeedsBtn = root.querySelector('#seed-run-all-btn');
+    if (runAllSeedsBtn) runAllSeedsBtn.addEventListener('click', () => onRunAllSeeds());
     root.querySelectorAll('.admin-retry-btn').forEach(btn => {
         btn.addEventListener('click', () => onAdminRetry(btn.dataset.id));
     });
