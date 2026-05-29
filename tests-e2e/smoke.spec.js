@@ -2703,12 +2703,15 @@ test.describe('Phase 6.5 — Email-queue admin panel', () => {
     });
 
     test('Clear sent older than 7 days removes only sent entries past the threshold', async ({ page }) => {
-        // One old-sent, one fresh-sent, one pending, one failed
+        // Dates relative to "now" so the 7-day boundary doesn't drift as the
+        // calendar moves (a hardcoded "fresh" date eventually ages past 7 days).
+        const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString(); };
+        // One old-sent (well past 7 days), one fresh-sent (within 7 days), one pending, one failed
         await seedQueue(page, [
-            mkEntry('oldSent', { sent: true, sentAt: '2026-04-01T10:00:00.000Z', queuedAt: '2026-03-30T10:00:00.000Z' }),
-            mkEntry('freshSent', { sent: true, sentAt: '2026-05-20T10:00:00.000Z', queuedAt: '2026-05-19T10:00:00.000Z' }),
-            mkEntry('pending', { queuedAt: '2026-05-21T10:00:00.000Z' }),
-            mkEntry('failed', { failed: true, attempts: 3, queuedAt: '2026-05-21T11:00:00.000Z' }),
+            mkEntry('oldSent', { sent: true, sentAt: daysAgo(30), queuedAt: daysAgo(31) }),
+            mkEntry('freshSent', { sent: true, sentAt: daysAgo(1), queuedAt: daysAgo(2) }),
+            mkEntry('pending', { queuedAt: daysAgo(1) }),
+            mkEntry('failed', { failed: true, attempts: 3, queuedAt: daysAgo(1) }),
         ]);
         await page.locator('.projects-subtab[data-subtab="admin"]').click();
 
