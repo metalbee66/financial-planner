@@ -43,6 +43,9 @@ export const DEFAULT_PROJECTS = {
     // IA refactor Phase 2). Only runs when business_transform_seeded is
     // already true.
     business_transform_extras_20260525_applied: false,
+    // Subpoena Brauer seed — set true after seeding the court proceedings
+    // project (hearing 1 July 2026). Legal matter tracker: phases 1–6.
+    subpoena_brauer_seeded: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
