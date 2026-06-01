@@ -3534,3 +3534,412 @@ select.editable { width: 100px; cursor: pointer; }
     .files-cell-by   { grid-area: by; }
     .files-cell-when { grid-area: when; text-align: right; }
 }
+
+/* ── Styling refresh overrides (2026-06) ── */
+:root {
+    --muted: var(--text-dim);
+    --surface-raised: #1d2948;
+    --surface-soft: rgba(255,255,255,0.035);
+    --accent-soft: rgba(0,176,240,0.12);
+    --accent-line: rgba(0,176,240,0.45);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --shadow-sm: 0 4px 14px rgba(0,0,0,0.18);
+    --shadow-md: 0 12px 32px rgba(0,0,0,0.28);
+    --focus-ring: 0 0 0 3px rgba(0,176,240,0.24);
+}
+
+body {
+    background:
+        radial-gradient(circle at top left, rgba(0,176,240,0.10), transparent 34rem),
+        radial-gradient(circle at 80% 0, rgba(112,48,160,0.10), transparent 30rem),
+        var(--bg);
+}
+
+header {
+    background: rgba(22,33,62,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--accent-line);
+    box-shadow: var(--shadow-sm);
+}
+header h1 { letter-spacing: 0.01em; }
+main { padding: 20px; }
+.module-content { padding: 18px; }
+
+.top-nav-btn,
+.sub-tab-btn,
+.tab-btn,
+.projects-subtab,
+.view-tab,
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.projects-back-btn,
+.projects-new-btn,
+.add-item-btn,
+.add-revision-btn,
+.import-upload-btn,
+.charge-submit,
+.week-nav-btn,
+.admin-retry-btn,
+.notif-mark-all,
+.notif-prefs-btn,
+.notif-prefs-save,
+.notif-prefs-cancel,
+.tasks-toolbar-dir,
+.tasks-toolbar-reset,
+.task-add-due-suggest {
+    border-radius: var(--radius-sm);
+}
+
+.top-nav-btn,
+.sub-tab-btn,
+.tab-btn,
+.projects-subtab,
+.view-tab {
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.top-nav-btn:hover,
+.sub-tab-btn:hover,
+.tab-btn:hover,
+.projects-subtab:hover,
+.view-tab:hover { transform: translateY(-1px); }
+.top-nav-btn.active {
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.12) inset, 0 8px 18px rgba(0,176,240,0.18);
+}
+.sub-nav,
+.projects-subtabs,
+.view-tabs {
+    background: rgba(22,33,62,0.78);
+    border-bottom-color: rgba(42,58,94,0.72);
+}
+
+.section-card,
+.account-card,
+.accounts-total,
+.summary-item,
+.week-strip,
+.week-nav,
+.project-card,
+.project-form,
+.projects-empty-state,
+.mytasks-section,
+.dashboard-card,
+.dashboard-drill,
+.dashboard-chart-card,
+.files-group,
+.task-panel,
+.notif-bell-dropdown,
+.notif-prefs-modal,
+.login-card {
+    border-radius: var(--radius-md);
+    border-color: rgba(42,58,94,0.86);
+    box-shadow: var(--shadow-sm);
+}
+.section-card,
+.account-card,
+.summary-item,
+.project-card,
+.mytasks-section,
+.dashboard-card,
+.files-group {
+    background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+}
+.section-card:hover,
+.account-card:hover,
+.project-card:hover,
+.dashboard-card-clickable:hover,
+.mytasks-section:hover,
+.files-group:hover {
+    border-color: var(--accent-line);
+    box-shadow: var(--shadow-md);
+}
+
+.section-header {
+    letter-spacing: 0.01em;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.budget-table th,
+.planner-week-table th,
+.import-table th,
+.admin-table thead th {
+    background: rgba(15,52,96,0.82);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+.budget-table tbody tr,
+.planner-week-table tbody tr,
+.import-table tbody tr,
+.admin-table tbody tr { transition: background-color 0.12s ease; }
+.budget-table tbody tr:hover,
+.planner-week-table tbody tr:hover,
+.import-table tbody tr:hover { background: rgba(0,176,240,0.075); }
+.total-row { background: rgba(15,52,96,0.9) !important; }
+
+.currency-input,
+.editable,
+.account-balance-input,
+.acct-balance-input,
+.actual-input,
+.comment-input,
+.detail-comment,
+.revision-reason,
+.charge-input,
+.import-search,
+.import-search-select,
+.gl-select,
+.project-form input,
+.project-form select,
+.project-form textarea,
+.tasks-add-row input,
+.tasks-add-row select,
+.tasks-toolbar select,
+.task-row-status,
+.task-panel-body input[type="text"],
+.task-panel-body input[type="date"],
+.task-panel-body select,
+.task-panel-body textarea,
+.participant-add-input,
+.mytasks-user-field select,
+.overview-sort-field select {
+    border-radius: var(--radius-sm);
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.currency-input:focus,
+.editable:focus,
+.account-balance-input:focus,
+.acct-balance-input:focus,
+.actual-input:focus,
+.comment-input:focus,
+.detail-comment:focus,
+.revision-reason:focus,
+.charge-input:focus,
+.import-search:focus,
+.import-search-select:focus,
+.gl-select:focus,
+.project-form input:focus,
+.project-form select:focus,
+.project-form textarea:focus,
+.tasks-add-row input:focus,
+.tasks-add-row select:focus,
+.tasks-toolbar select:focus,
+.task-row-status:focus,
+.task-panel-body input:focus,
+.task-panel-body select:focus,
+.task-panel-body textarea:focus,
+.participant-add-input:focus,
+.mytasks-user-field select:focus,
+.overview-sort-field select:focus {
+    box-shadow: var(--focus-ring);
+}
+
+.accounts-grid,
+.projects-grid,
+.dashboard-cards { gap: 16px; }
+.account-card,
+.project-card,
+.dashboard-card { padding: 16px 18px; }
+.account-bank,
+.summary-label,
+.accounts-section-title,
+.projects-toolbar .overview-sort-label,
+.tasks-toolbar-label,
+.files-row-head {
+    letter-spacing: 0.07em;
+}
+.account-balance,
+.account-balance-input,
+.summary-value,
+.dashboard-card-value { letter-spacing: -0.02em; }
+
+.week-strip {
+    padding: 10px 8px;
+    gap: 3px;
+}
+.strip-cell {
+    height: 22px;
+    border-radius: 5px;
+}
+.week-nav { padding: 10px 12px; }
+#week-select { border-radius: var(--radius-sm); }
+.planner-summary { gap: 10px; }
+.summary-item { padding: 12px 14px; }
+.charges-panel,
+.detail-panel { background: rgba(0,0,0,0.12); }
+
+.projects-toolbar {
+    padding: 8px 0 18px;
+    align-items: center;
+}
+.projects-title {
+    font-size: 1.24rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+}
+.project-card {
+    position: relative;
+    overflow: hidden;
+    min-height: 168px;
+}
+.project-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: linear-gradient(180deg, var(--accent), var(--purple));
+    opacity: 0.85;
+}
+.project-card:hover { transform: translateY(-2px); }
+.project-card-name {
+    font-size: 1.04rem;
+    font-weight: 650;
+}
+.project-card-desc { line-height: 1.5; }
+.project-card-progress-bar {
+    height: 7px;
+    background: rgba(42,58,94,0.9);
+}
+.project-card-progress-fill { background: linear-gradient(90deg, var(--accent), var(--green)); }
+.status-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.tasks-header {
+    align-items: center;
+    flex-wrap: wrap;
+    padding-top: 2px;
+}
+.tasks-title { font-size: 1.08rem; font-weight: 650; }
+.tasks-add-row,
+.tasks-toolbar,
+.task-row {
+    border-radius: var(--radius-md);
+}
+.tasks-toolbar {
+    background: rgba(22,33,62,0.45);
+    border: 1px solid rgba(42,58,94,0.55);
+    padding: 10px 12px;
+}
+.tasks-add-row {
+    background: rgba(22,33,62,0.72);
+    border-color: rgba(0,176,240,0.22);
+}
+.task-row {
+    background: rgba(22,33,62,0.82);
+    border-color: rgba(42,58,94,0.78);
+    padding: 10px 12px;
+}
+.task-row:hover {
+    border-color: var(--accent-line);
+    background: rgba(29,41,72,0.96);
+}
+.task-panel {
+    background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+    border-left-color: var(--accent-line);
+}
+.task-panel-head {
+    background: rgba(15,52,96,0.34);
+}
+.task-panel-foot { background: rgba(15,26,48,0.72); }
+
+.projects-subtabs,
+.view-tabs {
+    gap: 6px;
+    padding: 4px 4px 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.projects-subtab.active,
+.view-tab.active,
+.sub-tab-btn.active,
+.tab-btn.active {
+    background: linear-gradient(180deg, rgba(0,176,240,0.13), var(--surface2));
+    box-shadow: 0 -1px 0 rgba(255,255,255,0.08) inset;
+}
+
+.dashboard-card {
+    min-height: 112px;
+    justify-content: center;
+}
+.dashboard-card-value { font-size: clamp(1.65rem, 4vw, 2.25rem); }
+.dashboard-card-clickable:hover { transform: translateY(-2px); }
+.dashboard-digest {
+    background: rgba(0,176,240,0.08);
+    border: 1px solid rgba(0,176,240,0.18);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+}
+.files-row { transition: background-color 0.12s ease; }
+.files-row:hover { background: rgba(0,176,240,0.085); }
+
+.login-card {
+    background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+    box-shadow: var(--shadow-md);
+}
+.google-btn { border-radius: var(--radius-sm); }
+.toast { box-shadow: var(--shadow-md); }
+
+@media (max-width: 768px) {
+    main { padding: 10px; }
+    .module-content { padding: 10px 0; }
+    header {
+        align-items: stretch;
+        gap: 10px;
+    }
+    #top-nav,
+    .sub-nav,
+    .projects-subtabs,
+    .view-tabs {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        scrollbar-width: thin;
+    }
+    .top-nav-btn,
+    .sub-tab-btn,
+    .projects-subtab,
+    .view-tab {
+        flex: 0 0 auto;
+        white-space: nowrap;
+    }
+    .budget-container,
+    .accounts-grid,
+    .projects-grid { max-width: 100%; }
+    .section-card { border-radius: var(--radius-md); }
+    .projects-toolbar {
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .projects-title { width: 100%; flex-basis: 100%; }
+    .project-card { min-height: 0; }
+    .tasks-add-row {
+        grid-template-columns: 1fr;
+    }
+    .task-row {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "name delete"
+            "assignee status"
+            "due due";
+        gap: 6px 10px;
+    }
+    .task-row-name { grid-area: name; }
+    .task-row-assignee { grid-area: assignee; }
+    .task-row-status { grid-area: status; }
+    .task-row-due { grid-area: due; text-align: left; }
+    .task-row-delete { grid-area: delete; }
+    .dashboard-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 420px) {
+    .planner-summary,
+    .dashboard-cards { grid-template-columns: 1fr; }
+    .account-card,
+    .project-card,
+    .dashboard-card { padding: 14px; }
+    .budget-table td,
+    .budget-table th,
+    .planner-week-table td,
+    .planner-week-table th { font-size: 0.72rem; }
+}
