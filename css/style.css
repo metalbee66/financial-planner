@@ -3273,103 +3273,200 @@ select.editable { width: 100px; cursor: pointer; }
     .mytasks-task-due { grid-area: due; text-align: right; }
 }
 
-/* ── Dashboard tab (Task 5.3) ── */
+/* ── Dashboard tab (Task 5.3) — visual redesign 2026-06 ── */
+
+/* Digest: distinguish from body copy with a "TODAY" callout panel. */
+.dashboard-digest {
+    position: relative;
+    background: linear-gradient(180deg, rgba(0,176,240,0.10), rgba(0,176,240,0.02));
+    border: 1px solid rgba(0,176,240,0.22);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    padding: 14px 18px 14px 20px;
+    margin: 4px 0 18px;
+    color: var(--text);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+.dashboard-digest::before {
+    content: 'TODAY';
+    display: block;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
 
 .dashboard-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 18px;
 }
+
+/* Card: bigger numbers, label as small-caps above the value (via
+   column-reverse so DOM order stays label-then-value-friendly), gradient
+   surface, left edge stripe colored per-metric. */
 .dashboard-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px 18px;
+    position: relative;
+    background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+    border: 1px solid rgba(42,58,94,0.86);
+    border-radius: var(--radius-md);
+    padding: 18px 20px 16px;
     display: flex;
-    flex-direction: column;
+    flex-direction: column-reverse;
+    justify-content: center;
+    min-height: 112px;
     gap: 6px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
+.dashboard-card::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 3px;
+    background: var(--accent);
+    opacity: 0.65;
+}
+.dashboard-card[data-metric="overdueTasks"]::before        { background: var(--red);    opacity: 0.85; }
+.dashboard-card[data-metric="dueThisWeek"]::before         { background: var(--orange); opacity: 0.85; }
+.dashboard-card[data-metric="completedLast30Days"]::before { background: var(--green);  opacity: 0.8;  }
+.dashboard-card[data-metric="upcomingMilestones"]::before  { background: var(--purple); opacity: 0.8;  }
+
 .dashboard-card-value {
-    font-size: 2rem;
+    font-size: clamp(1.85rem, 4.2vw, 2.5rem);
     font-weight: 600;
     color: var(--text);
-    line-height: 1.1;
+    line-height: 1;
     font-family: var(--mono);
+    letter-spacing: -0.02em;
 }
 .dashboard-card-label {
     color: var(--text-dim);
-    font-size: 0.82rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
 }
-.dashboard-card-flag .dashboard-card-value { color: var(--red); }
+
+/* Overdue flagged state — only applied when value > 0 (gated by JS). */
 .dashboard-card-flag {
-    border-color: rgba(255, 82, 82, 0.4);
-    background: linear-gradient(180deg, rgba(255,82,82,0.06), var(--surface) 60%);
+    border-color: rgba(255, 82, 82, 0.45);
+    background: linear-gradient(180deg, rgba(255,82,82,0.12), var(--surface) 70%);
+    animation: dashboard-pulse 2.4s ease-in-out infinite;
 }
-.dashboard-card-clickable {
-    cursor: pointer;
-    transition: border-color 0.12s ease, background-color 0.12s ease;
+.dashboard-card-flag .dashboard-card-value {
+    color: var(--red);
+    text-shadow: 0 0 24px rgba(255,82,82,0.35);
+}
+@keyframes dashboard-pulse {
+    0%, 100% { box-shadow: var(--shadow-sm), 0 0 0 0 rgba(255,82,82,0); }
+    50%      { box-shadow: var(--shadow-sm), 0 0 0 4px rgba(255,82,82,0.10); }
+}
+
+/* Clickable cards: cursor + chevron affordance + lift on hover. */
+.dashboard-card-clickable { cursor: pointer; }
+.dashboard-card-clickable::after {
+    content: '›';
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    color: var(--text-dim);
+    font-size: 1.2rem;
+    line-height: 1;
+    opacity: 0.55;
+    transition: opacity 0.15s ease, transform 0.15s ease, color 0.15s ease;
 }
 .dashboard-card-clickable:hover,
 .dashboard-card-clickable:focus-visible {
-    border-color: var(--accent);
+    border-color: var(--accent-line);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
     outline: none;
 }
-.dashboard-card-active {
-    border-color: var(--accent);
-    background: linear-gradient(180deg, rgba(76, 175, 80, 0.08), var(--surface) 60%);
+.dashboard-card-clickable:hover::after,
+.dashboard-card-clickable:focus-visible::after {
+    opacity: 1;
+    color: var(--accent);
+    transform: translateX(2px);
 }
 
+/* Active (drill-open) state — palette aligned with accent (was green). */
+.dashboard-card-active {
+    border-color: var(--accent);
+    background: linear-gradient(180deg, rgba(0,176,240,0.14), var(--surface) 70%);
+    box-shadow: var(--shadow-md), inset 0 0 0 1px rgba(0,176,240,0.18);
+}
+.dashboard-card-active::after {
+    opacity: 1;
+    color: var(--accent);
+    transform: rotate(90deg);
+}
+
+/* ── Drill list ── */
 .dashboard-drill {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 18px;
+    background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+    border: 1px solid rgba(42,58,94,0.86);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
 }
 .dashboard-drill-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 .dashboard-drill-title {
     color: var(--accent);
-    font-size: 1rem;
+    font-size: 1.05rem;
+    font-weight: 650;
     margin: 0;
+    letter-spacing: -0.01em;
 }
 .dashboard-drill-close {
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     color: var(--text-dim);
     font-size: 1.25rem;
+    line-height: 1;
     cursor: pointer;
-    padding: 0 6px;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    transition: background-color 0.12s ease, color 0.12s ease;
 }
-.dashboard-drill-close:hover { color: var(--text); }
-.dashboard-drill-list {
-    display: flex;
-    flex-direction: column;
+.dashboard-drill-close:hover {
+    color: var(--text);
+    background: rgba(255,255,255,0.06);
 }
+.dashboard-drill-list { display: flex; flex-direction: column; }
 .dashboard-drill-empty {
     color: var(--text-dim);
     font-size: 0.9rem;
-    padding: 12px 0;
+    padding: 16px 4px;
+    text-align: center;
 }
 .dashboard-drill-row {
     display: grid;
     grid-template-columns: minmax(120px, 0.8fr) 2fr minmax(80px, 110px) minmax(90px, 120px);
     gap: 12px;
     align-items: center;
-    padding: 8px 4px;
-    border-bottom: 1px solid var(--border);
+    padding: 10px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
     cursor: pointer;
-    font-size: 0.88rem;
+    font-size: 0.9rem;
+    transition: background-color 0.12s ease;
 }
 .dashboard-drill-row:last-child { border-bottom: none; }
 .dashboard-drill-row:hover,
 .dashboard-drill-row:focus-visible {
-    background: rgba(76, 175, 80, 0.06);
+    background: rgba(0,176,240,0.085);
     outline: none;
 }
 .dashboard-drill-project {
@@ -3384,31 +3481,41 @@ select.editable { width: 100px; cursor: pointer; }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.dashboard-drill-due { color: var(--text-dim); }
+.dashboard-drill-due {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
 .dashboard-drill-status { justify-self: start; }
 
+/* ── Bar chart ── */
 .dashboard-chart-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 18px 12px;
+    background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+    border: 1px solid rgba(42,58,94,0.86);
+    border-radius: var(--radius-md);
+    padding: 18px 22px 16px;
+    box-shadow: var(--shadow-sm);
 }
 .dashboard-chart-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 8px;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 .dashboard-chart-title {
-    font-size: 0.95rem;
-    font-weight: 500;
+    font-size: 1rem;
+    font-weight: 650;
     color: var(--text);
     margin: 0;
+    letter-spacing: -0.01em;
 }
 .dashboard-chart-sub {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 .dashboard-chart {
     width: 100%;
@@ -3421,17 +3528,23 @@ select.editable { width: 100px; cursor: pointer; }
     color: var(--text-dim);
     font-style: italic;
     padding: 14px 0;
+    text-align: center;
 }
-.dashboard-bar { fill: var(--accent); }
+.dashboard-bar {
+    fill: var(--accent);
+    transition: fill 0.15s ease, opacity 0.15s ease;
+}
+.dashboard-bar-group:hover .dashboard-bar:not(.dashboard-bar-empty) { fill: #4dc7ff; }
 .dashboard-bar-empty { fill: var(--border); opacity: 0.5; }
 .dashboard-bar-value {
     fill: var(--text);
-    font-size: 9px;
+    font-size: 11px;
     font-family: var(--mono);
+    font-weight: 600;
 }
 .dashboard-bar-label {
     fill: var(--text-dim);
-    font-size: 9px;
+    font-size: 10px;
     font-family: var(--mono);
 }
 
@@ -3735,11 +3848,9 @@ main { padding: 20px; }
 }
 
 .accounts-grid,
-.projects-grid,
-.dashboard-cards { gap: 16px; }
+.projects-grid { gap: 16px; }
 .account-card,
-.project-card,
-.dashboard-card { padding: 16px 18px; }
+.project-card { padding: 16px 18px; }
 .account-bank,
 .summary-label,
 .accounts-section-title,
@@ -3859,18 +3970,8 @@ main { padding: 20px; }
     box-shadow: 0 -1px 0 rgba(255,255,255,0.08) inset;
 }
 
-.dashboard-card {
-    min-height: 112px;
-    justify-content: center;
-}
-.dashboard-card-value { font-size: clamp(1.65rem, 4vw, 2.25rem); }
-.dashboard-card-clickable:hover { transform: translateY(-2px); }
-.dashboard-digest {
-    background: rgba(0,176,240,0.08);
-    border: 1px solid rgba(0,176,240,0.18);
-    border-radius: var(--radius-md);
-    padding: 10px 12px;
-}
+/* Dashboard card/digest styling now lives in the redesigned block above
+   (search for "Dashboard tab (Task 5.3) — visual redesign 2026-06"). */
 .files-row { transition: background-color 0.12s ease; }
 .files-row:hover { background: rgba(0,176,240,0.085); }
 
