@@ -1042,7 +1042,7 @@ export function bucketCalendarTasks(tasks) {
 // ── Cross-project Overview helpers (Task 5.1) ──
 
 /** Sort dimensions surfaced in the Overview toolbar; first entry is the default. */
-export const OVERVIEW_SORT_OPTIONS = ['updated', 'status', 'dueDate', 'percent'];
+export const OVERVIEW_SORT_OPTIONS = ['updated', 'status', 'dueDate', 'percent', 'name'];
 
 const PROJECT_STATUS_ORDER = Object.fromEntries(
     PROJECT_STATUSES.map((s, i) => [s, i])
@@ -1112,9 +1112,10 @@ export function findNextMilestone(projectId, tasks, todayIso) {
  *   - `dueDate`: project `endDate` ascending; missing endDate sorts to end.
  *   - `percent`: completion % descending; empty projects (no tasks) sort to
  *      end so they don't masquerade as "0% done".
+ *   - `name`: case-insensitive ascending by project name (A → Z).
  *
  * `name` is the universal tiebreaker so equal sort-keys still produce a
- * stable, deterministic order.
+ * stable, deterministic order (and is the entire sort when `by === 'name'`).
  */
 export function sortProjectsForOverview(projects, tasks, opts) {
     if (!Array.isArray(projects) || projects.length === 0) return [];
@@ -1141,6 +1142,8 @@ export function sortProjectsForOverview(projects, tasks, opts) {
             if (bp.total === 0 && ap.total > 0) return -1;
             if (ap.total === 0 && bp.total === 0) primary = 0;
             else primary = bp.percent - ap.percent; // desc
+        } else if (by === 'name') {
+            // primary stays 0; tiebreak below already sorts asc-by-name.
         } else {
             // updated, desc
             primary = (b.updatedAt || '').localeCompare(a.updatedAt || '');

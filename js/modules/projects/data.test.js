@@ -1935,7 +1935,7 @@ test('findNextMilestone scopes by projectId', () => {
 });
 
 test('OVERVIEW_SORT_OPTIONS exposes the supported sort dimensions', () => {
-    eq(OVERVIEW_SORT_OPTIONS, ['updated', 'status', 'dueDate', 'percent']);
+    eq(OVERVIEW_SORT_OPTIONS, ['updated', 'status', 'dueDate', 'percent', 'name']);
 });
 
 test('sortProjectsForOverview default (updated) puts most recently updated first', () => {
@@ -1977,6 +1977,14 @@ test('sortProjectsForOverview by percent puts highest completion first; empty (0
     ];
     const sorted = sortProjectsForOverview([a, b, c], tasks, { by: 'percent' });
     // b=100%, a=50%, c=empty → b, a, c
+    eq(sorted.map(p => p.id), ['b', 'a', 'c']);
+});
+
+test('sortProjectsForOverview by name sorts A→Z case-insensitively', () => {
+    const a = mkProject({ id: 'a', name: 'banana' });
+    const b = mkProject({ id: 'b', name: 'Apple' });
+    const c = mkProject({ id: 'c', name: 'cherry' });
+    const sorted = sortProjectsForOverview([a, b, c], [], { by: 'name' });
     eq(sorted.map(p => p.id), ['b', 'a', 'c']);
 });
 

@@ -153,6 +153,7 @@ const OVERVIEW_SORT_LABELS = {
     status: 'Status',
     dueDate: 'Due date',
     percent: '% complete',
+    name: 'Name (A→Z)',
 };
 const DEFAULT_OVERVIEW_SORT = 'updated';
 const DEFAULT_TASK_SORT = { by: 'dueDate', dir: 'asc' };
