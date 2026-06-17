@@ -109,12 +109,21 @@ export function createProject(input) {
  * non-derivable statuses (`on-hold`, `cancelled`) so we don't fight the user
  * by auto-flipping them to derived values; default false otherwise.
  */
+/**
+ * Statuses that cannot be derived from task completion (`effectiveProjectStatus`
+ * only yields planning/active/completed). Selecting one is meaningless unless
+ * `statusOverride` is on, so create / edit paths force override for these.
+ */
+export function isNonDerivableStatus(status) {
+    return status === 'on-hold' || status === 'cancelled';
+}
+
 export function sanitiseProject(p) {
     if (!p || typeof p !== 'object') return null;
     const at = nowIso();
     const status = STATUS_SET.has(p.status) ? p.status : 'planning';
     const explicitOverride = typeof p.statusOverride === 'boolean';
-    const overrideDefault = (status === 'on-hold' || status === 'cancelled');
+    const overrideDefault = isNonDerivableStatus(status);
     return {
         id: p.id || generateId(),
         name: trim(p.name),

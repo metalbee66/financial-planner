@@ -28,6 +28,7 @@ import {
     deleteProjectFromList,
     findProject,
     effectiveProjectStatus,
+    isNonDerivableStatus,
     readAssignees,
     createTask,
     validateTask,
@@ -156,6 +157,21 @@ const OVERVIEW_SORT_LABELS = {
     name: 'Name (A→Z)',
 };
 const DEFAULT_OVERVIEW_SORT = 'updated';
+const DEFAULT_OVERVIEW_STATUS_FILTER = 'all';
+// Overview sort + status filter are per-device view preferences, persisted in
+// localStorage (like celebrate.js's sound toggle) so they survive a reload.
+const OVERVIEW_SORT_PREF_KEY = 'projects_overview_sort';
+const OVERVIEW_STATUS_FILTER_PREF_KEY = 'projects_overview_status_filter';
+
+function loadOverviewSortPref() {
+    const v = localStorage.getItem(OVERVIEW_SORT_PREF_KEY);
+    return v && OVERVIEW_SORT_OPTIONS.includes(v) ? v : DEFAULT_OVERVIEW_SORT;
+}
+function loadOverviewStatusFilterPref() {
+    const v = localStorage.getItem(OVERVIEW_STATUS_FILTER_PREF_KEY);
+    return v === 'all' || PROJECT_STATUSES.includes(v) ? v : DEFAULT_OVERVIEW_STATUS_FILTER;
+}
+
 const DEFAULT_TASK_SORT = { by: 'dueDate', dir: 'asc' };
 const DEFAULT_TASK_GROUP = 'none';
 const DEFAULT_DETAIL_VIEW = 'list';
@@ -489,8 +505,8 @@ function render() {
 
 // ── List view (sub-tabs: Overview / My Tasks) ──
 
-const LIST_SUBTABS_BASE = ['overview', 'mytasks', 'dashboard', 'files'];
-const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard', files: 'Files', admin: 'Admin' };
+const LIST_SUBTABS_BASE = ['overview', 'mytasks', 'dashboard', 'files', 'archived'];
+const SUBTAB_LABELS = { overview: 'Overview', mytasks: 'My Tasks', dashboard: 'Dashboard', files: 'Files', archived: 'Archived', admin: 'Admin' };
 
 /**
  * Available sub-tabs for the current user. Admin is the only role-gated one;
@@ -532,6 +548,8 @@ function renderList() {
         renderDashboardBody(body);
     } else if (subtab === 'files') {
         renderFilesBody(body);
+    } else if (subtab === 'archived') {
+        renderArchivedBody(body);
     } else if (subtab === 'admin') {
         renderAdminBody(body);
     } else {
@@ -571,10 +589,22 @@ function renderOverviewBody(root) {
     const sortBy = mode.overviewSort && OVERVIEW_SORT_OPTIONS.includes(mode.overviewSort)
         ? mode.overviewSort
         : DEFAULT_OVERVIEW_SORT;
+    const statusFilter = mode.overviewStatusFilter && (mode.overviewStatusFilter === 'all' || PROJECT_STATUSES.includes(mode.overviewStatusFilter))
+        ? mode.overviewStatusFilter
+        : DEFAULT_OVERVIEW_STATUS_FILTER;
 
     root.innerHTML = `
         <div class="projects-toolbar">
             <h2 class="projects-title">Projects</h2>
+            <label class="overview-sort-field">
+                <span class="overview-sort-label">Status</span>
+                <select id="overview-status-filter" aria-label="Filter projects by status">
+                    <option value="all"${statusFilter === 'all' ? ' selected' : ''}>All</option>
+                    ${PROJECT_STATUSES.map(s =>
+                        `<option value="${s}"${s === statusFilter ? ' selected' : ''}>${escapeHtml(STATUS_LABELS[s] || s)}</option>`
+                    ).join('')}
+                </select>
+            </label>
             <label class="overview-sort-field">
                 <span class="overview-sort-label">Sort</span>
                 <select id="overview-sort-by" aria-label="Sort projects by">
@@ -590,15 +620,68 @@ function renderOverviewBody(root) {
     root.querySelector('#projects-new-btn').addEventListener('click', goCreate);
     root.querySelector('#overview-sort-by').addEventListener('change', (e) => {
         mode.overviewSort = e.target.value;
+        localStorage.setItem(OVERVIEW_SORT_PREF_KEY, e.target.value);
+        render();
+    });
+    root.querySelector('#overview-status-filter').addEventListener('change', (e) => {
+        mode.overviewStatusFilter = e.target.value;
+        localStorage.setItem(OVERVIEW_STATUS_FILTER_PREF_KEY, e.target.value);
         render();
     });
 
     const grid = root.querySelector('#projects-grid');
     const allTasks = getTasks();
     const today = todayIso();
-    const resolved = resolveProjectStatuses(items, allTasks);
+    // Filter on the effective status (what the badge shows), so 'On Hold' etc.
+    // match what the user sees rather than the raw stored value.
+    const resolved = resolveProjectStatuses(items, allTasks)
+        .filter(p => statusFilter === 'all' || p.status === statusFilter);
+
+    if (resolved.length === 0) {
+        grid.innerHTML = `<div class="projects-empty-filter">No ${escapeHtml(STATUS_LABELS[statusFilter] || statusFilter)} projects.</div>`;
+        return;
+    }
+
     sortProjectsForOverview(resolved, allTasks, { by: sortBy })
         .forEach(p => grid.appendChild(renderCard(p, allTasks, today)));
+}
+
+// ── Archived sub-tab: projects hidden from the overview, with Restore ──
+
+function renderArchivedBody(root) {
+    const archived = getProjects().filter(p => p.archivedAt);
+
+    if (archived.length === 0) {
+        root.innerHTML = `
+            <div class="projects-toolbar"><h2 class="projects-title">Archived</h2></div>
+            <div class="projects-empty-filter">No archived projects.</div>
+        `;
+        return;
+    }
+
+    root.innerHTML = `
+        <div class="projects-toolbar"><h2 class="projects-title">Archived</h2></div>
+        <div class="archived-list" id="archived-list"></div>
+    `;
+    const list = root.querySelector('#archived-list');
+    const allTasks = getTasks();
+    // Most-recently-archived first.
+    archived.slice().sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''))
+        .forEach(p => {
+            const effStatus = effectiveProjectStatus(p, findTasksByProject(allTasks, p.id));
+            const row = document.createElement('div');
+            row.className = 'archived-row';
+            row.innerHTML = `
+                <button type="button" class="archived-row-open" aria-label="Open project ${escapeAttr(p.name)}">
+                    <span class="archived-row-name">${escapeHtml(p.name)}</span>
+                    <span class="status-badge status-${effStatus}">${escapeHtml(STATUS_LABELS[effStatus] || effStatus)}</span>
+                </button>
+                <button type="button" class="btn-secondary archived-row-restore">Restore</button>
+            `;
+            row.querySelector('.archived-row-open').addEventListener('click', () => goDetail(p.id));
+            row.querySelector('.archived-row-restore').addEventListener('click', () => onRestore(p));
+            list.appendChild(row);
+        });
 }
 
 // ── My Tasks (Task 5.2): cross-project per-user summary ──
@@ -1067,6 +1150,7 @@ function renderDetail() {
             <h2 class="projects-title">${escapeHtml(p.name)}</h2>
             <span class="status-badge status-${effStatus}">${STATUS_LABELS[effStatus] || effStatus}</span>
             <button class="btn-secondary" id="projects-edit-btn">Edit project</button>
+            <button class="btn-secondary" id="projects-archive-btn">${p.archivedAt ? 'Restore' : 'Archive'}</button>
         </div>
         <div class="project-detail-meta">
             ${dateRange ? `<div class="project-detail-dates">${escapeHtml(dateRange)}</div>` : ''}
@@ -1085,6 +1169,9 @@ function renderDetail() {
 
     host.querySelector('#projects-back-btn').addEventListener('click', goList);
     host.querySelector('#projects-edit-btn').addEventListener('click', () => goEdit(p.id));
+    host.querySelector('#projects-archive-btn').addEventListener('click', () => {
+        if (p.archivedAt) { onRestore(p); } else { onArchive(p); }
+    });
     host.querySelectorAll('.view-tab').forEach(btn => {
         btn.addEventListener('click', () => {
             const v = btn.dataset.view;
@@ -1826,6 +1913,14 @@ function renderForm() {
             statusSelect.value = effectiveProjectStatus({ ...draft, statusOverride: false }, projectTasks);
         }
     });
+    // On-hold / cancelled can't be derived from task completion, so picking one
+    // is a no-op unless we also turn on manual override. Auto-enable it so the
+    // chosen status actually sticks instead of snapping back to a derived value.
+    statusSelect.addEventListener('change', () => {
+        if (isNonDerivableStatus(statusSelect.value)) {
+            overrideBox.checked = true;
+        }
+    });
 
     if (!editing) {
         host.querySelector('#pf-name').focus();
@@ -1923,6 +2018,19 @@ function onDelete(p) {
     goList();
 }
 
+/** Archive a project: stamp archivedAt so it drops out of the overview. */
+function onArchive(p) {
+    setProjects(updateProjectInList(getProjects(), p.id, { archivedAt: new Date().toISOString() }));
+    closeTaskPanel();
+    goList();
+}
+
+/** Restore an archived project back into the overview. */
+function onRestore(p) {
+    setProjects(updateProjectInList(getProjects(), p.id, { archivedAt: null }));
+    render();
+}
+
 // ── View transitions ──
 
 function freshListMode() {
@@ -1932,7 +2040,8 @@ function freshListMode() {
         editingId: null,
         detailProjectId: null,
         detailView: DEFAULT_DETAIL_VIEW,
-        overviewSort: DEFAULT_OVERVIEW_SORT,
+        overviewSort: loadOverviewSortPref(),
+        overviewStatusFilter: loadOverviewStatusFilterPref(),
         listSubtab: 'overview',
         myTasksUser: null,
         myTasksCollapsed: { completed: true },
@@ -1952,6 +2061,7 @@ function goList() {
     const prev = mode || {};
     mode = freshListMode();
     if (prev.overviewSort) mode.overviewSort = prev.overviewSort;
+    if (prev.overviewStatusFilter) mode.overviewStatusFilter = prev.overviewStatusFilter;
     if (prev.listSubtab) mode.listSubtab = prev.listSubtab;
     if (prev.myTasksUser) mode.myTasksUser = prev.myTasksUser;
     if (prev.myTasksCollapsed) mode.myTasksCollapsed = prev.myTasksCollapsed;

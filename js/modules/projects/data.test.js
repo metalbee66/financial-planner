@@ -21,6 +21,7 @@ import {
     findProject,
     sanitiseProject,
     effectiveProjectStatus,
+    isNonDerivableStatus,
     createTask,
     sanitiseTask,
     validateTask,
@@ -383,6 +384,14 @@ test('effectiveProjectStatus derives even when stored status is on-hold but over
     // explicitly toggles override off, derivation must win.
     const p = { ...createProject({ name: 'X', status: 'on-hold' }), statusOverride: false };
     eq(effectiveProjectStatus(p, [statusTask('done')]), 'completed');
+});
+
+test('isNonDerivableStatus flags on-hold and cancelled only', () => {
+    eq(isNonDerivableStatus('on-hold'), true);
+    eq(isNonDerivableStatus('cancelled'), true);
+    eq(isNonDerivableStatus('planning'), false);
+    eq(isNonDerivableStatus('active'), false);
+    eq(isNonDerivableStatus('completed'), false);
 });
 
 // ── createTask ──

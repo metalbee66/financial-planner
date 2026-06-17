@@ -1658,6 +1658,41 @@ select.editable { width: 100px; cursor: pointer; }
     font-size: 0.88rem;
     margin: 0 0 18px;
 }
+.projects-empty-filter {
+    grid-column: 1 / -1;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    padding: 28px 8px;
+    text-align: center;
+}
+.archived-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.archived-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+}
+.archived-row-open {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+}
+.archived-row-name { font-size: 0.95rem; }
+.archived-row-restore { flex: none; }
 .projects-new-btn {
     background: var(--accent);
     color: #001a2a;
