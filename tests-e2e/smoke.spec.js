@@ -3507,3 +3507,90 @@ test.describe('Phase 0 — Module shell regression', () => {
         expect(real).toEqual([]);
     });
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Projects overview — sort persistence, status filter, archive, shift', () => {
+
+    test('On Hold sticks on a project that has tasks (auto override)', async ({ page }) => {
+        // Reproduces the bug: with tasks present and no override, on-hold would
+        // re-derive to Planning. Selecting on-hold must now auto-enable override.
+        await createProject(page, { name: 'Held' });
+        await page.locator('#task-add-name').fill('A task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('#projects-edit-btn').click();
+        await page.locator('#pf-status').selectOption('on-hold');
+        // Override checkbox auto-ticks
+        await expect(page.locator('#pf-status-override')).toBeChecked();
+        await page.locator('#pf-save').click();
+        await expect(page.locator('.projects-toolbar .status-badge')).toHaveText('On hold');
+        // Survives reload
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Held' }).click();
+        await expect(page.locator('.projects-toolbar .status-badge')).toHaveText('On hold');
+    });
+
+    test('overview sort choice persists across reload', async ({ page }) => {
+        await createProject(page, { name: 'Sortpref' });
+        await backToList(page);
+        await page.locator('#overview-sort-by').selectOption('name');
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await expect(page.locator('#overview-sort-by')).toHaveValue('name');
+    });
+
+    test('status filter hides non-matching projects and persists', async ({ page }) => {
+        await createProject(page, { name: 'ActiveOne', status: 'active' });
+        await backToList(page);
+        await createProject(page, { name: 'PlanOne', status: 'planning' });
+        await backToList(page);
+        await page.locator('#overview-status-filter').selectOption('active');
+        await expect(page.locator('.project-card', { hasText: 'ActiveOne' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'PlanOne' })).toHaveCount(0);
+        // Persists across reload
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await expect(page.locator('#overview-status-filter')).toHaveValue('active');
+        await expect(page.locator('.project-card', { hasText: 'PlanOne' })).toHaveCount(0);
+    });
+
+    test('archive removes from overview; Archived sub-tab restores it', async ({ page }) => {
+        await createProject(page, { name: 'ToArchive' });
+        await page.locator('#projects-archive-btn').click();
+        // Back on the overview, the card is gone
+        await expect(page.locator('.project-card', { hasText: 'ToArchive' })).toHaveCount(0);
+        // Archived sub-tab lists it
+        await page.locator('.projects-subtab[data-subtab="archived"]').click();
+        const row = page.locator('.archived-row', { hasText: 'ToArchive' });
+        await expect(row).toBeVisible();
+        // Restore puts it back in the overview
+        await row.locator('.archived-row-restore').click();
+        await page.locator('.projects-subtab[data-subtab="overview"]').click();
+        await expect(page.locator('.project-card', { hasText: 'ToArchive' })).toBeVisible();
+    });
+
+    test('project-level Shift dates moves project + task dates forward', async ({ page }) => {
+        await createProject(page, { name: 'Shifty', startDate: '2026-06-01', endDate: '2026-06-30' });
+        await page.locator('#task-add-name').fill('Dated task');
+        await page.locator('#task-add-name').press('Enter');
+        // Give the task a due date via the panel
+        await page.locator('.task-row .task-row-name', { hasText: 'Dated task' }).click();
+        await page.locator('#tp-due').fill('2026-06-10');
+        await page.locator('#tp-save').click();
+        // Shift everything +5 days
+        await page.locator('#projects-shift-btn').click();
+        await page.locator('#shift-days').fill('5');
+        await page.locator('#shift-apply').click();
+        // Project end date moved to 05/07/2026 (shown on edit form)
+        await page.locator('#projects-edit-btn').click();
+        await expect(page.locator('#pf-start')).toHaveValue('2026-06-06');
+        await expect(page.locator('#pf-end')).toHaveValue('2026-07-05');
+        await page.locator('#projects-back-btn').click();
+        // Task due date moved to 2026-06-15
+        await page.locator('.task-row .task-row-name', { hasText: 'Dated task' }).click();
+        await expect(page.locator('#tp-due')).toHaveValue('2026-06-15');
+    });
+});

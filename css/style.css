@@ -1448,6 +1448,27 @@ select.editable { width: 100px; cursor: pointer; }
     cursor: pointer;
 }
 .notif-prefs-row input { cursor: pointer; }
+.shift-dates-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.88rem;
+    margin-bottom: 12px;
+}
+.shift-dates-row input[type="number"] {
+    width: 90px;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 0.9rem;
+}
+.task-panel-subtasks-head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 .notif-prefs-foot {
     display: flex;
     justify-content: flex-end;

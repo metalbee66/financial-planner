@@ -22,6 +22,9 @@ import {
     sanitiseProject,
     effectiveProjectStatus,
     isNonDerivableStatus,
+    addDaysIso,
+    shiftProjectDates,
+    shiftTaskTreeDates,
     createTask,
     sanitiseTask,
     validateTask,
@@ -4120,6 +4123,59 @@ test('PROJECT_SEEDS entries are well-formed and their flags exist in DEFAULT_PRO
         truthy(typeof s.run === 'function', `seed ${s.id} has run()`);
         truthy(s.flag in DEFAULT_PROJECTS, `flag ${s.flag} is declared in DEFAULT_PROJECTS`);
     }
+});
+
+// ── bulk date shift ──
+
+test('addDaysIso moves a date forward and back, null-safe', () => {
+    eq(addDaysIso('2026-06-17', 7), '2026-06-24');
+    eq(addDaysIso('2026-06-17', -7), '2026-06-10');
+    eq(addDaysIso('2026-06-30', 1), '2026-07-01');   // month rollover
+    eq(addDaysIso(null, 5), null);
+    eq(addDaysIso('', 5), '');
+});
+
+test('shiftProjectDates moves project + all its tasks, leaves other projects untouched', () => {
+    const projects = [
+        mkProject({ id: 'p1', startDate: '2026-06-01', endDate: '2026-06-30' }),
+        mkProject({ id: 'p2', startDate: '2026-06-01', endDate: null }),
+    ];
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', startDate: '2026-06-05', dueDate: '2026-06-10' }),
+        mkTask({ id: 't2', projectId: 'p1', parentTaskId: 't1', startDate: null, dueDate: '2026-06-08' }),
+        mkTask({ id: 't3', projectId: 'p2', dueDate: '2026-06-09' }),
+    ];
+    const { projects: np, tasks: nt } = shiftProjectDates(projects, tasks, 'p1', 3);
+    eq(findProject(np, 'p1').startDate, '2026-06-04');
+    eq(findProject(np, 'p1').endDate, '2026-07-03');
+    eq(nt.find(t => t.id === 't1').dueDate, '2026-06-13');
+    eq(nt.find(t => t.id === 't2').dueDate, '2026-06-11');
+    eq(nt.find(t => t.id === 't2').startDate, null);     // null stays null
+    eq(nt.find(t => t.id === 't3').dueDate, '2026-06-09'); // other project untouched
+    eq(findProject(np, 'p2').startDate, '2026-06-01');
+});
+
+test('shiftProjectDates is a no-op for 0 days or unknown project', () => {
+    const projects = [mkProject({ id: 'p1', startDate: '2026-06-01' })];
+    const tasks = [mkTask({ id: 't1', projectId: 'p1', dueDate: '2026-06-05' })];
+    const zero = shiftProjectDates(projects, tasks, 'p1', 0);
+    eq(zero.projects, projects);
+    eq(zero.tasks, tasks);
+    const missing = shiftProjectDates(projects, tasks, 'nope', 3);
+    eq(missing.projects, projects);
+    eq(missing.tasks, tasks);
+});
+
+test('shiftTaskTreeDates moves a task and its direct subtasks only', () => {
+    const tasks = [
+        mkTask({ id: 't1', projectId: 'p1', dueDate: '2026-06-10' }),
+        mkTask({ id: 't2', projectId: 'p1', parentTaskId: 't1', dueDate: '2026-06-12' }),
+        mkTask({ id: 't3', projectId: 'p1', dueDate: '2026-06-15' }),  // sibling, untouched
+    ];
+    const nt = shiftTaskTreeDates(tasks, 't1', -2);
+    eq(nt.find(t => t.id === 't1').dueDate, '2026-06-08');
+    eq(nt.find(t => t.id === 't2').dueDate, '2026-06-10');
+    eq(nt.find(t => t.id === 't3').dueDate, '2026-06-15');
 });
 
 // ── runner ──

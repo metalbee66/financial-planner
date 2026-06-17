@@ -1415,7 +1415,7 @@ function isoDayDiff(aIso, bIso) {
 }
 
 /** YYYY-MM-DD + n days → YYYY-MM-DD. Tolerates malformed input by returning the original. */
-function addDaysIso(iso, n) {
+export function addDaysIso(iso, n) {
     if (!iso || typeof iso !== 'string') return iso;
     const [y, m, d] = iso.split('-').map(Number);
     if (!y || !m || !d) return iso;
@@ -1425,6 +1425,51 @@ function addDaysIso(iso, n) {
     const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
     const dd = String(dt.getUTCDate()).padStart(2, '0');
     return `${yy}-${mm}-${dd}`;
+}
+
+// ── Bulk date shift ──
+// Move every date in a project (or a task + its subtasks) by n days. n>0 pushes
+// dates forward, n<0 pulls them back. Empty dates stay empty. All helpers return
+// new objects/arrays (never mutate input) and re-stamp updatedAt on touched rows.
+
+/** New task with startDate/dueDate shifted by n days (null dates untouched). */
+function shiftTaskDates(task, n) {
+    if (!task) return task;
+    return {
+        ...task,
+        startDate: addDaysIso(task.startDate, n),
+        dueDate: addDaysIso(task.dueDate, n),
+        updatedAt: nowIso(),
+    };
+}
+
+/**
+ * Project-level shift: move the project's start/end and EVERY task in it
+ * (top-level + subtasks) by n days. Returns { projects, tasks } new arrays.
+ */
+export function shiftProjectDates(projects, tasks, projectId, n) {
+    if (!n || !Array.isArray(projects) || !Array.isArray(tasks)) {
+        return { projects, tasks };
+    }
+    const project = findProject(projects, projectId);
+    if (!project) return { projects, tasks };
+    const nextProjects = updateProjectInList(projects, projectId, {
+        startDate: addDaysIso(project.startDate, n),
+        endDate: addDaysIso(project.endDate, n),
+    });
+    const nextTasks = tasks.map(t => t.projectId === projectId ? shiftTaskDates(t, n) : t);
+    return { projects: nextProjects, tasks: nextTasks };
+}
+
+/**
+ * Task-level shift: move a task and its direct subtasks by n days. Returns a
+ * new tasks array. Other tasks pass through untouched.
+ */
+export function shiftTaskTreeDates(tasks, rootTaskId, n) {
+    if (!n || !Array.isArray(tasks)) return tasks;
+    return tasks.map(t =>
+        (t.id === rootTaskId || t.parentTaskId === rootTaskId) ? shiftTaskDates(t, n) : t
+    );
 }
 
 // ── Cross-project Files summary (Task 5.4) ──

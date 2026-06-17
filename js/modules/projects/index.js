@@ -29,6 +29,8 @@ import {
     findProject,
     effectiveProjectStatus,
     isNonDerivableStatus,
+    shiftProjectDates,
+    shiftTaskTreeDates,
     readAssignees,
     createTask,
     validateTask,
@@ -1150,6 +1152,7 @@ function renderDetail() {
             <h2 class="projects-title">${escapeHtml(p.name)}</h2>
             <span class="status-badge status-${effStatus}">${STATUS_LABELS[effStatus] || effStatus}</span>
             <button class="btn-secondary" id="projects-edit-btn">Edit project</button>
+            <button class="btn-secondary" id="projects-shift-btn">Shift dates</button>
             <button class="btn-secondary" id="projects-archive-btn">${p.archivedAt ? 'Restore' : 'Archive'}</button>
         </div>
         <div class="project-detail-meta">
@@ -1169,6 +1172,7 @@ function renderDetail() {
 
     host.querySelector('#projects-back-btn').addEventListener('click', goList);
     host.querySelector('#projects-edit-btn').addEventListener('click', () => goEdit(p.id));
+    host.querySelector('#projects-shift-btn').addEventListener('click', () => onShiftProjectDates(p));
     host.querySelector('#projects-archive-btn').addEventListener('click', () => {
         if (p.archivedAt) { onRestore(p); } else { onArchive(p); }
     });
@@ -2031,6 +2035,100 @@ function onRestore(p) {
     render();
 }
 
+// ── Bulk date shift (move all dates forward/back by N days) ──
+
+function closeShiftDatesModal() {
+    document.getElementById('shift-dates-backdrop')?.remove();
+    document.getElementById('shift-dates-modal')?.remove();
+    document.removeEventListener('keydown', onShiftDatesKey);
+}
+function onShiftDatesKey(e) {
+    if (e.key === 'Escape') closeShiftDatesModal();
+}
+
+/**
+ * Small modal asking how many days to move dates and in which direction.
+ * `onApply(signedDays)` receives a positive number for forward, negative for
+ * back. Caller does the actual shifting + save.
+ */
+function openShiftDatesModal(title, onApply) {
+    closeShiftDatesModal();
+
+    const backdrop = document.createElement('div');
+    backdrop.id = 'shift-dates-backdrop';
+    backdrop.className = 'notif-prefs-backdrop';
+    backdrop.addEventListener('click', closeShiftDatesModal);
+    document.body.appendChild(backdrop);
+
+    const modal = document.createElement('div');
+    modal.id = 'shift-dates-modal';
+    modal.className = 'notif-prefs-modal shift-dates-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', title);
+    modal.innerHTML = `
+        <div class="notif-prefs-head">
+            <h2>${escapeHtml(title)}</h2>
+            <button type="button" class="notif-prefs-close" aria-label="Close">×</button>
+        </div>
+        <div class="notif-prefs-body">
+            <label class="shift-dates-row">
+                <span>Days</span>
+                <input type="number" id="shift-days" min="1" step="1" value="7" />
+            </label>
+            <fieldset class="notif-prefs-fieldset shift-dates-dir">
+                <legend>Direction</legend>
+                <label class="notif-prefs-row notif-prefs-radio">
+                    <input type="radio" name="shift-dir" value="forward" checked />
+                    <span>Forward (later)</span>
+                </label>
+                <label class="notif-prefs-row notif-prefs-radio">
+                    <input type="radio" name="shift-dir" value="back" />
+                    <span>Back (earlier)</span>
+                </label>
+            </fieldset>
+            <div class="form-error" id="shift-dates-error" role="alert" aria-live="polite"></div>
+        </div>
+        <div class="notif-prefs-foot">
+            <button type="button" id="shift-cancel" class="notif-prefs-cancel">Cancel</button>
+            <button type="button" id="shift-apply" class="notif-prefs-save">Apply</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('.notif-prefs-close').addEventListener('click', closeShiftDatesModal);
+    modal.querySelector('#shift-cancel').addEventListener('click', closeShiftDatesModal);
+    modal.querySelector('#shift-apply').addEventListener('click', () => {
+        const days = parseInt(modal.querySelector('#shift-days').value, 10);
+        if (!Number.isFinite(days) || days < 1) {
+            modal.querySelector('#shift-dates-error').textContent = 'Enter a whole number of days (1 or more).';
+            return;
+        }
+        const dir = (modal.querySelector('input[name="shift-dir"]:checked') || {}).value;
+        onApply(dir === 'back' ? -days : days);
+        closeShiftDatesModal();
+    });
+
+    document.addEventListener('keydown', onShiftDatesKey);
+    modal.querySelector('#shift-days').focus();
+}
+
+/** Project-level: shift the project's dates + all its tasks/subtasks. */
+function onShiftProjectDates(p) {
+    openShiftDatesModal(`Shift all dates — ${p.name}`, (days) => {
+        const { projects, tasks } = shiftProjectDates(getProjects(), getTasks(), p.id, days);
+        setBoth(projects, tasks);
+        render();
+    });
+}
+
+/** Task-level: shift this task + its subtasks. */
+function onShiftTaskDates(t) {
+    openShiftDatesModal('Shift task dates', (days) => {
+        setTasks(shiftTaskTreeDates(getTasks(), t.id, days));
+        if (openTaskPanelId === t.id) openTaskPanel(t.id);
+    });
+}
+
 // ── View transitions ──
 
 function freshListMode() {
@@ -2252,7 +2350,10 @@ function renderTaskPanel(t) {
                 <div class="task-panel-subtasks" id="tp-subtasks-section">
                     <div class="task-panel-subtasks-head">
                         <h4>Subtasks</h4>
-                        <button type="button" class="btn-secondary" id="tp-add-subtask-btn">+ Subtask</button>
+                        <div class="task-panel-subtasks-head-actions">
+                            <button type="button" class="btn-secondary" id="tp-shift-dates-btn">Shift dates</button>
+                            <button type="button" class="btn-secondary" id="tp-add-subtask-btn">+ Subtask</button>
+                        </div>
                     </div>
                     <div class="task-panel-subtask-add" id="tp-subtask-add" hidden>
                         <input type="text" id="tp-subtask-name" placeholder="Subtask name" maxlength="200" autocomplete="off" />
@@ -2554,6 +2655,8 @@ function wireSubtaskSection(panel, parent) {
     const submitBtn = panel.querySelector('#tp-subtask-submit');
     const cancelBtn = panel.querySelector('#tp-subtask-cancel');
     const list = panel.querySelector('#tp-subtask-list');
+
+    panel.querySelector('#tp-shift-dates-btn').addEventListener('click', () => onShiftTaskDates(parent));
 
     addBtn.addEventListener('click', () => {
         addRow.hidden = false;
