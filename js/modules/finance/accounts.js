@@ -52,6 +52,15 @@ const SLUG_TO_ACCOUNT_ID = {
 
 const STALE_MS = 48 * 60 * 60 * 1000;  // auto balance older than 48h → stale warning
 
+// Escape scraped string fields before interpolating into innerHTML. The values
+// come from n8n/scraper output (isValidBalanceRecord checks shape, not chars),
+// so a bank name or slug containing < " & must not break out of the markup.
+function esc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /** "updated 2h ago" / "updated 3d ago" from an ISO asOf string. */
 function relativeTimeFromNow(iso) {
     const then = Date.parse(iso);
@@ -109,7 +118,7 @@ function buildAutoOnlyRows(sectionKey, autos, consumedSlugs) {
 function autoBadgeHtml(rec) {
     const rel = relativeTimeFromNow(rec.asOf);
     const stale = (Date.now() - Date.parse(rec.asOf)) > STALE_MS;
-    return `<span class="account-auto-tag" title="Auto-populated from bank scrape (${rec.asOf})">auto${rel ? ' · ' + rel : ''}</span>`
+    return `<span class="account-auto-tag" title="Auto-populated from bank scrape (${esc(rec.asOf)})">auto${rel ? ' · ' + rel : ''}</span>`
         + (stale ? '<span class="account-stale-tag" title="Balance is over 48h old — the scraper may be failing">stale</span>' : '');
 }
 
@@ -178,8 +187,8 @@ export function renderAccountsTab(accounts) {
             const colorCls = rec.balance === 0 ? '' : 'positive';
             html += `
                 <div class="account-card account-card-auto">
-                    <div class="account-bank">${rec.institution}</div>
-                    <div class="account-name">${rec.accountSlug}</div>
+                    <div class="account-bank">${esc(rec.institution)}</div>
+                    <div class="account-name">${esc(rec.accountSlug)}</div>
                     <div class="account-auto-line">${autoBadgeHtml(rec)} <span class="dim" style="font-size:0.7rem;">unmatched — map this slug</span></div>
                     <div class="account-balance ${colorCls}">
                         <span class="account-balance-input ${colorCls}" style="display:inline-block;">${fmtPlain(rec.balance)}</span>
