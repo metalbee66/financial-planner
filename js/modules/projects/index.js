@@ -159,19 +159,24 @@ const OVERVIEW_SORT_LABELS = {
     name: 'Name (A→Z)',
 };
 const DEFAULT_OVERVIEW_SORT = 'updated';
-const DEFAULT_OVERVIEW_STATUS_FILTER = 'all';
 // Overview sort + status filter are per-device view preferences, persisted in
 // localStorage (like celebrate.js's sound toggle) so they survive a reload.
 const OVERVIEW_SORT_PREF_KEY = 'projects_overview_sort';
-const OVERVIEW_STATUS_FILTER_PREF_KEY = 'projects_overview_status_filter';
+// v2: a comma-joined list of statuses to SHOW. Empty array = no filter (show
+// all). Replaces the old single-select 'projects_overview_status_filter' key.
+const OVERVIEW_STATUS_FILTER_PREF_KEY = 'projects_overview_statuses';
 
 function loadOverviewSortPref() {
     const v = localStorage.getItem(OVERVIEW_SORT_PREF_KEY);
     return v && OVERVIEW_SORT_OPTIONS.includes(v) ? v : DEFAULT_OVERVIEW_SORT;
 }
-function loadOverviewStatusFilterPref() {
-    const v = localStorage.getItem(OVERVIEW_STATUS_FILTER_PREF_KEY);
-    return v === 'all' || PROJECT_STATUSES.includes(v) ? v : DEFAULT_OVERVIEW_STATUS_FILTER;
+function loadOverviewStatusesPref() {
+    const raw = localStorage.getItem(OVERVIEW_STATUS_FILTER_PREF_KEY);
+    if (!raw) return [];
+    return raw.split(',').filter(s => PROJECT_STATUSES.includes(s));
+}
+function saveOverviewStatusesPref(statuses) {
+    localStorage.setItem(OVERVIEW_STATUS_FILTER_PREF_KEY, statuses.join(','));
 }
 
 const DEFAULT_TASK_SORT = { by: 'dueDate', dir: 'asc' };
@@ -591,22 +596,15 @@ function renderOverviewBody(root) {
     const sortBy = mode.overviewSort && OVERVIEW_SORT_OPTIONS.includes(mode.overviewSort)
         ? mode.overviewSort
         : DEFAULT_OVERVIEW_SORT;
-    const statusFilter = mode.overviewStatusFilter && (mode.overviewStatusFilter === 'all' || PROJECT_STATUSES.includes(mode.overviewStatusFilter))
-        ? mode.overviewStatusFilter
-        : DEFAULT_OVERVIEW_STATUS_FILTER;
 
     root.innerHTML = `
         <div class="projects-toolbar">
             <h2 class="projects-title">Projects</h2>
-            <label class="overview-sort-field">
+            <div class="overview-status-filter" id="overview-status-filter">
                 <span class="overview-sort-label">Status</span>
-                <select id="overview-status-filter" aria-label="Filter projects by status">
-                    <option value="all"${statusFilter === 'all' ? ' selected' : ''}>All</option>
-                    ${PROJECT_STATUSES.map(s =>
-                        `<option value="${s}"${s === statusFilter ? ' selected' : ''}>${escapeHtml(STATUS_LABELS[s] || s)}</option>`
-                    ).join('')}
-                </select>
-            </label>
+                <button type="button" class="overview-status-btn" id="overview-status-btn"
+                    aria-haspopup="true" aria-expanded="false"></button>
+            </div>
             <label class="overview-sort-field">
                 <span class="overview-sort-label">Sort</span>
                 <select id="overview-sort-by" aria-label="Sort projects by">
@@ -625,27 +623,107 @@ function renderOverviewBody(root) {
         localStorage.setItem(OVERVIEW_SORT_PREF_KEY, e.target.value);
         render();
     });
-    root.querySelector('#overview-status-filter').addEventListener('change', (e) => {
-        mode.overviewStatusFilter = e.target.value;
-        localStorage.setItem(OVERVIEW_STATUS_FILTER_PREF_KEY, e.target.value);
-        render();
-    });
 
     const grid = root.querySelector('#projects-grid');
     const allTasks = getTasks();
     const today = todayIso();
-    // Filter on the effective status (what the badge shows), so 'On Hold' etc.
-    // match what the user sees rather than the raw stored value.
-    const resolved = resolveProjectStatuses(items, allTasks)
-        .filter(p => statusFilter === 'all' || p.status === statusFilter);
 
-    if (resolved.length === 0) {
-        grid.innerHTML = `<div class="projects-empty-filter">No ${escapeHtml(STATUS_LABELS[statusFilter] || statusFilter)} projects.</div>`;
-        return;
+    // Repaint only the grid so toggling a checkbox doesn't tear down the
+    // toolbar (which would close the open filter popover).
+    function paintGrid() {
+        const selected = Array.isArray(mode.overviewStatuses) ? mode.overviewStatuses : [];
+        // Empty selection = no filter (show all). Filter on the effective status
+        // (what the badge shows), so 'On hold' etc. match what the user sees.
+        const resolved = resolveProjectStatuses(items, allTasks)
+            .filter(p => selected.length === 0 || selected.includes(p.status));
+        grid.innerHTML = '';
+        if (resolved.length === 0) {
+            grid.innerHTML = `<div class="projects-empty-filter">No projects match the selected statuses.</div>`;
+            return;
+        }
+        sortProjectsForOverview(resolved, allTasks, { by: sortBy })
+            .forEach(p => grid.appendChild(renderCard(p, allTasks, today)));
     }
 
-    sortProjectsForOverview(resolved, allTasks, { by: sortBy })
-        .forEach(p => grid.appendChild(renderCard(p, allTasks, today)));
+    wireStatusFilter(root.querySelector('#overview-status-filter'), paintGrid);
+    paintGrid();
+}
+
+/**
+ * Multi-select status filter: a toolbar button that opens a checkbox popover.
+ * Selected statuses are held in `mode.overviewStatuses` (empty = show all) and
+ * persisted to localStorage. `onChange` repaints the grid in place; the popover
+ * stays open across toggles and closes on outside-click / Esc.
+ */
+function wireStatusFilter(container, onChange) {
+    const btn = container.querySelector('#overview-status-btn');
+
+    function selected() {
+        return Array.isArray(mode.overviewStatuses) ? mode.overviewStatuses : [];
+    }
+    function updateButtonLabel() {
+        const n = selected().length;
+        btn.textContent = n === 0 ? 'All' : `${n} selected`;
+    }
+    function isOpen() {
+        return !!container.querySelector('.overview-status-popover');
+    }
+    function close() {
+        const pop = container.querySelector('.overview-status-popover');
+        if (pop) pop.remove();
+        btn.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('click', onDocClick);
+        document.removeEventListener('keydown', onKey);
+    }
+    function onDocClick(e) {
+        const path = (typeof e.composedPath === 'function') ? e.composedPath() : [e.target];
+        if (!path.includes(container)) close();
+    }
+    function onKey(e) {
+        if (e.key === 'Escape') close();
+    }
+    function open() {
+        const pop = document.createElement('div');
+        pop.className = 'overview-status-popover';
+        pop.setAttribute('role', 'group');
+        pop.setAttribute('aria-label', 'Show project statuses');
+        pop.innerHTML = `
+            ${PROJECT_STATUSES.map(s => `
+                <label class="overview-status-row">
+                    <input type="checkbox" value="${s}"${selected().includes(s) ? ' checked' : ''} />
+                    <span>${escapeHtml(STATUS_LABELS[s] || s)}</span>
+                </label>
+            `).join('')}
+            <button type="button" class="overview-status-clear">Show all</button>
+        `;
+        pop.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const next = PROJECT_STATUSES.filter(s =>
+                    pop.querySelector(`input[value="${s}"]`).checked
+                );
+                mode.overviewStatuses = next;
+                saveOverviewStatusesPref(next);
+                updateButtonLabel();
+                onChange();
+            });
+        });
+        pop.querySelector('.overview-status-clear').addEventListener('click', () => {
+            mode.overviewStatuses = [];
+            saveOverviewStatusesPref([]);
+            pop.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+            updateButtonLabel();
+            onChange();
+        });
+        container.appendChild(pop);
+        btn.setAttribute('aria-expanded', 'true');
+        setTimeout(() => {
+            document.addEventListener('click', onDocClick);
+            document.addEventListener('keydown', onKey);
+        }, 0);
+    }
+
+    btn.addEventListener('click', () => { isOpen() ? close() : open(); });
+    updateButtonLabel();
 }
 
 // ── Archived sub-tab: projects hidden from the overview, with Restore ──
@@ -2139,7 +2217,7 @@ function freshListMode() {
         detailProjectId: null,
         detailView: DEFAULT_DETAIL_VIEW,
         overviewSort: loadOverviewSortPref(),
-        overviewStatusFilter: loadOverviewStatusFilterPref(),
+        overviewStatuses: loadOverviewStatusesPref(),
         listSubtab: 'overview',
         myTasksUser: null,
         myTasksCollapsed: { completed: true },
@@ -2159,7 +2237,7 @@ function goList() {
     const prev = mode || {};
     mode = freshListMode();
     if (prev.overviewSort) mode.overviewSort = prev.overviewSort;
-    if (prev.overviewStatusFilter) mode.overviewStatusFilter = prev.overviewStatusFilter;
+    if (prev.overviewStatuses) mode.overviewStatuses = prev.overviewStatuses;
     if (prev.listSubtab) mode.listSubtab = prev.listSubtab;
     if (prev.myTasksUser) mode.myTasksUser = prev.myTasksUser;
     if (prev.myTasksCollapsed) mode.myTasksCollapsed = prev.myTasksCollapsed;

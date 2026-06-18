@@ -3541,20 +3541,49 @@ test.describe('Projects overview — sort persistence, status filter, archive, s
         await expect(page.locator('#overview-sort-by')).toHaveValue('name');
     });
 
-    test('status filter hides non-matching projects and persists', async ({ page }) => {
+    test('status filter checkbox dropdown hides non-matching projects and persists', async ({ page }) => {
         await createProject(page, { name: 'ActiveOne', status: 'active' });
         await backToList(page);
         await createProject(page, { name: 'PlanOne', status: 'planning' });
         await backToList(page);
-        await page.locator('#overview-status-filter').selectOption('active');
+        // Open the popover and tick only Active
+        await page.locator('#overview-status-btn').click();
+        await page.locator('.overview-status-popover input[value="active"]').check();
         await expect(page.locator('.project-card', { hasText: 'ActiveOne' })).toBeVisible();
         await expect(page.locator('.project-card', { hasText: 'PlanOne' })).toHaveCount(0);
+        // Button label reflects the count
+        await expect(page.locator('#overview-status-btn')).toHaveText('1 selected');
         // Persists across reload
         await page.reload();
         await page.waitForSelector('#module-host', { state: 'attached' });
         await page.locator('.top-nav-btn[data-module="projects"]').click();
-        await expect(page.locator('#overview-status-filter')).toHaveValue('active');
+        await expect(page.locator('#overview-status-btn')).toHaveText('1 selected');
         await expect(page.locator('.project-card', { hasText: 'PlanOne' })).toHaveCount(0);
+        // The checkbox is restored as checked
+        await page.locator('#overview-status-btn').click();
+        await expect(page.locator('.overview-status-popover input[value="active"]')).toBeChecked();
+    });
+
+    test('status filter multi-select shows several statuses; Show all clears', async ({ page }) => {
+        await createProject(page, { name: 'ActiveOne', status: 'active' });
+        await backToList(page);
+        await createProject(page, { name: 'PlanOne', status: 'planning' });
+        await backToList(page);
+        await createProject(page, { name: 'HoldOne', status: 'on-hold' });
+        await backToList(page);
+        await page.locator('#overview-status-btn').click();
+        await page.locator('.overview-status-popover input[value="active"]').check();
+        await page.locator('.overview-status-popover input[value="on-hold"]').check();
+        // Both ticked statuses show; planning is hidden
+        await expect(page.locator('.project-card', { hasText: 'ActiveOne' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'HoldOne' })).toBeVisible();
+        await expect(page.locator('.project-card', { hasText: 'PlanOne' })).toHaveCount(0);
+        await expect(page.locator('#overview-status-btn')).toHaveText('2 selected');
+        // Show all clears the filter — every project returns
+        await page.locator('.overview-status-clear').click();
+        await expect(page.locator('#overview-status-btn')).toHaveText('All');
+        await expect(page.locator('.project-card', { hasText: 'PlanOne' })).toBeVisible();
+        await expect(page.locator('.project-card')).toHaveCount(3);
     });
 
     test('archive removes from overview; Archived sub-tab restores it', async ({ page }) => {
