@@ -31,3 +31,18 @@ Patterns to avoid repeating, and gotchas worth remembering. Updated by Claude wh
 - For any task gated on a third-party vendor covering Brad's specific accounts / account types / regional setup: get a hands-on trial done **before** writing a detailed spec or plan. List the specific must-work items explicitly, then verify each against his real accounts. Captured as a feedback memory ([feedback_validate_vendor_before_detailed_spec.md](file:///C:/Users/brads/.claude/projects/e--Projects-Family-Planner/memory/feedback_validate_vendor_before_detailed_spec.md)) so it applies across future sessions, not just this project.
 - Vendor research that reports "supports X bank" should be treated as necessary-but-not-sufficient. Coverage of an institution is per-account-type per-product per-region, and CDR scope evolves bank-by-bank quarter-by-quarter — vendor docs lag the actual rollout.
 - The right ordering for vendor-dependent tasks: **research the landscape → narrow to 1–2 candidates → Brad does a cheap trial → verify the specific must-work list → only then write spec + plan**. Skipping the trial buys speed in exchange for high blowup risk when reality contradicts docs.
+
+---
+
+## L3 — Date fields deserialize as strings off Firebase/localStorage (2026-06-18)
+
+**What happened:** v2.4's Bank inbox loads scraped transactions (stored under the Firebase `bank_inbox` key) into the existing CSV review table, then reuses `applyToPlanner`. The transaction row shape carries a `date` field that the CSV parsers (`parseNabCsv` / `parseHsbcCsv`) produce as a live `Date` object. But bank-inbox rows come from JSON (Firebase → localStorage), and **JSON has no Date type** — `date` round-trips as an ISO **string**. `applyToPlanner` → `getWeekIndex(tx.date)` calls `date.getFullYear()`, which throws on a string. The first E2E test caught it: Apply silently failed and the inbox row never got its dedup hash, so it re-appeared after reload.
+
+**Why it slipped:** The CSV flow never exercises the string path — `parseNabCsv` builds Date objects in-memory and applies them in the same session, so `tx.date` is always a real Date. Any row that has been *persisted and reloaded* (or arrives from Firebase/n8n) loses the Date type. Inspection of the row shape looked identical; the difference is only visible at runtime after a serialize→deserialize hop.
+
+**Fix:** `loadBankInboxIntoReview` rehydrates `date` to a Date (`tx.date instanceof Date ? tx.date : new Date(tx.date)`) before handing rows to the review/apply flow.
+
+**Guardrails for next time:**
+- Any entity with a `Date` field that is persisted to Firebase/localStorage and read back MUST rehydrate the Date on load — the field will be a string, not a Date. Treat `instanceof Date` as the gate.
+- When reusing an in-memory code path (built for freshly-parsed data) on persisted/remote data, assume Dates, Sets, and Maps did NOT survive the JSON hop and re-hydrate them at the boundary.
+- This is exactly the class of bug E2E catches and unit tests don't: the unit tests for `parseAmpCsv` pass live Dates; only the full seed→reload→apply E2E exercises the string path.
