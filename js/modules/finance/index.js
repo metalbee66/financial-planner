@@ -16,7 +16,7 @@ import { saveBudgetCY, saveBudgetNY } from '../../data.js';
 import { renderBudgetTab, setupBudgetEditing } from './budget.js';
 import { initPlanner, setupPlannerEditing } from './planner.js';
 import { renderAccountsTab, setupAccountsEditing } from './accounts.js';
-import { renderMappings, setupImport } from './import.js';
+import { renderMappings, setupImport, renderBankInboxCard } from './import.js';
 
 const TEMPLATE = `
 <nav class="sub-nav">
@@ -178,10 +178,14 @@ const TEMPLATE = `
             <h2 class="section-header" style="background:#1a2a1a;color:var(--accent);">Merchant Mappings</h2>
             <div id="mappings-content" style="padding:16px;"></div>
         </div>
-        <div class="section-card" style="opacity:0.5;">
-            <h2 class="section-header" style="background:#2a2a3e;color:var(--text-dim);">Bank API (Coming Soon)</h2>
-            <div style="padding:20px;color:var(--text-dim);font-size:0.85rem;">
-                Connect directly to bank APIs to pull transactions automatically.
+        <div class="section-card">
+            <h2 class="section-header" style="background:#1a2238;color:var(--accent);">Bank inbox</h2>
+            <div style="padding:16px;">
+                <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:12px;">
+                    Transactions scraped from your bank logins land here automatically.
+                    Load them into the review table above to assign budget lines and apply.
+                </p>
+                <div id="bank-inbox-summary"></div>
             </div>
         </div>
     </div>
@@ -213,6 +217,7 @@ export function mount(host) {
                     break;
                 case 'import':
                     renderMappings(state.glMappings, state.budgetCY);
+                    renderBankInboxCard();
                     break;
             }
         });
@@ -231,4 +236,5 @@ export function mount(host) {
     initPlanner(state.budgetCY, state.weekActuals);
     renderAccountsTab(state.accountsData);
     renderMappings(state.glMappings, state.budgetCY);
+    renderBankInboxCard();
 }

@@ -2,7 +2,7 @@
  * Transaction import — parse CSV, present for review, assign to budget GL lines.
  */
 
-import { getWeekDates, fmtPlain, showToast, saveWeekActuals } from '../../data.js';
+import { getWeekDates, fmtPlain, showToast, saveWeekActuals, sanitiseBankInbox } from '../../data.js';
 import { fbSave } from '../../firebase-sync.js';
 import { state } from '../../state.js';
 
@@ -26,6 +26,20 @@ export function loadStoredHashes() {
 export function saveStoredHashes(hashes) {
     state.storedTransactionHashes = hashes;
     fbSave('imported_tx_hashes', [...hashes]);
+}
+
+/**
+ * v2.4: prime state.bankInbox from localStorage on boot (mirror of
+ * loadStoredHashes / loadGlMappings). Firebase's realtime listener overwrites
+ * this once the user signs in; the localStorage copy gives an instant render
+ * and an offline / local-only fallback. Always returns a valid shape.
+ */
+export function loadBankInbox() {
+    try {
+        const raw = localStorage.getItem('bank_inbox');
+        if (raw) return sanitiseBankInbox(JSON.parse(raw));
+    } catch (e) { /* fall through to default */ }
+    return { transactions: {}, balances: {} };
 }
 
 /** Create a hash to identify a unique transaction */
@@ -208,6 +222,91 @@ export function parseHsbcCsv(text, accountSlug = 'hsbc-unknown') {
 
     transactions.sort((a, b) => a.date - b.date);
     return transactions;
+}
+
+/**
+ * Parse an AMP super transaction-export CSV.
+ *
+ * ⚠️ COLUMN MAPPING IS PROVISIONAL. AMP's actual export layout is confirmed
+ * during the headed `scrapers/amp.mjs` walk-through (T2.6). This parser assumes
+ * the common super-fund shape — `Date, Description, Amount[, Balance]` with a
+ * header row — reusing the same quoted-field + amount handling as HSBC. The
+ * date parser is deliberately tolerant: it accepts `D MMM YYYY` (HSBC-style),
+ * ISO `YYYY-MM-DD`, and `DD/MM/YYYY`, because AMP's date format is unknown
+ * until the first real export lands. Once a real AMP CSV is captured, confirm
+ * the column indices below and tighten if needed.
+ *
+ * Output shape matches parseHsbcCsv / parseNabCsv exactly so the rows flow
+ * through autoSuggest + applyToPlanner unchanged. `accountSlug` defaults to
+ * 'amp-super' (the pilot's single AMP account).
+ */
+export function parseAmpCsv(text, accountSlug = 'amp-super') {
+    if (!text || typeof text !== 'string') return [];
+    const lines = text.split(/\r?\n/);
+    const transactions = [];
+
+    for (let i = 1; i < lines.length; i++) {  // skip header
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const cols = parseCsvLine(line);
+        if (cols.length < 3) continue;  // need date, description, amount
+
+        const date = parseAmpDate(cols[0]);
+        if (!date) continue;
+
+        const amount = parseHsbcAmount(cols[2]);  // same quoted/comma handling
+        if (amount === null) continue;
+
+        const details = cols[1];
+
+        transactions.push({
+            date,
+            dateStr: cols[0].trim(),
+            amount: Math.abs(amount),
+            isRefund: amount > 0,
+            account: accountSlug,
+            source: 'AMP',
+            txType: '',
+            details,
+            category: '',
+            merchant: details.substring(0, 30).trim(),
+            glLine: '',
+            isDuplicate: false,
+        });
+    }
+
+    transactions.sort((a, b) => a.date - b.date);
+    return transactions;
+}
+
+/**
+ * Tolerant date parser for AMP rows — accepts `D MMM YYYY`, ISO `YYYY-MM-DD`,
+ * and `DD/MM/YYYY` (AU convention). Returns a Date or null on no match.
+ */
+function parseAmpDate(str) {
+    if (!str) return null;
+    const s = str.trim();
+
+    // `D MMM YYYY` / `DD MMM YYYY` (reuse the HSBC parser)
+    const hsbcStyle = parseHsbcDate(s);
+    if (hsbcStyle) return hsbcStyle;
+
+    // ISO `YYYY-MM-DD`
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+        const d = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+        return isNaN(d) ? null : d;
+    }
+
+    // `DD/MM/YYYY` (Australian day-first)
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+        const d = new Date(parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10));
+        return isNaN(d) ? null : d;
+    }
+
+    return null;
 }
 
 function getWeekIndex(date) {
@@ -440,6 +539,80 @@ export function renderMappings(mappings, budgetData) {
     container.innerHTML = html;
 }
 
+// ── Bank inbox (v2.4) ──
+// Scraped transactions arrive via n8n → Firebase `bank_inbox/transactions`,
+// already in the parseHsbcCsv/parseAmpCsv row shape. Rather than build a
+// parallel review table, the Bank inbox card surfaces a count + a "Load into
+// review" button that drops the not-yet-applied rows into the SAME
+// state.importedTransactions table the CSV upload uses. "Applied" is the
+// existing txHash dedup: once a row is applied, its hash is in
+// state.storedTransactionHashes and it's filtered out here on the next render.
+
+/** Inbox rows not yet applied (txHash absent from stored hashes). */
+function pendingInboxTransactions() {
+    const inbox = (state.bankInbox && state.bankInbox.transactions) || {};
+    const hashes = state.storedTransactionHashes || new Set();
+    return Object.values(inbox).filter(tx => tx && !hashes.has(txHash(tx)));
+}
+
+/**
+ * Render the Bank inbox summary card (#bank-inbox-summary). Shows a per-source
+ * count of pending scraped transactions + a Load button, or an empty state.
+ * Safe to call when the card isn't mounted (returns early).
+ */
+export function renderBankInboxCard() {
+    const el = document.getElementById('bank-inbox-summary');
+    if (!el) return;
+
+    const pending = pendingInboxTransactions();
+    if (pending.length === 0) {
+        el.innerHTML = '<p class="dim" style="font-size:0.8rem;">No new scraped transactions. They appear here automatically after the daily bank scrape runs.</p>';
+        return;
+    }
+
+    // Count per source (HSBC, AMP, …)
+    const bySource = {};
+    pending.forEach(tx => { bySource[tx.source] = (bySource[tx.source] || 0) + 1; });
+    const sourceList = Object.keys(bySource).sort()
+        .map(s => `${s} (${bySource[s]})`).join(', ');
+
+    el.innerHTML = `
+        <div class="import-summary" style="margin-bottom:0;">
+            <span>${pending.length} new scraped transaction${pending.length === 1 ? '' : 's'}</span>
+            <span class="dim">${sourceList}</span>
+            <button id="load-bank-inbox" class="add-revision-btn" style="margin-left:auto;">Load ${pending.length} into review</button>
+        </div>`;
+}
+
+/**
+ * Load pending inbox rows into the review table (state.importedTransactions),
+ * run auto-suggest, and render. Reuses the entire CSV review/apply flow.
+ * Returns the number loaded.
+ */
+export function loadBankInboxIntoReview() {
+    const pending = pendingInboxTransactions();
+    if (pending.length === 0) {
+        showToast('No new scraped transactions to load');
+        return 0;
+    }
+    // Deep-clone so applying/editing in the review table never mutates the
+    // bank_inbox source map (which the realtime listener owns). `date` comes
+    // back from Firebase/localStorage as an ISO STRING (JSON has no Date type);
+    // rehydrate it to a Date so getWeekIndex/applyToPlanner work like the CSV
+    // path (which produces live Date objects).
+    state.importedTransactions = pending.map(tx => ({
+        ...tx,
+        date: tx.date instanceof Date ? tx.date : new Date(tx.date),
+        glLine: '',
+        isDuplicate: false,
+    }));
+    const allLines = getAllLineNames(state.budgetCY);
+    const dupCount = autoSuggest(state.importedTransactions, state.glMappings, allLines, state.storedTransactionHashes);
+    renderImportTab(state.importedTransactions, state.budgetCY, dupCount);
+    showToast(`Loaded ${pending.length} scraped transaction${pending.length === 1 ? '' : 's'} into review`);
+    return pending.length;
+}
+
 /** Group assigned transactions by budget line and week */
 function groupByLineAndWeek(transactions) {
     const groups = {};
@@ -646,6 +819,10 @@ export function setupImport() {
             showToast('Mapping removed');
         }
 
+        if (e.target.id === 'load-bank-inbox') {
+            loadBankInboxIntoReview();
+        }
+
         if (e.target.id === 'apply-to-planner') {
             if (state.importedTransactions.length === 0) return;
             const unassigned = state.importedTransactions.filter(tx => !tx.glLine);
@@ -654,6 +831,8 @@ export function setupImport() {
             }
             state.weekActuals = applyToPlanner(state.importedTransactions, state.weekActuals);
             saveWeekActuals(state.weekActuals);
+            // Applied rows now have their txHash stored → drop out of the inbox count.
+            renderBankInboxCard();
             showToast('Applied to planner');
         }
     });
@@ -686,6 +865,12 @@ function updateImportCounts() {
         if (f === 'assigned') btn.textContent = `Assigned (${assigned})`;
         if (f === 'ignored') btn.textContent = `Ignored (${ignored})`;
     });
+
+    // Keep the Apply button's enabled state in sync as rows get assigned —
+    // renderImportTab sets the initial `disabled` but only this incremental
+    // path runs on each GL change (no full re-render), so toggle it here too.
+    const applyBtn = document.getElementById('apply-to-planner');
+    if (applyBtn) applyBtn.disabled = assigned === 0;
 
     if (applyImportFilters) applyImportFilters();
 }
