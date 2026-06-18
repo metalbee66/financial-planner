@@ -12,7 +12,7 @@
  */
 
 import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
-import { migrateOutgoing, migrateWeekActuals, DEFAULT_CY, DEFAULT_NY } from './data.js';
+import { migrateOutgoing, migrateWeekActuals, DEFAULT_CY, DEFAULT_NY, DEFAULT_BANK_INBOX, sanitiseBankInbox } from './data.js';
 import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
 // v2.0.2: DEFAULT_PM import removed; firebase-sync no longer reads or writes
 // the legacy `pm_dlbooks` key.
@@ -33,12 +33,14 @@ let renderBudgetTab = null;
 let renderAccountsTab = null;
 let renderProjectsTab = null;
 let renderEmailQueueAdmin = null;
+let renderBankInbox = null;
 
 export function registerRenderHooks(hooks) {
     renderBudgetTab = hooks.renderBudgetTab;
     renderAccountsTab = hooks.renderAccountsTab;
     renderProjectsTab = hooks.renderProjectsTab;
     renderEmailQueueAdmin = hooks.renderEmailQueueAdmin;
+    renderBankInbox = hooks.renderBankInbox;
 }
 
 function isFirebaseConfigured() {
@@ -273,6 +275,17 @@ export function setupRealtimeListeners() {
         if (renderEmailQueueAdmin) renderEmailQueueAdmin();
     });
 
+    fbListen('bank_inbox', (data) => {
+        // v2.4: n8n PATCHes scraped rows under bank_inbox/{transactions,balances}.
+        // One listener fires on either sibling change. sanitiseBankInbox
+        // tolerates a partially-populated tree (e.g. only balances so far).
+        state.bankInbox = sanitiseBankInbox(data);
+        localStorage.setItem('bank_inbox', JSON.stringify(state.bankInbox));
+        // Transactions surface in the Import tab; balances in the Accounts view.
+        if (renderBankInbox) renderBankInbox();
+        if (renderAccountsTab && state.accountsData) renderAccountsTab(state.accountsData);
+    });
+
     fbListen('projects', (data) => {
         if (data && Array.isArray(data.items)) {
             state.projectsData = {
@@ -334,6 +347,12 @@ export async function initialSync() {
             localStorage.setItem('email_queue', JSON.stringify(fbEq));
         }
 
+        const fbInbox = await fbLoad('bank_inbox');
+        if (fbInbox) {
+            state.bankInbox = sanitiseBankInbox(fbInbox);
+            localStorage.setItem('bank_inbox', JSON.stringify(state.bankInbox));
+        }
+
         const fbProjects = await fbLoad('projects');
         if (fbProjects && Array.isArray(fbProjects.items)) {
             state.projectsData = {
@@ -381,6 +400,9 @@ export async function initialSync() {
         if (!state.projectsData || !Array.isArray(state.projectsData.items)) {
             state.projectsData = JSON.parse(JSON.stringify(DEFAULT_PROJECTS));
         }
+        if (!state.bankInbox || typeof state.bankInbox !== 'object') {
+            state.bankInbox = JSON.parse(JSON.stringify(DEFAULT_BANK_INBOX));
+        }
 
         fbSave('budget_cy26', state.budgetCY);
         fbSave('budget_ny27', state.budgetNY);
@@ -388,6 +410,7 @@ export async function initialSync() {
         fbSave('accounts_data', state.accountsData);
         fbSave('gl_mappings', state.glMappings || {});
         fbSave('projects', state.projectsData);
+        fbSave('bank_inbox', state.bankInbox);
         console.log('Default data pushed to Firebase.');
     }
 }

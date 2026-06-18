@@ -19,6 +19,9 @@ export const state = {
     glMappings: {},
     storedTransactionHashes: new Set(),
     importedTransactions: [],
+    // v2.4: scraped bank data ingested via n8n → Firebase `bank_inbox`.
+    // { transactions: { [txHash]: row }, balances: { [accountSlug]: record } }
+    bankInbox: { transactions: {}, balances: {} },
     // Projects module (Phase 1+): { items: [...], (later) prefs, notifications, ... }
     projectsData: null,
 };

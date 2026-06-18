@@ -17,7 +17,7 @@ import {
     isValidBalanceRecord,
 } from './data.js';
 
-import { parseHsbcCsv } from './modules/finance/import.js';
+import { parseHsbcCsv, parseAmpCsv } from './modules/finance/import.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -208,6 +208,70 @@ test('parseHsbcCsv truncates merchant to first 30 chars', () => {
     const rows = parseHsbcCsv(csv);
     eq(rows[0].merchant.length, 30);
     eq(rows[0].details, longDetails);  // full string preserved in details
+});
+
+// ── parseAmpCsv ──
+// AMP's real export layout is confirmed during the headed amp.mjs scrape
+// (T2.6); these cases lock in the PROVISIONAL `Date, Description, Amount`
+// shape + the tolerant multi-format date parser. Update the synthetic samples
+// once a real AMP export is captured.
+
+const AMP_HEADER = 'Date,Description,Amount,Balance';
+
+test('parseAmpCsv("") returns []', () => {
+    eq(parseAmpCsv(''), []);
+});
+
+test('parseAmpCsv with header only returns []', () => {
+    eq(parseAmpCsv(AMP_HEADER), []);
+});
+
+test('parseAmpCsv parses a contribution row (D MMM YYYY date)', () => {
+    const csv = AMP_HEADER + '\n01 May 2026,EMPLOYER CONTRIBUTION,"1,250.00","85,400.00"';
+    const rows = parseAmpCsv(csv);
+    eq(rows.length, 1);
+    const r = rows[0];
+    eq(r.amount, 1250.00);
+    eq(r.isRefund, true);   // positive amount = credit/contribution
+    eq(r.source, 'AMP');
+    eq(r.account, 'amp-super');
+    eq(r.details, 'EMPLOYER CONTRIBUTION');
+    eq(r.merchant, 'EMPLOYER CONTRIBUTION');
+    eq(r.dateStr, '01 May 2026');
+    truthy(r.date instanceof Date, 'date should be a Date');
+});
+
+test('parseAmpCsv parses a fee row as a debit (ISO date)', () => {
+    const csv = AMP_HEADER + '\n2026-05-15,ADMIN FEE,"-12.50","85,387.50"';
+    const rows = parseAmpCsv(csv);
+    eq(rows.length, 1);
+    eq(rows[0].amount, 12.50);
+    eq(rows[0].isRefund, false);
+});
+
+test('parseAmpCsv accepts DD/MM/YYYY Australian dates', () => {
+    const csv = AMP_HEADER + '\n20/05/2026,INVESTMENT EARNINGS,"340.10","85,727.60"';
+    const rows = parseAmpCsv(csv);
+    eq(rows.length, 1);
+    eq(rows[0].amount, 340.10);
+    truthy(rows[0].date instanceof Date, 'DD/MM/YYYY should parse');
+});
+
+test('parseAmpCsv defaults accountSlug to amp-super and respects an override', () => {
+    const csv = AMP_HEADER + '\n01 May 2026,X,"-1.00","1.00"';
+    eq(parseAmpCsv(csv)[0].account, 'amp-super');
+    eq(parseAmpCsv(csv, 'amp-brad')[0].account, 'amp-brad');
+});
+
+test('parseAmpCsv skips malformed-date rows and sorts ascending', () => {
+    const csv = AMP_HEADER
+        + '\nNOT-A-DATE,bad,"-5.00","1.00"'
+        + '\n20 May 2026,later,"-10.00","2.00"'
+        + '\n15 May 2026,earlier,"-20.00","3.00"';
+    const rows = parseAmpCsv(csv);
+    eq(rows.length, 2);
+    eq(rows[0].details, 'earlier');
+    eq(rows[1].details, 'later');
 });
 
 // ── Runner ──

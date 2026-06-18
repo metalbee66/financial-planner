@@ -26,7 +26,7 @@ import { state } from './state.js';
 import { MODULES } from './modules.js';
 
 import { loadAccounts } from './modules/finance/accounts.js';
-import { loadGlMappings, loadStoredHashes } from './modules/finance/import.js';
+import { loadGlMappings, loadStoredHashes, loadBankInbox, renderBankInboxCard } from './modules/finance/import.js';
 import { renderBudgetTab } from './modules/finance/budget.js';
 import { renderAccountsTab } from './modules/finance/accounts.js';
 // Task 8.2: PM DLBooks module retired. `loadPM` stays imported so the one-shot
@@ -42,7 +42,7 @@ import { applyBusinessTransformExtras20260525 } from './modules/projects/add-bus
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
 // cheap and idempotent.
-registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderProjectsTab, renderEmailQueueAdmin });
+registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderProjectsTab, renderEmailQueueAdmin, renderBankInbox: renderBankInboxCard });
 
 document.addEventListener('DOMContentLoaded', async () => {
     // Load from localStorage first (instant render before Firebase resolves)
@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.pmData = loadPM();
     state.glMappings = loadGlMappings();
     state.storedTransactionHashes = loadStoredHashes();
+    state.bankInbox = loadBankInbox();
     state.projectsData = loadProjects();
 
     const fbReady = await initFirebase();
