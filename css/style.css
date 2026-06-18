@@ -315,6 +315,30 @@ select.editable { width: 100px; cursor: pointer; }
 .account-balance-input:hover { border-color: var(--border); }
 .account-balance-input:focus { border-color: var(--accent); outline: none; background: rgba(0,176,240,0.08); }
 
+/* v2.4 — auto-populated (scraped) balances */
+.account-auto-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.account-auto-tag {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 700;
+    color: var(--accent);
+    background: rgba(0,176,240,0.12);
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+.account-stale-tag {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 700;
+    color: var(--orange);
+    background: rgba(255,152,0,0.12);
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+.account-card-auto { border-style: dashed; border-color: rgba(0,176,240,0.3); }
+
 .accounts-section-title {
     font-size: 0.78rem;
     text-transform: uppercase;

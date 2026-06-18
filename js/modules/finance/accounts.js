@@ -2,7 +2,7 @@
  * Accounts dashboard — all bank, investment, and super accounts.
  */
 
-import { fmt, fmtPlain, fmtSigned, showToast, parseCurrency, saveBudgetCY } from '../../data.js';
+import { fmt, fmtPlain, fmtSigned, showToast, parseCurrency, saveBudgetCY, isValidBalanceRecord } from '../../data.js';
 import { fbSave } from '../../firebase-sync.js';
 import { state } from '../../state.js';
 
@@ -34,6 +34,85 @@ export function loadAccounts() {
     return JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
 }
 
+// ── v2.4: auto-populated balances from scraped bank_inbox/balances ──
+//
+// Scraped balances are keyed by accountSlug (e.g. 'amp-super'); the accounts
+// view is keyed by category+index with per-account `id`s. This map pairs a
+// scraped slug to an existing account `id` so the balance lands on that card.
+//
+// ⚠️ PAIRINGS ARE PROVISIONAL — Brad to confirm against the real scraped
+// slugs once the Selfwealth + AMP scrapers run headed. Any slug NOT in this
+// map renders as its own auto-only row in its category (see buildAutoOnlyRows),
+// so an unconfirmed slug is surfaced, never silently dropped.
+const SLUG_TO_ACCOUNT_ID = {
+    'amp-super': 'amp-brad',            // TODO confirm: pilot AMP account = Brad's super?
+    // 'selfwealth-account-1': 'sw',    // TODO confirm — one 'sw' card today
+    // 'selfwealth-account-2': '???',   // TODO no second Selfwealth card exists yet
+};
+
+const STALE_MS = 48 * 60 * 60 * 1000;  // auto balance older than 48h → stale warning
+
+/** "updated 2h ago" / "updated 3d ago" from an ISO asOf string. */
+function relativeTimeFromNow(iso) {
+    const then = Date.parse(iso);
+    if (Number.isNaN(then)) return '';
+    const diff = Date.now() - then;
+    const mins = Math.round(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.round(hrs / 24);
+    return `${days}d ago`;
+}
+
+/** Valid scraped balance records keyed by accountSlug (from state.bankInbox). */
+function autoBalances() {
+    const balances = (state.bankInbox && state.bankInbox.balances) || {};
+    const out = {};
+    for (const [slug, rec] of Object.entries(balances)) {
+        if (isValidBalanceRecord(rec)) out[slug] = rec;
+    }
+    return out;
+}
+
+/**
+ * For a given account, find its auto balance record IF one is mapped to its id
+ * AND the account isn't manually overridden. Returns the record or null.
+ * Manual wins: an account flagged manualBalance keeps its typed value.
+ */
+function autoRecordForAccount(acct, autos) {
+    if (acct.manualBalance) return null;
+    for (const [slug, rec] of Object.entries(autos)) {
+        if (SLUG_TO_ACCOUNT_ID[slug] === acct.id) return rec;
+    }
+    return null;
+}
+
+// Balance-record `category` → accounts-view section key.
+const CATEGORY_TO_SECTION = { banking: 'banking', super: 'super', investment: 'investments' };
+
+/**
+ * Scraped balances in the given section's category that aren't paired to any
+ * existing account card (slug absent from SLUG_TO_ACCOUNT_ID) and haven't
+ * already been consumed. These render as read-only auto-only rows.
+ */
+function buildAutoOnlyRows(sectionKey, autos, consumedSlugs) {
+    return Object.values(autos).filter(rec =>
+        CATEGORY_TO_SECTION[rec.category] === sectionKey
+        && !(rec.accountSlug in SLUG_TO_ACCOUNT_ID)
+        && !consumedSlugs.has(rec.accountSlug)
+    );
+}
+
+/** Render an auto badge (auto · updated Nh ago [· stale]) for a balance record. */
+function autoBadgeHtml(rec) {
+    const rel = relativeTimeFromNow(rec.asOf);
+    const stale = (Date.now() - Date.parse(rec.asOf)) > STALE_MS;
+    return `<span class="account-auto-tag" title="Auto-populated from bank scrape (${rec.asOf})">auto${rel ? ' · ' + rel : ''}</span>`
+        + (stale ? '<span class="account-stale-tag" title="Balance is over 48h old — the scraper may be failing">stale</span>' : '');
+}
+
 export function saveAccounts(data) {
     fbSave('accounts_data', data);
     showToast('Saved');
@@ -53,12 +132,19 @@ export function renderAccountsTab(accounts) {
 
     let html = '';
 
+    // v2.4: scraped balances available for auto-population this render.
+    const autos = autoBalances();
+    const consumedSlugs = new Set();  // slugs that landed on an existing card
+
     sections.forEach(sec => {
         html += `<div class="accounts-section-title">${sec.title}</div>`;
         html += '<div class="accounts-grid">';
 
         accounts[sec.key].forEach((acct, i) => {
-            const bal = acct.balance;
+            // Auto balance wins only when the account isn't manually overridden.
+            const auto = autoRecordForAccount(acct, autos);
+            if (auto) consumedSlugs.add(auto.accountSlug);
+            const bal = auto ? auto.balance : acct.balance;
             const isLiability = acct.type === 'liability';
             const colorCls = bal === 0 ? '' : (isLiability && bal > 0 ? 'negative' : 'positive');
 
@@ -73,10 +159,30 @@ export function renderAccountsTab(accounts) {
                     <div class="account-bank">${acct.bank}</div>
                     <div class="account-name">${acct.name}</div>
                     ${acct.desc ? `<div class="account-desc">${acct.desc}</div>` : ''}
+                    ${auto ? `<div class="account-auto-line">${autoBadgeHtml(auto)}</div>` : ''}
                     <div class="account-balance ${colorCls}">
                         <input class="account-balance-input ${colorCls}" type="text"
                             value="${fmtPlain(bal)}"
                             data-section="${sec.key}" data-index="${i}">
+                    </div>
+                </div>
+            `;
+        });
+
+        // Auto-only rows: scraped balances in this category not paired to any
+        // existing card (unmapped slug). Read-only — surfaced so an unconfirmed
+        // slug is visible, never silently dropped. Tallied into totals as assets.
+        buildAutoOnlyRows(sec.key, autos, consumedSlugs).forEach(rec => {
+            consumedSlugs.add(rec.accountSlug);
+            totalAssets += rec.balance;
+            const colorCls = rec.balance === 0 ? '' : 'positive';
+            html += `
+                <div class="account-card account-card-auto">
+                    <div class="account-bank">${rec.institution}</div>
+                    <div class="account-name">${rec.accountSlug}</div>
+                    <div class="account-auto-line">${autoBadgeHtml(rec)} <span class="dim" style="font-size:0.7rem;">unmatched — map this slug</span></div>
+                    <div class="account-balance ${colorCls}">
+                        <span class="account-balance-input ${colorCls}" style="display:inline-block;">${fmtPlain(rec.balance)}</span>
                     </div>
                 </div>
             `;
@@ -114,7 +220,12 @@ export function setupAccountsEditing() {
         if (e.target.classList.contains('account-balance-input')) {
             const sec = e.target.dataset.section;
             const idx = parseInt(e.target.dataset.index);
-            e.target.value = state.accountsData[sec][idx].balance;
+            const acct = state.accountsData[sec][idx];
+            // Editing reveals the effective (displayed) balance — the auto
+            // value if one is active, else the stored manual value — so the
+            // user edits what they see; the blur pins it as manual.
+            const auto = autoRecordForAccount(acct, autoBalances());
+            e.target.value = auto ? auto.balance : acct.balance;
             e.target.select();
         }
     }, true);
@@ -125,6 +236,10 @@ export function setupAccountsEditing() {
             const sec = e.target.dataset.section;
             const idx = parseInt(e.target.dataset.index);
             state.accountsData[sec][idx].balance = val;
+            // v2.4: a manual edit pins this account to the typed value — auto
+            // scraped balances stop overriding it (manual wins). Cleared only
+            // by removing the flag (future feature if Brad wants to re-enable auto).
+            state.accountsData[sec][idx].manualBalance = true;
             e.target.value = fmtPlain(val);
             saveAccounts(state.accountsData);
             renderAccountsTab(state.accountsData);

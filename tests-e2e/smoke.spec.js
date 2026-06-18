@@ -3623,3 +3623,187 @@ test.describe('Projects overview — sort persistence, status filter, archive, s
         await expect(page.locator('#tp-due')).toHaveValue('2026-06-15');
     });
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// v2.4 — Bank scraping pipeline (browser side: Import-tab inbox + auto balances)
+// ──────────────────────────────────────────────────────────────────────────
+
+// Build a bank_inbox transactions map keyed by txHash (dateStr|amount|details|
+// account) — the same key the data layer + n8n use. Rows are already in the
+// parseHsbcCsv/parseAmpCsv output shape.
+function inboxTxRow({ dateStr, amount, details, account, source, isRefund = false }) {
+    return {
+        date: new Date(dateStr).toISOString(),
+        dateStr, amount, isRefund, account, source,
+        txType: '', details, category: '',
+        merchant: details.substring(0, 30), glLine: '', isDuplicate: false,
+    };
+}
+function inboxKey(r) { return `${r.dateStr}|${r.amount}|${r.details}|${r.account}`; }
+
+async function seedBankInboxTransactions(page, rows) {
+    const map = {};
+    for (const r of rows) map[inboxKey(r)] = r;
+    await page.evaluate((m) => {
+        localStorage.setItem('bank_inbox', JSON.stringify({ transactions: m, balances: {} }));
+    }, map);
+}
+
+async function gotoFinanceImport(page) {
+    await page.locator('.top-nav-btn[data-module="finance"]').click();
+    await page.locator('.sub-tab-btn[data-sub-tab="import"]').click();
+}
+
+test.describe('v2.4 bank-api — HSBC inbox', () => {
+
+    test('scraped transactions surface in the Bank inbox card and load into review', async ({ page }) => {
+        await seedBankInboxTransactions(page, [
+            inboxTxRow({ dateStr: '25 May 2026', amount: 12.5, details: 'COFFEE SHOP', account: 'hsbc-everyday', source: 'HSBC' }),
+            inboxTxRow({ dateStr: '24 May 2026', amount: 80, details: 'SUPERMARKET', account: 'hsbc-everyday', source: 'HSBC' }),
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoFinanceImport(page);
+
+        // Card shows the pending count + source breakdown.
+        await expect(page.locator('#bank-inbox-summary')).toContainText('2 new scraped transactions');
+        await expect(page.locator('#bank-inbox-summary')).toContainText('HSBC (2)');
+
+        // Load into the review table — reuses the CSV review surface.
+        await page.locator('#load-bank-inbox').click();
+        await expect(page.locator('.import-table tbody tr')).toHaveCount(2);
+        await expect(page.locator('#import-preview')).toContainText('COFFEE SHOP');
+    });
+
+    test('GL-assign + Apply stores the hash so the row disappears from the inbox on reload', async ({ page }) => {
+        await seedBankInboxTransactions(page, [
+            inboxTxRow({ dateStr: '25 May 2026', amount: 12.5, details: 'COFFEE SHOP', account: 'hsbc-everyday', source: 'HSBC' }),
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoFinanceImport(page);
+
+        page.on('dialog', d => d.accept());  // accept any confirm prompts
+
+        await page.locator('#load-bank-inbox').click();
+        // Assign the single row to a real budget line (first non-empty option).
+        const sel = page.locator('.import-table tbody tr .gl-select').first();
+        const optionValue = await sel.locator('option:not([value=""])').first().getAttribute('value');
+        await sel.selectOption(optionValue);
+        await expect(sel).toHaveValue(optionValue);  // assignment took
+        // Now exactly one row is assigned → Apply enables.
+        await expect(page.locator('#apply-to-planner')).toBeEnabled();
+
+        await page.locator('#apply-to-planner').click();
+
+        // Inbox count drops to the empty state immediately (hash now stored).
+        await expect(page.locator('#bank-inbox-summary')).toContainText('No new scraped transactions');
+
+        // Survives reload — the stored hash persists in localStorage.
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoFinanceImport(page);
+        await expect(page.locator('#bank-inbox-summary')).toContainText('No new scraped transactions');
+        await expect(page.locator('#load-bank-inbox')).toHaveCount(0);
+    });
+
+    test('an already-applied transaction is not re-shown when re-seeded', async ({ page }) => {
+        const row = inboxTxRow({ dateStr: '25 May 2026', amount: 12.5, details: 'COFFEE SHOP', account: 'hsbc-everyday', source: 'HSBC' });
+        // Pre-store the hash as if it was applied previously.
+        await page.evaluate(({ r, key }) => {
+            localStorage.setItem('imported_tx_hashes', JSON.stringify([key]));
+            localStorage.setItem('bank_inbox', JSON.stringify({ transactions: { [key]: r }, balances: {} }));
+        }, { r: row, key: inboxKey(row) });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoFinanceImport(page);
+        await expect(page.locator('#bank-inbox-summary')).toContainText('No new scraped transactions');
+    });
+});
+
+test.describe('v2.4 bank-api — auto-populated balances', () => {
+
+    async function seedBalances(page, balances) {
+        const map = {};
+        for (const b of balances) map[b.accountSlug] = b;
+        await page.evaluate((m) => {
+            const raw = localStorage.getItem('bank_inbox');
+            const inbox = raw ? JSON.parse(raw) : { transactions: {}, balances: {} };
+            inbox.balances = m;
+            localStorage.setItem('bank_inbox', JSON.stringify(inbox));
+        }, map);
+    }
+
+    async function gotoAccounts(page) {
+        await page.locator('.top-nav-btn[data-module="finance"]').click();
+        await page.locator('.sub-tab-btn[data-sub-tab="accounts"]').click();
+    }
+
+    test('a mapped scraped balance fills its account card with an auto tag', async ({ page }) => {
+        const recentIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();  // 2h ago
+        await seedBalances(page, [
+            { accountSlug: 'amp-super', balance: 85400, asOf: recentIso, institution: 'AMP', category: 'super' },
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+
+        // amp-super maps to the amp-brad card (SLUG_TO_ACCOUNT_ID).
+        const ampCard = page.locator('.account-card', { hasText: 'Brad Superannuation' });
+        await expect(ampCard.locator('.account-auto-tag')).toBeVisible();
+        await expect(ampCard.locator('.account-balance-input')).toHaveValue('$85,400.00');
+    });
+
+    test('a stale (>48h) auto balance gets a stale warning', async ({ page }) => {
+        const oldIso = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();  // 3d ago
+        await seedBalances(page, [
+            { accountSlug: 'amp-super', balance: 85400, asOf: oldIso, institution: 'AMP', category: 'super' },
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+        const ampCard = page.locator('.account-card', { hasText: 'Brad Superannuation' });
+        await expect(ampCard.locator('.account-stale-tag')).toBeVisible();
+    });
+
+    test('an unmapped scraped balance renders as an auto-only row in its category', async ({ page }) => {
+        const recentIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        await seedBalances(page, [
+            { accountSlug: 'selfwealth-account-1', balance: 12345, asOf: recentIso, institution: 'Selfwealth', category: 'investment' },
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+        const autoRow = page.locator('.account-card-auto', { hasText: 'selfwealth-account-1' });
+        await expect(autoRow).toBeVisible();
+        await expect(autoRow.locator('.account-auto-tag')).toBeVisible();
+    });
+
+    test('manual override wins: a typed balance is kept and pins the account to manual', async ({ page }) => {
+        const recentIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        await seedBalances(page, [
+            { accountSlug: 'amp-super', balance: 85400, asOf: recentIso, institution: 'AMP', category: 'super' },
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+
+        const ampInput = page.locator('.account-card', { hasText: 'Brad Superannuation' }).locator('.account-balance-input');
+        // Auto value shows first.
+        await expect(ampInput).toHaveValue('$85,400.00');
+        // Type a manual correction + blur. (Focus reveals the raw number 85400.)
+        await ampInput.click();
+        await ampInput.fill('90000');
+        await ampInput.blur();
+
+        // Manual value held; auto tag gone (manualBalance now true).
+        await expect(ampInput).toHaveValue('$90,000.00');
+        await expect(page.locator('.account-card', { hasText: 'Brad Superannuation' }).locator('.account-auto-tag')).toHaveCount(0);
+
+        // Persists across reload, still ignoring the auto value.
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+        await expect(page.locator('.account-card', { hasText: 'Brad Superannuation' }).locator('.account-balance-input')).toHaveValue('$90,000.00');
+    });
+});
