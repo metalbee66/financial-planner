@@ -1,132 +1,90 @@
-# Build sheet — `FamilyPlanner: overdue/due-soon scan` (v2.2.1)
+# Overdue/due-soon scan — deployment notes (v2.2.1)
 
-Manual n8n-UI assembly. The logic is already written + unit-tested in
-[`overdue-scan.code-node.js`](overdue-scan.code-node.js) (`node app/n8n/overdue-scan.code-node.js` → 24/24).
-You just wire the nodes and paste the Code body.
+**Status (2026-06-23): workflow DEPLOYED to n8n, INACTIVE, awaiting Brad's verify + activate.**
 
-**Host:** <https://n8n.dlbooks.com.au/> · **Container TZ:** Australia/Melbourne ·
-**Firebase cred:** `Family Planner - Firebase RTDB` (HTTP Query Auth, `auth=<secret>`) ·
-**SMTP cred:** reuse the existing InstantDrainer's `Gmail SMTP (bradsmyrkai)` — *or* don't send here at all (see Node 4 note: the simplest build lets the existing InstantDrainerCron do the sending).
+Built + deployed via SSH→`docker exec n8n` (no n8n API key needed). The scan logic
+is unit-tested in [`overdue-scan.code-node.js`](overdue-scan.code-node.js)
+(`node app/n8n/overdue-scan.code-node.js` → 24/24). The deployed workflow JSON is
+[`overdue-scan.workflow.json`](overdue-scan.workflow.json) (n8n id `fpOverdueScan01`).
 
----
-
-## Firebase paths (verified against the app 2026-06-23)
-
-Base: `https://<your-db>.firebaseio.com/household/family`
-
-| What | Path | Op |
-|------|------|----|
-| Projects blob (tasks + prefs + digest_pending) | `/household/family/projects.json` | **GET** |
-| Email queue (one row per id) | `/household/family/email_queue/<id>.json` | **PUT** |
-| Digest bucket (per user, appended) | `/household/family/projects/digest_pending/<user>.json` | **PATCH/PUT** |
-
-⚠️ **`digest_pending` lives INSIDE `projects`**, not at the root (it's `projects.digest_pending`, a sibling of `tasks`/`prefs`). `email_queue` IS a root sibling. Don't mix these up.
+**Host:** <https://n8n.dlbooks.com.au/> · container `n8n` on the Geekom (`100.67.178.56`) ·
+n8n 2.19.5 · TZ Australia/Melbourne.
 
 ---
 
-## Nodes
+## What's deployed
+
+Workflow **`Family Planner: overdue/due-soon scan`** (id `fpOverdueScan01`), 7 nodes:
 
 ```
-Schedule (daily 07:00)
-   → HTTP GET projects.json   (name: "Get projects")
-   → Code  "Scan"             (paste the scan body)
-   → Switch on {{$json._target}}
-        ├─ "email_queue" → HTTP PUT email_queue/{id}   (name: "Write email row")
-        └─ "digest"      → HTTP PATCH digest_pending/{user}  (name: "Append digest")
-   → Merge (Append, both Switch branches)
-   → Set ("Always Output Data" + "Execute Once")
-   → HTTP GET Heartbeat ping URL
+Schedule Trigger (daily 07:00)
+  → Get projects        GET .../household/family/projects.json   [cred: Family Planner - Firebase RTDB]
+  → Scan                Code: emits 1 row per instant-mode overdue/due-soon assignee,
+                         OR one {_sentinel:true} item on a quiet day
+  → Scan fans out to two filters:
+       ├─ Rows only      (keep _sentinel == false) → Write email_queue row (PUT) → Heartbeat
+       └─ Sentinel only  (keep _sentinel == true)  → Heartbeat
 ```
 
-### 1. Schedule Trigger — `Daily overdue scan`
-- Trigger Interval: **Days**, at **07:00** (before the 08:00 digest so an instant
-  user's overdue email and a digest user's roll-up don't race the same morning).
+**Why the dual filter (the load-bearing design):** PROVEN live on this n8n —
+a Code node returning `[]` halts the entire downstream chain, and a node's
+`alwaysOutputData` does NOT rescue a node that receives zero input items. So a
+naive `Scan → … → Heartbeat` chain would skip the heartbeat on every quiet day
+(the same class of bug as the v2.1.1 InstantDrainer short-circuit). The sentinel
+guarantees Scan always emits ≥1 item; the two filters route it:
+- **busy day:** real rows → Write → Heartbeat (heartbeat is downstream of Write,
+  so a Firebase write failure stops the ping — dead-man's-switch holds).
+- **quiet day:** the sentinel bypasses Write straight to Heartbeat (fires once).
+- **GET projects fails:** chain dies before Scan → no ping → healthchecks alerts.
 
-### 2. HTTP Request — `Get projects`
-- Method **GET**, URL `https://<db>.firebaseio.com/household/family/projects.json`
-- Authentication: **Predefined Credential Type → HTTP Query Auth → `Family Planner - Firebase RTDB`**
-- Response: JSON. This node returns the whole blob as item[0].json.
+**Cadence:** re-notify every day, no cap, no dedupe (Brad's decision 2026-06-23).
+The scan is stateless — a still-overdue task re-emails daily until done / due-date changes.
 
-### 3. Code — `Scan`
-- Mode: **Run Once for All Items**.
-- Paste the body of `scan()` from `overdue-scan.code-node.js` — i.e. copy
-  everything from the `// ── Constants` block down through the `scan()` function,
-  then end the node with:
-  ```js
-  return scan($input.all());
-  ```
-- Output: 0..N items, each `{ _target: 'email_queue' | 'digest', ... }`.
-  Empty result = `[]` (that's fine — the heartbeat tail still fires once).
-
-### 4. Switch — on `{{ $json._target }}`
-- Rule 1: equals `email_queue` → output 0
-- Rule 2: equals `digest` → output 1
-
-**Node 4a — HTTP `Write email row`** (Switch output 0)
-- Method **PUT**, URL `https://<db>.firebaseio.com/household/family/email_queue/{{ $json.id }}.json`
-- Auth: same Firebase cred. Body (JSON, send all fields except the discriminator):
-  send `{{ $json }}` but strip `_target` — easiest is a tiny Set node before it,
-  or in the Code node push the row without `_target` and carry the route on a
-  separate field. (Simplest: in Node 3 keep `_target` only for the Switch, and in
-  this HTTP node set the body to the raw entry via an expression that omits it.)
-- The existing **InstantDrainerCron** (every 30 min) will pick this row up and
-  actually send the email. **You do not need a Send Email node here** — that's the
-  whole point of writing to `email_queue`. (This also means overdue emails inherit
-  the v2.1.1 heartbeat fix once that lands.)
-
-**Node 4b — HTTP `Append digest`** (Switch output 1)
-- Method **PATCH**, URL `https://<db>.firebaseio.com/household/family/projects/digest_pending/{{ $json.user }}.json`
-- ⚠️ `digest_pending[user]` is an **array** in the app (`appendDigestEntry` does
-  `existing.concat([entry])` — verified in notifications.js:589). Firebase PATCH
-  merges keys and can't append to an array atomically, so you **must read-modify-write**:
-  - GET `digest_pending/{user}.json` → Code node `arr = ($json || []); arr.push(entry); return [{json:{arr}}]`
-    → PUT `digest_pending/{user}.json` with body `{{ $json.arr }}`.
-  - Do **not** store digest entries as a keyed object — that would break the app's
-    array-based `composeDigestSummary`/`buildDigestEmail` reader and the 08:00 cron.
-- Digest mode is the secondary path (default + most users are **instant**). If the
-  read-modify-write is fiddly, **ship instant-only first** (Switch with just the
-  email_queue branch) and wire digest in a follow-up — overdue emails work without it.
-
-### 5. Merge — `Join`
-- Mode **Append**, 2 inputs (from 4a and 4b). This collapses both branches so the
-  heartbeat fires once regardless of which/both ran.
-
-### 6. Set — `Force one output`
-- Add any field (e.g. `done = true`).
-- **Options → "Always Output Data" = ON**, **"Execute Once" = ON**.
-- This is the v2.1.1 empty-items fix: on a day with zero overdue tasks the Merge
-  receives nothing, but "Always Output Data" emits one item so the heartbeat still
-  pings. **Without this the heartbeat short-circuits exactly like the InstantDrainer bug.**
-
-### 7. HTTP Request — `Heartbeat`
-- Method **GET**, URL = the ping URL of a new healthchecks.io check
-  **`FamilyPlanner-OverdueScanCron`** (period **1 day**, grace **2 h**), created
-  under the `metalbee66@gmail.com` healthchecks.io account.
-- The ping URL is the secret — keep it in the node only, not in routines.md.
+**Instant-only:** digest-mode users are not handled yet (deferred follow-up, v2.2.x).
+Most users are instant (the default), so overdue email works now.
 
 ---
 
-## Verify (do this once after wiring, before activating)
+## ⚠️ 3 things to finish before activating (Brad, in the n8n UI)
 
-1. In the app, set a task: `dueDate` = **yesterday**, assignee = **brad**, status not done,
-   and brad's notification prefs = **instant** (the default).
-2. n8n → open the workflow → **Execute Workflow** (manual).
-   - Expect: one item out of the Code node with `_target: email_queue`; one new row
-     under `email_queue/` in Firebase; within ≤30 min the InstantDrainer sends brad an
-     `[Family Planner] Overdue: <name>` email.
-3. **Execute again** the same day → another `email_queue` row appears (re-notify is
-   intentional — every day, no cap; decided 2026-06-23). Confirm you're OK with that
-   cadence in practice.
-4. Switch brad to **digest** mode, set another overdue task, Execute → entry lands in
-   `projects/digest_pending/brad`, **not** in `email_queue`.
-5. Empty case: mark the test tasks done, Execute → Code outputs `[]`, but the Set's
-   "Always Output Data" still fires the Heartbeat → healthchecks.io check goes/stays UP.
-6. **Activate** the workflow.
+### 1. Create the healthcheck + paste its ping URL into the Heartbeat node
+The Heartbeat node's URL is a placeholder: `https://hc-ping.com/REPLACE-WITH-OverdueScanCron-UUID`.
+- healthchecks.io (signed in as `metalbee66@gmail.com`) → **New Check**
+  - Name: `FamilyPlanner-OverdueScanCron`
+  - Period **1 day**, Grace **2 h**
+- Copy its ping URL → open `fpOverdueScan01` in n8n → **Heartbeat** node → paste over the placeholder → Save.
+  (Until you do this the heartbeat GETs a dead URL — harmless, just unmonitored.)
+
+### 2. Verify with one manual run (this is the real end-to-end test)
+The logic is unit-tested and the wiring round-trips correctly, but the assembled
+workflow has not yet executed on the live server (the CLI executor races the
+running n8n on port 5679, so I couldn't trigger it headless).
+- In the app: set a task `dueDate` = **yesterday**, assignee **brad** (or you),
+  status not done, brad's notification prefs = **instant** (the default).
+- In n8n: open `fpOverdueScan01` → **Execute Workflow** (manual).
+  - Expect: Scan outputs 1 row; **Write email_queue row** writes one
+    `email_queue/eq_scan_*` entry; the Heartbeat node turns green.
+  - Within ≤30 min the existing **InstantDrainer** sends brad an
+    `[Family Planner] Overdue: <name>` email. Check the **email_queue admin panel**
+    in the app to see the row flip sent.
+- **Quiet-day check:** mark the test task done → Execute again → Scan outputs the
+  sentinel only, **no** email_queue row is written, Heartbeat still fires green.
+- **Re-notify check:** with the overdue task back, Execute twice → a second
+  `email_queue` row appears (daily re-notify is intentional — confirm you're OK with it).
+
+### 3. Activate
+Toggle the workflow **Active** (top-right). It will then fire daily at 07:00 Melbourne.
+
+### Also: delete the leftover probe workflow
+A scaffolding workflow **`PROBE empty-items heartbeat`** (id `probeEmptyItems01`)
+is still in the list — it's inactive + harmless (Manual Trigger only, no real
+creds), but I couldn't remove it (n8n 2.19.5 has no `delete:workflow` CLI and no
+`sqlite3` in the container). Delete it via the UI trash icon when convenient.
 
 ---
 
 ## After it's live
-
 - Tick **v2.2.1** in `app/tasks/todo.md`.
-- **v2.2.2:** add the workflow + the `FamilyPlanner-OverdueScanCron` check to
-  `C:\Users\brads\.claude\routines.md` (Family Planner workflow table + healthchecks table).
+- **v2.2.2:** add `FamilyPlanner: overdue/due-soon scan` + the
+  `FamilyPlanner-OverdueScanCron` check to `C:\Users\brads\.claude\routines.md`
+  (Family Planner workflow table + healthchecks table).
