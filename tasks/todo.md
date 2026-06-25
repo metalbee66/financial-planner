@@ -169,13 +169,13 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 
 ### Phase 2 — Ingestion pipeline + browser UI
 
-- [ ] **T7** Three n8n workflows (hsbc-ingest CSV, selfwealth-ingest balance, amp-ingest hybrid) polling per-bank folders every 15 min — M
-- [ ] **T8** Data layer in `app/js/data.js`: `DEFAULT_BANK_INBOX`, `sanitiseBankInbox`, `parseHsbcCsv`, `parseAmpCsv`, `isValidBalanceRecord` + ≥10 unit cases — S
-- [ ] **T9** `app/js/firebase-sync.js` realtime listener + initialSync + `state.bankInbox` init + render hooks — S
-- [ ] **T10** Browser Import tab Bank inbox sub-section (`renderBankInboxTab` + `markBankInboxApplied`) — M
-- [ ] **T10.5** Browser `accounts.js` auto-populate from `state.bankInbox.balances` with "auto" tag + asOf + manual-override behaviour — S
-- [ ] **T11** E2E `bank-api — HSBC inbox` (3 scenarios) + `bank-api — auto-populated balances` (2 scenarios) — S
-- [ ] **Checkpoint L** — Firebase shows bank_inbox rows from real scraper runs; browser surfaces them; Apply-to-Planner flips applied:true; manual balance override works
+- [~] **T7** Three n8n ingest workflows (hsbc CSV, selfwealth balance, amp hybrid), every 15 min — M — **AUTHORED + locally verified 2026-06-25, DEPLOY-PENDING.** Code-node logic in [`../n8n/bank-ingest.code-node.js`](../n8n/bank-ingest.code-node.js) (`node` self-check → 40/40, incl. real-fs directory-ingest tests). Workflow JSONs: [`hsbc-ingest`](../n8n/hsbc-ingest.workflow.json) / [`selfwealth-ingest`](../n8n/selfwealth-ingest.workflow.json) / [`amp-ingest`](../n8n/amp-ingest.workflow.json) — graphs validated (no dangling conns, all nodes reachable); embedded Code nodes run against real fixtures match the tested logic. Single fs-reading Code node off the Schedule item (avoids the empty-items trap; same dual-filter-sentinel heartbeat as overdue-scan). Idempotent `txKey` PUTs (no dedupe state). Date stored date-only (timezone-shift bug caught + guarded). **Deploy blocked on Brad: bind-mount `C:\BankScrapes` → `/data/bankscrapes` into the n8n container + 3 healthchecks + manual verify — see [`../n8n/bank-ingest.BUILD-SHEET.md`](../n8n/bank-ingest.BUILD-SHEET.md).**
+- [x] **T8** Data layer in `app/js/data.js`: `DEFAULT_BANK_INBOX`, `sanitiseBankInbox`, `parseHsbcCsv`, `parseAmpCsv`, `isValidBalanceRecord` + unit cases — S — _shipped (data.test.js + import.js); box was stale_
+- [x] **T9** `app/js/firebase-sync.js` realtime listener + initialSync + `state.bankInbox` init + render hooks — S — _shipped (firebase-sync.js `fbListen('bank_inbox')`); box was stale_
+- [x] **T10** Browser Import tab Bank inbox sub-section (`renderBankInboxCard` + load-into-review) — M — _shipped (import.js + finance/index.js); box was stale_
+- [x] **T10.5** Browser `accounts.js` auto-populate from `state.bankInbox.balances` with "auto" tag + asOf + manual-override — S — _shipped (accounts.js `autoBalances`/`autoRecordForAccount` + STALE_MS); box was stale_
+- [x] **T11** E2E `bank-api — HSBC inbox` + `bank-api — auto-populated balances` — S — _shipped (smoke.spec.js describes at L3657/L3724); box was stale_
+- [ ] **Checkpoint L** — Firebase shows bank_inbox rows from real scraper runs; browser surfaces them; Apply-to-Planner flips applied:true; manual balance override works — _blocked on T7 deploy (the mount) + a real scrape_
 
 ### Phase 3 — Burn-in (4 weeks)
 

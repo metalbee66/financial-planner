@@ -109,6 +109,17 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [x] **UA4** 3 healthchecks.io checks created (2026-06-05), order HSBC/Selfwealth/AMP confirmed. Ping URLs stored in `scrapers/config/healthchecks.json` (in the private repo).
 - [x] **UA5** Folders created on the **Geekom** (2026-06-05): `C:\BankScrapes\{hsbc,selfwealth,amp,logs}`, `C:\Vault\fp-state\`.
 
+### T7 ingest deploy (workflows authored 2026-06-25 — Brad to deploy on the Geekom)
+
+> The 3 n8n ingest workflows are written + locally verified. Deploy steps + full
+> rationale are in [`../n8n/bank-ingest.BUILD-SHEET.md`](../n8n/bank-ingest.BUILD-SHEET.md).
+
+- [ ] **UA-T7.1** **Bind-mount `C:\BankScrapes` → `/data/bankscrapes` (`:ro`) into the n8n container** — REQUIRED, blocks the whole ingest. Verify with `docker exec n8n ls /data/bankscrapes/hsbc` (must list dated subfolders). Without the mount, every ingest emits the sentinel → heartbeat green but **zero rows written** (silent no-op).
+- [ ] **UA-T7.2** Import the 3 workflows (`fpHsbcIngest01`, `fpSelfwealthIngest01`, `fpAmpIngest01`) via SSH→`docker exec n8n`.
+- [ ] **UA-T7.3** Create 3 healthchecks (`FamilyPlanner-{Hsbc,Selfwealth,Amp}IngestCron`, 1h/1h) + paste each ping URL into its Heartbeat node.
+- [ ] **UA-T7.4** Manual-run each (busy + quiet + idempotency paths per the build sheet); confirm rows land in `bank_inbox` and surface in the app (Import card / accounts balance). If a Code node errors on `require('fs')`, set `NODE_FUNCTION_ALLOW_BUILTIN=fs,path` (or `*`) + restart.
+- [ ] **UA-T7.5** Activate all 3 (`docker restart n8n` after CLI activation). Then tick T7 + add the 3 workflows/checks to `routines.md`.
+
 ### Sample-data privacy guard (one-time follow-up — DONE 2026-05-28)
 
 - [x] **2026-05-28** — Real HSBC export landed in `app/sample-data/` during the discussion (`TransHist.csv` + a `TransactionsReport_733-118 529119_...pdf` + a modified `Transactions.csv`). The repo is public; the files contained real BSBs, account numbers, balances, and a Selfwealth account reference. **Moved** to `C:\Vault\fp-samples\` (private vault) as `hsbc-TransHist-2026-05-28.csv`, `hsbc-TransactionsReport-2026-05-28.pdf`, `nab-Transactions-2026-05-28-modified.csv`. `app/sample-data/Transactions.csv` reverted to the originally-committed version. `app/.gitignore` gained a `sample-data/*.{csv,pdf,qif,qfx}` block with `!sample-data/Transactions.csv` exempted (existing committed file stays; new files are silently ignored). Commit `c9b9176`.
