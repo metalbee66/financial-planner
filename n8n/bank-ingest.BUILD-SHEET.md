@@ -71,9 +71,29 @@ code-node has a regression guard for this (test 7b).
 
 ---
 
-## ⚠️ Before deploying — the ONE infra step (Brad, on the Geekom)
+## Recon (2026-06-26, from the SenseAi session on the Geekom)
 
-### 1. Bind-mount the scrape folder into the n8n container  ← REQUIRED, blocks everything
+Facts confirmed on the live box — they set the exact deploy shape below:
+
+- **n8n is docker-compose**, file `C:\SenseAi\deploy\n8n-compose.yml`, project `n8n`,
+  recreated via `docker compose -f n8n-compose.yml --env-file C:\n8n\.env -p n8n up -d`.
+  Current `volumes:` = only `n8n_data:/home/node/.n8n`. **`C:\BankScrapes` is NOT
+  mounted** → both the mount and the `fs` flag are real compose edits.
+- **`NODE_FUNCTION_ALLOW_BUILTIN` is UNSET** → Code nodes currently CANNOT
+  `require('fs')`. The flag below is **mandatory, not contingent**.
+- n8n **2.19.5**; `n8n import:workflow --input=<file>` is the working import path.
+- Credential `Family Planner - Firebase RTDB` / id `9i2uFN81PFlwBaXa` exists (matches
+  the workflow JSONs). ✓ no change needed.
+- **Only HSBC is scraping.** `C:\BankScrapes\hsbc` has fresh dated files daily;
+  `selfwealth` + `amp` folders are **empty** because those scrapers are still
+  `TODO(headed)` scaffolds (T2.5/T2.6 unbuilt). **→ Deploy HSBC ingest ONLY now.**
+  Selfwealth/AMP ingest waits until their scrapers are built and writing files.
+
+---
+
+## ⚠️ Before deploying — the infra edits (Brad / the Geekom session)
+
+### 1. Add BOTH the bind-mount AND the fs flag to `n8n-compose.yml`  ← REQUIRED, blocks everything
 
 The Code nodes read from these **container** paths (hardcoded as `ROOT`):
 
@@ -83,69 +103,88 @@ The Code nodes read from these **container** paths (hardcoded as `ROOT`):
 | `C:\BankScrapes\selfwealth` | `/data/bankscrapes/selfwealth` |
 | `C:\BankScrapes\amp` | `/data/bankscrapes/amp` |
 
-Add the volume to the n8n container. If n8n runs via `docker-compose`, add under
-the `n8n` service (then `docker compose up -d` to recreate):
+In `C:\SenseAi\deploy\n8n-compose.yml`, add the bind mount to the `n8n` service's
+`volumes:` and the fs flag to its `environment:`:
 
 ```yaml
     volumes:
-      - C:\BankScrapes:/data/bankscrapes:ro
+      - n8n_data:/home/node/.n8n
+      - C:\BankScrapes:/data/bankscrapes:ro      # ← add (read-only; ingest only reads)
+    environment:
+      # ...existing TZ / N8N_* vars unchanged...
+      NODE_FUNCTION_ALLOW_BUILTIN: "fs,path"     # ← add (Code nodes need require('fs'))
 ```
 
-If it runs via plain `docker run`, the mount must be added to the run command /
-the container recreated with `-v C:\BankScrapes:/data/bankscrapes:ro`. Read-only
-(`:ro`) is correct — the ingest never writes to disk, only reads.
-
-**Verify the mount before importing the workflows:**
+Then recreate the container:
 ```
-docker exec n8n ls -la /data/bankscrapes/hsbc
+docker compose -f C:\SenseAi\deploy\n8n-compose.yml --env-file C:\n8n\.env -p n8n up -d
 ```
-should list the dated scrape subfolders. If it errors / is empty, the mount is
-wrong and every ingest will just emit the sentinel (heartbeat green, **zero rows
-written**) — looks healthy, ingests nothing. Don't skip this check.
 
-> **If the Code node can't use `fs`:** self-hosted n8n allows built-ins via
-> `NODE_FUNCTION_ALLOW_BUILTIN` (often `*` already). If a deploy run errors with
-> "Cannot find module 'fs'", set `NODE_FUNCTION_ALLOW_BUILTIN=fs,path` (or `*`) in
-> the container env and restart. (overdue-scan didn't need this — it's pure — so
-> confirm on the first ingest run.)
+**Verify both before importing:**
+```
+docker exec n8n ls -la /data/bankscrapes/hsbc       # must list dated subfolders
+docker exec n8n printenv NODE_FUNCTION_ALLOW_BUILTIN # must print: fs,path
+```
+If the mount is wrong/empty, the ingest emits the sentinel (heartbeat green,
+**zero rows written**) — looks healthy, ingests nothing. If the flag is missing,
+the Code node throws "Cannot find module 'fs'" on every run. Don't skip either check.
 
-### 2. Import + create the 3 healthchecks
+> **Note:** `NODE_FUNCTION_ALLOW_BUILTIN` was confirmed UNSET on this box
+> (2026-06-26), so this is mandatory. overdue-scan/queue-stuck didn't need it —
+> they're pure and never `require()` anything.
 
-For each workflow, replace the placeholder ping URL
-(`https://hc-ping.com/REPLACE-WITH-{Hsbc,Selfwealth,Amp}IngestCron-UUID`) in its
-**Heartbeat** node with a real one:
-- healthchecks.io (as `metalbee66@gmail.com`) → **New Check** ×3:
-  `FamilyPlanner-HsbcIngestCron`, `FamilyPlanner-SelfwealthIngestCron`,
-  `FamilyPlanner-AmpIngestCron` — Period **1 h**, Grace **1 h** (they ping every
-  15 min; missing 4 consecutive pings → DOWN after grace catches a dead workflow).
-- Paste each ping URL into the matching workflow's Heartbeat node → Save.
+### 2. Import the HSBC workflow + create its healthcheck
 
-### 3. Verify with one manual run each (the real end-to-end test)
+> **HSBC ONLY for now.** Selfwealth + AMP scrapers are unbuilt `TODO(headed)`
+> scaffolds writing no files (recon #6), so their ingests would run against empty
+> folders. Deploy `fpHsbcIngest01` now; hold the other two until those scrapers
+> are built and producing files. (The JSONs are ready when they are.)
 
-Per-workflow, in the n8n UI → **Execute Workflow**:
-- **Busy path:** with real scrape files present, expect the Code node to output N
-  rows, the **Write** node(s) to PUT them, Heartbeat green. Then open the app:
-  - transactions → **Import tab → "Bank inbox" card** shows the new count → "Load
-    into review" drops them into the review table.
-  - balances → **accounts view** shows the auto-populated balance with its `asOf`.
-- **Quiet path:** with no files (or after the mount check on an empty folder),
-  Execute → Code outputs the **sentinel only**, no PUT, Heartbeat still green.
-- **Idempotency:** Execute twice with the same files → the second run overwrites
-  the same keys, the app shows no duplicate rows.
+```
+docker exec n8n n8n import:workflow --input=/home/node/.n8n/hsbc-ingest.workflow.json
+```
+(Copy the JSON into the container first, e.g. `docker cp app/n8n/hsbc-ingest.workflow.json n8n:/home/node/.n8n/`.)
+
+Then replace the placeholder ping URL
+(`https://hc-ping.com/REPLACE-WITH-HsbcIngestCron-UUID`) in the **Heartbeat** node:
+- healthchecks.io (as `metalbee66@gmail.com`) → **New Check**:
+  `FamilyPlanner-HsbcIngestCron` — Period **1 h**, Grace **1 h** (pings every 15
+  min; missing 4 consecutive → DOWN after grace catches a dead workflow).
+- Paste its ping URL into the Heartbeat node → Save.
+
+### 3. Verify with one manual run (the real end-to-end test)
+
+In the n8n UI → open `fpHsbcIngest01` → **Execute Workflow**:
+- **Busy path:** with today's HSBC CSVs present, expect the Code node to output N
+  rows, **Write transaction row** to PUT them, Heartbeat green. Then open the app:
+  **Import tab → "Bank inbox" card** shows the new count → "Load into review"
+  drops them into the review table.
+- **Idempotency:** Execute twice → the second run overwrites the same `txKey`s,
+  the app shows no duplicate rows.
+- **Quiet path** (optional): rename the dated folder away briefly → Execute →
+  Code outputs the **sentinel only**, no PUT, Heartbeat still green. (Put it back.)
 
 ### 4. Activate
 
-Toggle each workflow **Active**. **NOTE:** CLI activation needs a
+Toggle `fpHsbcIngest01` **Active**. **NOTE:** CLI activation needs a
 `docker restart n8n` to take effect (the UI toggle is hot) — see
 [routines.md](file:///C:/Users/brads/.claude/routines.md).
+
+### 5. Later — Selfwealth + AMP (when their scrapers exist)
+
+Same steps per workflow (`fpSelfwealthIngest01`, `fpAmpIngest01`), each with its
+own healthcheck (`FamilyPlanner-{Selfwealth,Amp}IngestCron`). The mount + fs flag
+from step 1 already cover all three, so it's just import + healthcheck + verify +
+activate once `C:\BankScrapes\{selfwealth,amp}` start filling.
 
 ---
 
 ## After it's live
 
-- Tick **T7** in `app/tasks/todo.md`; record the mount + healthcheck + verify
-  steps as done in `app/tasks/user-actions.md`.
-- Add the 3 workflows + 3 healthchecks to
+- Tick **T7** in `app/tasks/todo.md` (HSBC done; note S/W + AMP deferred to their
+  scrapers); record the mount + flag + healthcheck + verify steps in
+  `app/tasks/user-actions.md`.
+- Add the HSBC workflow + `FamilyPlanner-HsbcIngestCron` to
   `C:\Users\brads\.claude\routines.md` (Family Planner workflow table +
   healthchecks table).
 - **Only then** is the v2.4 pipeline truly end-to-end — that's the gate for the
