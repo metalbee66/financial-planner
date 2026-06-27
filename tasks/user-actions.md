@@ -124,6 +124,22 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 
 - [x] **2026-05-28** — Real HSBC export landed in `app/sample-data/` during the discussion (`TransHist.csv` + a `TransactionsReport_733-118 529119_...pdf` + a modified `Transactions.csv`). The repo is public; the files contained real BSBs, account numbers, balances, and a Selfwealth account reference. **Moved** to `C:\Vault\fp-samples\` (private vault) as `hsbc-TransHist-2026-05-28.csv`, `hsbc-TransactionsReport-2026-05-28.pdf`, `nab-Transactions-2026-05-28-modified.csv`. `app/sample-data/Transactions.csv` reverted to the originally-committed version. `app/.gitignore` gained a `sample-data/*.{csv,pdf,qif,qfx}` block with `!sample-data/Transactions.csv` exempted (existing committed file stays; new files are silently ignored). Commit `c9b9176`.
 
+### NAB scraper walk-through (scaffolded 2026-06-27 — Brad to finish on the Geekom)
+
+> First of the "remaining 6" logins. `nab.mjs` + `run-nab1.ps1` + `run-nab2.ps1` +
+> the `nab-ingest` workflow are written; the site-specific selectors are
+> `TODO(headed)`. Two separate logins (NAB1, NAB2), transactions-only, one
+> parameterised scraper. Full finish steps in `scrapers/README.md` → "NAB —
+> scaffold status". This is a NEW pilot bank, separate from the burn-in decision
+> gate below (which is about scaling AFTER the first 3 prove out).
+
+- [ ] **UA-NAB.1** Confirm NAB really is two separate logins (vs one login, two profiles). The scaffold assumes two `Family Planner - NAB{1,2}` credentials + two trusted-device profiles.
+- [ ] **UA-NAB.2** Create KeePass entries `Family Planner - NAB1` + `Family Planner - NAB2` in `C:\Vault\familyplanner.kdbx`.
+- [ ] **UA-NAB.3** Headed walk-through per login on the Geekom: `$env:NAB_LOGIN='nab1'; node nab.mjs` → log in + MFA + enroll trusted device (creates `nab1-profile`), fill in every `TODO(headed)` selector (login fields, `DASHBOARD_RE`, account nav, export trigger, `ACCOUNTS` list). Repeat for nab2.
+- [ ] **UA-NAB.4** Create 2 healthchecks (`FamilyPlanner-Nab1ScraperCron`, `FamilyPlanner-Nab2ScraperCron`, 1d/2h) + paste their ping URLs into `scrapers/config/healthchecks.json` (replacing the `nab1`/`nab2` placeholders).
+- [ ] **UA-NAB.5** Confirm the CSV export format matches the ingest's assumptions (cols 0/1/2 = date/details/amount; `parseNabDate` = `D MMM YY`). If it differs, fix the `NAB` branch in `app/n8n/bank-ingest.code-node.js` (re-run self-check) + re-paste into `app/n8n/nab-ingest.workflow.json`.
+- [ ] **UA-NAB.6** Two Task Scheduler entries (run-nab1.ps1 / run-nab2.ps1, daily 06:00, Interactive logon like HSBC). Then deploy `fpNabIngest01` per `app/n8n/bank-ingest.BUILD-SHEET.md` (the `C:\BankScrapes` mount already covers `nab/`).
+
 ### v2.4 wrap (deferred until pilot complete)
 
 - [x] **2026-06-05** — **Version-control for `scrapers/` RESOLVED: option (a), own private repo `metalbee66/family-planner-scrapers`.** `.gitignore` excludes screenshots/CSVs/node_modules (no bank data or secrets committed). Deploy to the Geekom stays via `scp`. **New manual follow-up:** auto-logon is enabled on the Geekom for senseai-admin (Sysinternals Autologon) — confirm it survives a reboot whenever the box is next bounced (doesn't affect SenseAi services).
