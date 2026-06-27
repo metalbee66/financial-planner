@@ -133,10 +133,10 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 > scaffold status". This is a NEW pilot bank, separate from the burn-in decision
 > gate below (which is about scaling AFTER the first 3 prove out).
 
-- [ ] **UA-NAB.1** Confirm NAB really is two separate logins (vs one login, two profiles). The scaffold assumes two `Family Planner - NAB{1,2}` credentials + two trusted-device profiles.
-- [ ] **UA-NAB.2** Create KeePass entries `Family Planner - NAB1` + `Family Planner - NAB2` in `C:\Vault\familyplanner.kdbx`.
-- [ ] **UA-NAB.3** Headed walk-through per login on the Geekom: `$env:NAB_LOGIN='nab1'; node nab.mjs` → log in + MFA + enroll trusted device (creates `nab1-profile`), fill in every `TODO(headed)` selector (login fields, `DASHBOARD_RE`, account nav, export trigger, `ACCOUNTS` list). Repeat for nab2.
-- [ ] **UA-NAB.4** Create 2 healthchecks (`FamilyPlanner-Nab1ScraperCron`, `FamilyPlanner-Nab2ScraperCron`, 1d/2h) + paste their ping URLs into `scrapers/config/healthchecks.json` (replacing the `nab1`/`nab2` placeholders).
+- [x] **UA-NAB.1** Confirmed 2026-06-27 — two separate logins.
+- [~] **UA-NAB.2** KeePass entries — **NAB1 populated** (verified 2026-06-27, user+pass present); **NAB2 is an empty shell** (title exists, both fields 0-length — still to fill).
+- [ ] **UA-NAB.3** Headed walk-through per login on the Geekom: `$env:NAB_LOGIN='nab1'; node nab.mjs` → log in + MFA + enroll trusted device (creates `nab1-profile`), fill in every `TODO(headed)` selector (login fields, `DASHBOARD_RE`, account nav, export trigger, `ACCOUNTS` list). Repeat for nab2 once UA-NAB.2 is done. _NAB1 ready to start: files deployed to `C:\FamilyPlanner\scrapers` (scp 2026-06-27), bad-login guard verified, NAB1 creds present._
+- [x] **UA-NAB.4** Two healthchecks created + ping URLs in `scrapers/config/healthchecks.json` (nab1=cb937683…, nab2=1c0ec8fa…), deployed to the Geekom 2026-06-27.
 - [ ] **UA-NAB.5** Confirm the CSV export format matches the ingest's assumptions (cols 0/1/2 = date/details/amount; `parseNabDate` = `D MMM YY`). If it differs, fix the `NAB` branch in `app/n8n/bank-ingest.code-node.js` (re-run self-check) + re-paste into `app/n8n/nab-ingest.workflow.json`.
 - [ ] **UA-NAB.6** Two Task Scheduler entries (run-nab1.ps1 / run-nab2.ps1, daily 06:00, Interactive logon like HSBC). Then deploy `fpNabIngest01` per `app/n8n/bank-ingest.BUILD-SHEET.md` (the `C:\BankScrapes` mount already covers `nab/`).
 
