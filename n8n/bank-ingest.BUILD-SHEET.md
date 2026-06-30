@@ -24,13 +24,18 @@ SSH→`docker exec n8n` (no n8n API key needed), same as overdue-scan / queue-st
 
 ---
 
-## The three workflows
+## The workflows
 
-| File | n8n id | Reads | Writes |
-|---|---|---|---|
-| [`hsbc-ingest.workflow.json`](hsbc-ingest.workflow.json) | `fpHsbcIngest01` | `*.csv` (6 accounts) | `bank_inbox/transactions/{txKey}` |
-| [`selfwealth-ingest.workflow.json`](selfwealth-ingest.workflow.json) | `fpSelfwealthIngest01` | `*.balance.json` (2) | `bank_inbox/balances/{slug}` |
-| [`amp-ingest.workflow.json`](amp-ingest.workflow.json) | `fpAmpIngest01` | `*.balance.json` + `*.csv` (hybrid) | both of the above |
+| File | n8n id | Reads | Writes | Scraper status |
+|---|---|---|---|---|
+| [`hsbc-ingest.workflow.json`](hsbc-ingest.workflow.json) | `fpHsbcIngest01` | `*.csv` (6 accounts) | `bank_inbox/transactions/{txKey}` | LIVE |
+| [`nab-ingest.workflow.json`](nab-ingest.workflow.json) | `fpNabIngest01` | `*.csv` (NAB1 cc) | `bank_inbox/transactions/{txKey}` | **LIVE (2026-06-30)** |
+| [`selfwealth-ingest.workflow.json`](selfwealth-ingest.workflow.json) | `fpSelfwealthIngest01` | `*.balance.json` (2) | `bank_inbox/balances/{slug}` | scaffold (no files) |
+| [`amp-ingest.workflow.json`](amp-ingest.workflow.json) | `fpAmpIngest01` | `*.balance.json` + `*.csv` (hybrid) | both of the above | scaffold (no files) |
+
+**Deploy HSBC + NAB now** (both scrapers are live + writing files); hold Selfwealth/AMP
+until their scrapers are built. NAB reads `/data/bankscrapes/nab` — the same single
+`C:\BankScrapes` mount covers it.
 
 All three: **Schedule (every 15 min)** → one **Code node** that reads the mounted
 folder via `require('fs')` and emits rows → route → **PUT to Firebase** → **Heartbeat**.
@@ -135,30 +140,32 @@ the Code node throws "Cannot find module 'fs'" on every run. Don't skip either c
 
 ### 2. Import the HSBC workflow + create its healthcheck
 
-> **HSBC ONLY for now.** Selfwealth + AMP scrapers are unbuilt `TODO(headed)`
-> scaffolds writing no files (recon #6), so their ingests would run against empty
-> folders. Deploy `fpHsbcIngest01` now; hold the other two until those scrapers
-> are built and producing files. (The JSONs are ready when they are.)
+> **HSBC + NAB now** (both scrapers are live + writing CSVs). Selfwealth + AMP are
+> unbuilt `TODO(headed)` scaffolds writing no files, so hold those until they're
+> built. (Their JSONs are ready when they are.)
 
 ```
+docker cp app/n8n/hsbc-ingest.workflow.json n8n:/home/node/.n8n/
+docker cp app/n8n/nab-ingest.workflow.json  n8n:/home/node/.n8n/
 docker exec n8n n8n import:workflow --input=/home/node/.n8n/hsbc-ingest.workflow.json
+docker exec n8n n8n import:workflow --input=/home/node/.n8n/nab-ingest.workflow.json
 ```
-(Copy the JSON into the container first, e.g. `docker cp app/n8n/hsbc-ingest.workflow.json n8n:/home/node/.n8n/`.)
 
-Then replace the placeholder ping URL
-(`https://hc-ping.com/REPLACE-WITH-HsbcIngestCron-UUID`) in the **Heartbeat** node:
-- healthchecks.io (as `metalbee66@gmail.com`) → **New Check**:
-  `FamilyPlanner-HsbcIngestCron` — Period **1 h**, Grace **1 h** (pings every 15
-  min; missing 4 consecutive → DOWN after grace catches a dead workflow).
-- Paste its ping URL into the Heartbeat node → Save.
+Then create a healthcheck per workflow + paste its ping URL over the placeholder
+in that workflow's **Heartbeat** node:
+- healthchecks.io (as `metalbee66@gmail.com`) → **New Check** ×2 — Period **1 h**,
+  Grace **1 h** (they ping every 15 min; missing 4 consecutive → DOWN catches a
+  dead workflow):
+  - `FamilyPlanner-HsbcIngestCron` → into `fpHsbcIngest01` (over `REPLACE-WITH-HsbcIngestCron-UUID`)
+  - `FamilyPlanner-NabIngestCron` → into `fpNabIngest01` (over `REPLACE-WITH-NabIngestCron-UUID`)
 
-### 3. Verify with one manual run (the real end-to-end test)
+### 3. Verify with one manual run each (the real end-to-end test)
 
-In the n8n UI → open `fpHsbcIngest01` → **Execute Workflow**:
-- **Busy path:** with today's HSBC CSVs present, expect the Code node to output N
-  rows, **Write transaction row** to PUT them, Heartbeat green. Then open the app:
-  **Import tab → "Bank inbox" card** shows the new count → "Load into review"
-  drops them into the review table.
+In the n8n UI → open each workflow → **Execute Workflow**:
+- **Busy path:** with today's CSVs present (`hsbc/` has 6, `nab/` has `nab1-cc3696.csv`),
+  expect the Code node to output N rows, **Write transaction row** to PUT them,
+  Heartbeat green. Then open the app: **Import tab → "Bank inbox" card** shows the
+  new count (NAB rows show source "NAB") → "Load into review" drops them in.
 - **Idempotency:** Execute twice → the second run overwrites the same `txKey`s,
   the app shows no duplicate rows.
 - **Quiet path** (optional): rename the dated folder away briefly → Execute →
@@ -166,25 +173,25 @@ In the n8n UI → open `fpHsbcIngest01` → **Execute Workflow**:
 
 ### 4. Activate
 
-Toggle `fpHsbcIngest01` **Active**. **NOTE:** CLI activation needs a
-`docker restart n8n` to take effect (the UI toggle is hot) — see
+Toggle `fpHsbcIngest01` + `fpNabIngest01` **Active**. **NOTE:** CLI activation needs
+a `docker restart n8n` to take effect (the UI toggle is hot) — see
 [routines.md](file:///C:/Users/brads/.claude/routines.md).
 
 ### 5. Later — Selfwealth + AMP (when their scrapers exist)
 
 Same steps per workflow (`fpSelfwealthIngest01`, `fpAmpIngest01`), each with its
 own healthcheck (`FamilyPlanner-{Selfwealth,Amp}IngestCron`). The mount + fs flag
-from step 1 already cover all three, so it's just import + healthcheck + verify +
+from step 1 already cover all four, so it's just import + healthcheck + verify +
 activate once `C:\BankScrapes\{selfwealth,amp}` start filling.
 
 ---
 
 ## After it's live
 
-- Tick **T7** in `app/tasks/todo.md` (HSBC done; note S/W + AMP deferred to their
-  scrapers); record the mount + flag + healthcheck + verify steps in
+- Tick **T7** in `app/tasks/todo.md` (HSBC + NAB done; note S/W + AMP deferred to
+  their scrapers); record the mount + flag + healthcheck + verify steps in
   `app/tasks/user-actions.md`.
-- Add the HSBC workflow + `FamilyPlanner-HsbcIngestCron` to
+- Add the HSBC + NAB workflows + `FamilyPlanner-{Hsbc,Nab}IngestCron` to
   `C:\Users\brads\.claude\routines.md` (Family Planner workflow table +
   healthchecks table).
 - **Only then** is the v2.4 pipeline truly end-to-end — that's the gate for the
