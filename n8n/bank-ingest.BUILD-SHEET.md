@@ -1,7 +1,11 @@
 # Bank-scrape ingest — deployment notes (v2.4)
 
-**Status: 3 workflows AUTHORED + locally verified, NOT yet deployed. Deploy is
-blocked on one infra step Brad must do on the Geekom (the volume mount).**
+**Status: HSBC + NAB ingest are LIVE on the Geekom (deployed 2026-07-02).** The
+`C:\BankScrapes` mount + `NODE_FUNCTION_ALLOW_BUILTIN=fs,path` are in the compose;
+both workflows are active on an 8-hour schedule with healthchecks wired. First run
+wrote 243 transactions to Firebase `bank_inbox`. Selfwealth + AMP remain AUTHORED
+but undeployed (their scrapers aren't built). The steps below are the record of
+what was done + the procedure for the remaining two.
 
 The three ingest workflows are the missing bridge in the v2.4 bank pipeline:
 
@@ -153,9 +157,9 @@ docker exec n8n n8n import:workflow --input=/home/node/.n8n/nab-ingest.workflow.
 
 Then create a healthcheck per workflow + paste its ping URL over the placeholder
 in that workflow's **Heartbeat** node:
-- healthchecks.io (as `metalbee66@gmail.com`) → **New Check** ×2 — Period **1 h**,
-  Grace **1 h** (they ping every 15 min; missing 4 consecutive → DOWN catches a
-  dead workflow):
+- healthchecks.io (as `metalbee66@gmail.com`) → **New Check** ×2 — Period **8 h**,
+  Grace **2 h** (they ping every 8 h; ~10 h of silence → DOWN catches a dead
+  workflow):
   - `FamilyPlanner-HsbcIngestCron` → into `fpHsbcIngest01` (over `REPLACE-WITH-HsbcIngestCron-UUID`)
   - `FamilyPlanner-NabIngestCron` → into `fpNabIngest01` (over `REPLACE-WITH-NabIngestCron-UUID`)
 
