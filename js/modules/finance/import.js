@@ -366,6 +366,47 @@ export function getAllLineNames(data) {
     return lines;
 }
 
+/**
+ * Classify a transaction as an inter-account transfer or an interest charge so
+ * it can be auto-excluded from the budget (own review tab, never assigned).
+ * Returns 'transfer' | 'interest' | null.
+ *
+ * Detection is grounded in real HSBC + NAB exports. HSBC CSVs have NO category
+ * column, so transfers/interest there are matched from the details text
+ * (anchored at the start to avoid catching merchants that merely contain the
+ * word). NAB populates a category/txType, which is the reliable signal there.
+ *
+ * Deliberately does NOT match bare "BPAY"/"INTERNET PAYMENT" on text alone —
+ * real bills come through as "INTERNET BPAY GLOBIRD ENERGY" (category Utilities)
+ * / "INTERNET BPAY MEDIBANK PRIVATE" (Insurance); those must stay assignable.
+ */
+export function classifyAutoCategory(tx) {
+    const details = (tx.details || '').trim();
+    const category = (tx.category || '').trim();
+    const txType = (tx.txType || '').trim();
+
+    // Note on the separators below: HSBC details arrive with a non-space
+    // separator between words that decodes as U+FFFD (the replacement char) in
+    // the scrape→ingest chain — e.g. "TRANSFER�TO ...", "INTEREST�DEBIT".
+    // So the word-boundary after the keyword is matched with `[^A-Za-z]` (any
+    // non-letter) rather than a literal space, to survive that mangling.
+
+    // Interest first (more specific). Mortgage interest is already absorbed in
+    // the mortgage payment, so budgeting it here would double-count.
+    if (/^INTEREST[^A-Za-z]+DEBIT\b/i.test(details)) return 'interest';
+    if (txType.toUpperCase() === 'INTEREST CHARGED') return 'interest';
+    if (category === 'Loans' && /\bINTEREST\b/i.test(details)) return 'interest';
+
+    // Transfers — net to zero across Brad's own accounts. On HSBC, any details
+    // line whose leading word is TRANSFER is an inter-account move (TRANSFER TO/
+    // FROM/LP/RTP/<label>...); NAB flags them via the category. Anchor on the
+    // leading word so a mid-string "transfer" (e.g. a merchant name) doesn't hit.
+    if (category === 'Internal transfers') return 'transfer';
+    if (/^TRANSFER([^A-Za-z]|$)/i.test(details)) return 'transfer';
+
+    return null;
+}
+
 /** Suggest a GL line */
 function suggestGlLine(tx, mappings, allLines) {
     if (mappings[tx.merchant] && mappings[tx.merchant] !== '-- Per Transaction --') {
@@ -399,6 +440,12 @@ export function autoSuggest(transactions, mappings, allLines, storedHashes) {
     let dupCount = 0;
     transactions.forEach(tx => {
         tx.glLine = suggestGlLine(tx, mappings, allLines);
+        // Auto-classify transfers + interest → own review tabs, kept out of the
+        // budget (glLine '-- Ignore --') so they never need manual assignment.
+        tx.autoCategory = classifyAutoCategory(tx);
+        if (tx.autoCategory) {
+            tx.glLine = '-- Ignore --';
+        }
         // Check for duplicates
         const hash = txHash(tx);
         if (storedHashes.has(hash)) {
@@ -410,6 +457,27 @@ export function autoSuggest(transactions, mappings, allLines, storedHashes) {
     return dupCount;
 }
 
+/**
+ * Which filter tab a transaction belongs to. Single source of truth for both
+ * the initial render and the incremental updateImportCounts path.
+ * Precedence: duplicate → ignored; then auto-classified transfer/interest tabs;
+ * then GL-based assigned/ignored/unassigned.
+ */
+function groupForTx(tx) {
+    if (tx.isDuplicate) return 'ignored';
+    if (tx.autoCategory === 'transfer') return 'transfers';
+    if (tx.autoCategory === 'interest') return 'interest';
+    if (!tx.glLine) return 'unassigned';
+    return tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned';
+}
+
+/** Tally transactions by filter group (keeps summary, tabs + rows in sync). */
+function groupCounts(transactions) {
+    const c = { unassigned: 0, assigned: 0, transfers: 0, interest: 0, ignored: 0 };
+    transactions.forEach(tx => { c[groupForTx(tx)]++; });
+    return c;
+}
+
 /** Render the import tab */
 export function renderImportTab(transactions, budgetData, dupCount) {
     const preview = document.getElementById('import-preview');
@@ -418,28 +486,31 @@ export function renderImportTab(transactions, budgetData, dupCount) {
         return;
     }
 
-    const unassigned = transactions.filter(tx => !tx.glLine && !tx.isDuplicate);
-    const assigned = transactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --');
-    const ignored = transactions.filter(tx => tx.glLine === '-- Ignore --');
+    const counts = groupCounts(transactions);
 
-    const totalCharges = transactions.filter(t => !t.isRefund && !t.isDuplicate).reduce((s, t) => s + t.amount, 0);
-    const totalRefunds = transactions.filter(t => t.isRefund && !t.isDuplicate).reduce((s, t) => s + t.amount, 0);
+    // Net excludes duplicates AND auto-classified transfers/interest — those
+    // aren't spending (transfers net to zero; interest is in the mortgage payment).
+    const inNet = t => !t.isRefund && !t.isDuplicate && !t.autoCategory;
+    const totalCharges = transactions.filter(t => inNet(t)).reduce((s, t) => s + t.amount, 0);
+    const totalRefunds = transactions.filter(t => t.isRefund && !t.isDuplicate && !t.autoCategory).reduce((s, t) => s + t.amount, 0);
 
     let html = `<div class="import-summary">
         <span>${transactions.length} transactions</span>
         <span>Net: ${fmtPlain(totalCharges - totalRefunds)}</span>
-        <span class="positive">${assigned.length} assigned</span>
-        <span class="negative">${unassigned.length} unassigned</span>
-        <span class="dim">${ignored.length} ignored</span>
+        <span class="positive">${counts.assigned} assigned</span>
+        <span class="negative">${counts.unassigned} unassigned</span>
+        <span class="dim">${counts.ignored} ignored</span>
         ${dupCount > 0 ? `<span class="dim">(${dupCount} duplicates skipped)</span>` : ''}
-        <button id="apply-to-planner" class="add-revision-btn" style="margin-left:auto;" ${assigned.length === 0 ? 'disabled' : ''}>Apply to Planner</button>
+        <button id="apply-to-planner" class="add-revision-btn" style="margin-left:auto;" ${counts.assigned === 0 ? 'disabled' : ''}>Apply to Planner</button>
     </div>`;
 
     html += `<div class="import-filters">
-        <button class="import-filter-btn active" data-filter="unassigned">Unassigned (${unassigned.length})</button>
-        <button class="import-filter-btn" data-filter="assigned">Assigned (${assigned.length})</button>
+        <button class="import-filter-btn active" data-filter="unassigned">Unassigned (${counts.unassigned})</button>
+        <button class="import-filter-btn" data-filter="assigned">Assigned (${counts.assigned})</button>
+        ${counts.transfers ? `<button class="import-filter-btn" data-filter="transfers">Transfers (${counts.transfers})</button>` : ''}
+        ${counts.interest ? `<button class="import-filter-btn" data-filter="interest">Interest (${counts.interest})</button>` : ''}
         <button class="import-filter-btn" data-filter="all">All (${transactions.length})</button>
-        <button class="import-filter-btn" data-filter="ignored">Ignored (${ignored.length})</button>
+        <button class="import-filter-btn" data-filter="ignored">Ignored (${counts.ignored})</button>
     </div>
     <div class="import-search-bar">
         <input type="text" id="import-search" class="import-search" placeholder="Search merchant, details, category...">
@@ -459,8 +530,15 @@ export function renderImportTab(transactions, budgetData, dupCount) {
     </tr></thead><tbody>`;
 
     transactions.forEach((tx, globalIdx) => {
-        const group = tx.isDuplicate ? 'ignored' : (tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned');
+        const group = groupForTx(tx);
         const isHidden = group !== 'unassigned';
+
+        // Auto-classified / duplicate rows are non-assignable: show a static
+        // label instead of the GL dropdown + remember-checkbox.
+        const staticLabel = tx.isDuplicate ? 'Duplicate'
+            : tx.autoCategory === 'transfer' ? 'Transfer'
+            : tx.autoCategory === 'interest' ? 'Interest'
+            : null;
 
         const searchText = `${tx.merchant} ${tx.details} ${tx.category} ${tx.dateStr}`.toLowerCase();
         html += `<tr class="${tx.isRefund ? 'refund-row' : ''} ${tx.isDuplicate ? 'duplicate-row' : ''}" data-filter-group="${group}" data-search="${searchText}" data-source="${tx.source}" data-gl-line="${tx.glLine || ''}" ${isHidden ? 'style="display:none"' : ''}>
@@ -470,8 +548,8 @@ export function renderImportTab(transactions, budgetData, dupCount) {
             <td class="import-details" title="${tx.details}">${tx.details}</td>
             <td class="import-amount ${tx.isRefund ? 'positive' : 'negative'}">${tx.isRefund ? '+' : ''}${fmtPlain(tx.amount)}</td>
             <td class="import-category">${tx.category}</td>
-            <td>${tx.isDuplicate ? '<span class="dim">Duplicate</span>' : '<select class="gl-select" data-tx-index="' + globalIdx + '">' + buildGlOptions(budgetData, tx.glLine) + '</select>'}</td>
-            <td>${tx.isDuplicate ? '' : '<input type="checkbox" class="remember-check" data-tx-index="' + globalIdx + '" ' + (state.glMappings[tx.merchant] ? 'checked' : '') + ' title="Remember ' + tx.merchant + '">'}</td>
+            <td>${staticLabel ? '<span class="dim">' + staticLabel + '</span>' : '<select class="gl-select" data-tx-index="' + globalIdx + '">' + buildGlOptions(budgetData, tx.glLine) + '</select>'}</td>
+            <td>${staticLabel ? '' : '<input type="checkbox" class="remember-check" data-tx-index="' + globalIdx + '" ' + (state.glMappings[tx.merchant] ? 'checked' : '') + ' title="Remember ' + tx.merchant + '">'}</td>
         </tr>`;
     });
 
@@ -845,32 +923,31 @@ function updateImportCounts() {
 
     rows.forEach(row => {
         const select = row.querySelector('.gl-select');
-        if (!select) return;
+        if (!select) return; // static-label rows (duplicate/transfer/interest) don't re-group
         const idx = parseInt(select.dataset.txIndex);
         const tx = state.importedTransactions[idx];
-        const group = tx.glLine ? (tx.glLine === '-- Ignore --' ? 'ignored' : 'assigned') : 'unassigned';
-        row.dataset.filterGroup = group;
+        row.dataset.filterGroup = groupForTx(tx);
         row.dataset.glLine = tx.glLine || '';
     });
 
-    const unassigned = state.importedTransactions.filter(tx => !tx.glLine).length;
-    const assigned = state.importedTransactions.filter(tx => tx.glLine && tx.glLine !== '-- Ignore --').length;
-    const ignored = state.importedTransactions.filter(tx => tx.glLine === '-- Ignore --').length;
+    const counts = groupCounts(state.importedTransactions);
 
     const buttons = section.querySelectorAll('.import-filter-btn');
     buttons.forEach(btn => {
         const f = btn.dataset.filter;
         if (f === 'all') btn.textContent = `All (${state.importedTransactions.length})`;
-        if (f === 'unassigned') btn.textContent = `Unassigned (${unassigned})`;
-        if (f === 'assigned') btn.textContent = `Assigned (${assigned})`;
-        if (f === 'ignored') btn.textContent = `Ignored (${ignored})`;
+        if (f === 'unassigned') btn.textContent = `Unassigned (${counts.unassigned})`;
+        if (f === 'assigned') btn.textContent = `Assigned (${counts.assigned})`;
+        if (f === 'transfers') btn.textContent = `Transfers (${counts.transfers})`;
+        if (f === 'interest') btn.textContent = `Interest (${counts.interest})`;
+        if (f === 'ignored') btn.textContent = `Ignored (${counts.ignored})`;
     });
 
     // Keep the Apply button's enabled state in sync as rows get assigned —
     // renderImportTab sets the initial `disabled` but only this incremental
     // path runs on each GL change (no full re-render), so toggle it here too.
     const applyBtn = document.getElementById('apply-to-planner');
-    if (applyBtn) applyBtn.disabled = assigned === 0;
+    if (applyBtn) applyBtn.disabled = counts.assigned === 0;
 
     if (applyImportFilters) applyImportFilters();
 }

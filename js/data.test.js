@@ -17,7 +17,7 @@ import {
     isValidBalanceRecord,
 } from './data.js';
 
-import { parseHsbcCsv, parseAmpCsv } from './modules/finance/import.js';
+import { parseHsbcCsv, parseAmpCsv, classifyAutoCategory } from './modules/finance/import.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -272,6 +272,71 @@ test('parseAmpCsv skips malformed-date rows and sorts ascending', () => {
     eq(rows.length, 2);
     eq(rows[0].details, 'earlier');
     eq(rows[1].details, 'later');
+});
+
+// ── classifyAutoCategory (transfers + interest auto-detection) ──
+// Cases derived from REAL HSBC + NAB exports (C:\Vault\fp-samples). Transfers
+// net to zero across accounts; interest is already absorbed in the mortgage
+// payment — both are kept out of the budget (glLine '-- Ignore --').
+
+// Transfers — HSBC (no category column; must detect from the details prefix)
+test('classifyAutoCategory: HSBC "TRANSFER TO ..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER TO 005-356399-258 P9 balance IB0884619 INTERNET BANKING', category: '', txType: '' }), 'transfer');
+});
+test('classifyAutoCategory: HSBC "TRANSFER FROM ..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER FROM 250-289048-090 AUD transfer IB0329225 INTERNET BANKING', category: '', txType: '' }), 'transfer');
+});
+test('classifyAutoCategory: HSBC "TRANSFER LP ..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER LP SDB60BUBC s1-24 may wk3 NAB account 152607063', category: '', txType: '' }), 'transfer');
+});
+// Real HSBC data uses U+FFFD (replacement char) as the word separator, not a
+// space — "TRANSFER�TO ...". Detection must survive that mangling.
+test('classifyAutoCategory: HSBC "TRANSFER\\uFFFDTO ..." (mangled separator) → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER�TO 005-356399-259�transfer�IB0451564', category: '', txType: '' }), 'transfer');
+});
+test('classifyAutoCategory: HSBC "TRANSFER\\uFFFDCranbourne Rent ..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER�Cranbourne Rent�BRADLEY SMYRK', category: '', txType: '' }), 'transfer');
+});
+test('classifyAutoCategory: HSBC "TRANSFER\\uFFFDRTP\\uFFFD..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER�RTP�NOTPROVIDED�NATAAU33XXX', category: '', txType: '' }), 'transfer');
+});
+
+// Transfers — NAB (category is reliable when present)
+test('classifyAutoCategory: NAB category "Internal transfers" → transfer', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET PAYMENT credit rebalance', category: 'Internal transfers', txType: 'CREDIT CARD PAYMENT' }), 'transfer');
+});
+
+// Interest — HSBC loan interest + NAB interest-charged
+test('classifyAutoCategory: HSBC "INTEREST DEBIT ..." (space) → interest', () => {
+    eq(classifyAutoCategory({ details: 'INTEREST DEBIT INTEREST ZDD400020 SYSTEM GENERATED', category: '', txType: '' }), 'interest');
+});
+test('classifyAutoCategory: HSBC "INTEREST\\uFFFDDEBIT ..." (mangled separator) → interest', () => {
+    eq(classifyAutoCategory({ details: 'INTEREST�DEBIT INTEREST�ZDD400041�SYSTEM', category: '', txType: '' }), 'interest');
+});
+test('classifyAutoCategory: NAB txType "INTEREST CHARGED" → interest', () => {
+    eq(classifyAutoCategory({ details: 'INTEREST ON CASH ADV(S)', category: 'Loans', txType: 'INTEREST CHARGED' }), 'interest');
+});
+
+// FALSE-POSITIVE GUARDS — real BPAY bill payments must stay assignable (null).
+// These share the "INTERNET BPAY"/"INTERNET" prefix with transfers but are
+// genuine expenses (a broad /BPAY/ or /INTERNET/ rule would wrongly ignore them).
+test('classifyAutoCategory: NAB "INTERNET BPAY GLOBIRD ENERGY" (Utilities) → null', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET BPAY GLOBIRD ENERGY', category: 'Utilities', txType: 'CREDIT CARD PURCHASE' }), null);
+});
+test('classifyAutoCategory: NAB "INTERNET BPAY MEDIBANK PRIVATE" (Insurance) → null', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET BPAY MEDIBANK PRIVATE', category: 'Insurance', txType: 'CREDIT CARD PURCHASE' }), null);
+});
+test('classifyAutoCategory: ordinary purchase (Amazon) → null', () => {
+    eq(classifyAutoCategory({ details: 'AMAZON MARKETPLACE AU SYDNEY', category: '', txType: '' }), null);
+});
+// A merchant whose name merely contains "transfer"/"interest" mid-string must
+// not trip the anchored prefix rules.
+test('classifyAutoCategory: merchant containing "transfer" mid-details → null', () => {
+    eq(classifyAutoCategory({ details: 'QUICK TRANSFER LOGISTICS PTY', category: '', txType: '' }), null);
+});
+test('classifyAutoCategory: tolerates missing fields', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER TO 123' }), 'transfer');
+    eq(classifyAutoCategory({}), null);
 });
 
 // ── Runner ──
