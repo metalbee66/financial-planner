@@ -177,6 +177,19 @@ Toggle `fpHsbcIngest01` + `fpNabIngest01` **Active**. **NOTE:** CLI activation n
 a `docker restart n8n` to take effect (the UI toggle is hot) — see
 [routines.md](file:///C:/Users/brads/.claude/routines.md).
 
+These are **schedule-triggered** (not webhook) workflows — the same shape as the
+already-live `fpOverdueScan01` / queue-stuck, which activated fine via UI-toggle
+(or `update:workflow --active=true`) + `docker restart`. Use that path first.
+
+> **If activation doesn't "take"** (workflow imports but never fires, or the
+> startup log says `Processed N draft workflows, 0 published workflows`), the
+> SenseAi deploy procedure has a hardened 4-step for this box —
+> `import → publish:workflow --id=… → set active=1 in the DB (deploy/n8n-workflows/_activate.js) → docker restart`.
+> That was proven necessary for **webhook** workflows on this same n8n; fall back
+> to it if the simple path leaves the ingest stuck as a silent draft. (`update --active`
+> can be a deprecated no-op depending on n8n build — the `publish` step is what makes
+> `active=1` actually take effect.) See `E:\Projects\SenseAi\deploy\n8n-workflows\README.md`.
+
 ### 5. Later — Selfwealth + AMP (when their scrapers exist)
 
 Same steps per workflow (`fpSelfwealthIngest01`, `fpAmpIngest01`), each with its
