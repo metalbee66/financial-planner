@@ -390,9 +390,11 @@ export function getAllLineNames(data) {
  * (anchored at the start to avoid catching merchants that merely contain the
  * word). NAB populates a category/txType, which is the reliable signal there.
  *
- * Deliberately does NOT match bare "BPAY"/"INTERNET PAYMENT" on text alone —
- * real bills come through as "INTERNET BPAY GLOBIRD ENERGY" (category Utilities)
- * / "INTERNET BPAY MEDIBANK PRIVATE" (Insurance); those must stay assignable.
+ * "INTERNET PAYMENT ..." IS a transfer (NAB credit-card rebalancing), but
+ * "INTERNET BPAY <biller>" is NOT — those are real bills (GLOBIRD ENERGY /
+ * FRANKSTON COUNCIL / SOUTH EAST WATER / MEDIBANK PRIVATE) and must stay
+ * assignable. PAYMENT vs BPAY are different words, so the rules below separate
+ * them cleanly; bare "BPAY" is never matched.
  */
 export function classifyAutoCategory(tx) {
     const details = (tx.details || '').trim();
@@ -411,12 +413,19 @@ export function classifyAutoCategory(tx) {
     if (txType.toUpperCase() === 'INTEREST CHARGED') return 'interest';
     if (category === 'Loans' && /\bINTEREST\b/i.test(details)) return 'interest';
 
-    // Transfers — net to zero across Brad's own accounts. On HSBC, any details
-    // line whose leading word is TRANSFER is an inter-account move (TRANSFER TO/
-    // FROM/LP/RTP/<label>...); NAB flags them via the category. Anchor on the
-    // leading word so a mid-string "transfer" (e.g. a merchant name) doesn't hit.
+    // Transfers — net to zero across Brad's own accounts.
+    //  - HSBC: any details line whose leading word is TRANSFER is an inter-account
+    //    move (TRANSFER TO/FROM/LP/RTP/<label>...). Anchor on the leading word so
+    //    a mid-string "transfer" (a merchant name) doesn't hit.
+    //  - NAB: category 'Internal transfers' when present, and — since the live
+    //    scraper leaves category empty — "INTERNET PAYMENT ..." (credit-card
+    //    rebalancing, i.e. paying the card from another account). This is
+    //    distinct from "INTERNET BPAY <biller>" (a real bill: council, water,
+    //    energy, insurance), which must stay assignable — PAYMENT vs BPAY are
+    //    different words, so matching "INTERNET PAYMENT" does not catch bills.
     if (category === 'Internal transfers') return 'transfer';
     if (/^TRANSFER([^A-Za-z]|$)/i.test(details)) return 'transfer';
+    if (/^INTERNET[^A-Za-z]+PAYMENT\b/i.test(details)) return 'transfer';
 
     return null;
 }

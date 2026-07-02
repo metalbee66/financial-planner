@@ -304,9 +304,17 @@ test('classifyAutoCategory: HSBC "TRANSFER RTP ..." → transfer', () => {
     eq(classifyAutoCategory({ details: 'TRANSFER RTP NOTPROVIDED NATAAU33XXX', category: '', txType: '' }), 'transfer');
 });
 
-// Transfers — NAB (category is reliable when present)
+// Transfers — NAB. Category is reliable when present, but the LIVE scraper
+// leaves it empty — so "INTERNET PAYMENT ..." (credit-card rebalancing) must be
+// caught from the text alone, with OR without the category.
 test('classifyAutoCategory: NAB category "Internal transfers" → transfer', () => {
     eq(classifyAutoCategory({ details: 'INTERNET PAYMENT credit rebalance', category: 'Internal transfers', txType: 'CREDIT CARD PAYMENT' }), 'transfer');
+});
+test('classifyAutoCategory: NAB "INTERNET PAYMENT credit rebalance" with EMPTY category → transfer', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET PAYMENT credit rebalance', category: '', txType: '' }), 'transfer');
+});
+test('classifyAutoCategory: NAB "INTERNET PAYMENT Linked Acc Trns" → transfer', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET PAYMENT Linked Acc Trns', category: '', txType: '' }), 'transfer');
 });
 
 // Interest — HSBC loan interest + NAB interest-charged
@@ -320,14 +328,18 @@ test('classifyAutoCategory: NAB txType "INTEREST CHARGED" → interest', () => {
     eq(classifyAutoCategory({ details: 'INTEREST ON CASH ADV(S)', category: 'Loans', txType: 'INTEREST CHARGED' }), 'interest');
 });
 
-// FALSE-POSITIVE GUARDS — real BPAY bill payments must stay assignable (null).
-// These share the "INTERNET BPAY"/"INTERNET" prefix with transfers but are
-// genuine expenses (a broad /BPAY/ or /INTERNET/ rule would wrongly ignore them).
-test('classifyAutoCategory: NAB "INTERNET BPAY GLOBIRD ENERGY" (Utilities) → null', () => {
-    eq(classifyAutoCategory({ details: 'INTERNET BPAY GLOBIRD ENERGY', category: 'Utilities', txType: 'CREDIT CARD PURCHASE' }), null);
+// FALSE-POSITIVE GUARDS — real BPAY bill payments must stay assignable (null),
+// even with EMPTY category (the live scraper leaves category empty, so the text
+// rule must distinguish "INTERNET PAYMENT" (transfer) from "INTERNET BPAY <biller>"
+// (bill) on the word alone — PAYMENT vs BPAY).
+test('classifyAutoCategory: NAB "INTERNET BPAY GLOBIRD ENERGY" empty cat → null', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET BPAY GLOBIRD ENERGY', category: '', txType: '' }), null);
 });
-test('classifyAutoCategory: NAB "INTERNET BPAY MEDIBANK PRIVATE" (Insurance) → null', () => {
-    eq(classifyAutoCategory({ details: 'INTERNET BPAY MEDIBANK PRIVATE', category: 'Insurance', txType: 'CREDIT CARD PURCHASE' }), null);
+test('classifyAutoCategory: NAB "INTERNET BPAY FRANKSTON COUNCIL" empty cat → null', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET BPAY FRANKSTON COUNCIL', category: '', txType: '' }), null);
+});
+test('classifyAutoCategory: NAB "INTERNET BPAY SOUTH EAST WATER" empty cat → null', () => {
+    eq(classifyAutoCategory({ details: 'INTERNET BPAY SOUTH EAST WATER', category: '', txType: '' }), null);
 });
 test('classifyAutoCategory: ordinary purchase (Amazon) → null', () => {
     eq(classifyAutoCategory({ details: 'AMAZON MARKETPLACE AU SYDNEY', category: '', txType: '' }), null);
