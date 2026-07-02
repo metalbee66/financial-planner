@@ -177,17 +177,21 @@ Not blocking Phase 6 — pick up between phases or as standalone polish.
 - [x] **T11** E2E `bank-api — HSBC inbox` + `bank-api — auto-populated balances` — S — _shipped (smoke.spec.js describes at L3657/L3724); box was stale_
 - [x] **Checkpoint L** — Firebase shows bank_inbox rows from real scraper runs (HSBC + NAB, 243 tx, 2026-07-02); browser surfaces them in the Import → Bank inbox card (Brad confirmed). Apply-to-Planner / manual balance override paths shipped in T10/T10.5 + E2E-covered (T11).
 
-### Phase 3 — Burn-in (4 weeks)
+### Phase 3 — Burn-in (ongoing ops, NOT a release gate)
 
-- [ ] **UA6** Manual trigger all 3 scrapers end-to-end; verify CSVs/JSONs → Firebase → UI flow
-- [ ] **UA7** 4-week burn-in: per-bank daily flow; watch for partial-runs, MFA expiry, UI changes, anti-bot signals
-- [ ] **UA8** Week-4 per-bank decision gate: ship working scrapers, fall back to manual for fragile ones, write follow-up plan for remaining 6 logins if architecture validates
+**Decision 2026-07-02:** burn-in is de-gated from the v2.4 tag. The pipeline is
+live end-to-end (the hard part); reliability-over-time is now ongoing operations,
+watched via the healthchecks — not a precondition for shipping. Tag cut on that
+basis (see CHANGELOG v2.4).
 
-### Phase 4 — Wrap (only after Phase 3 decision gate)
+- [ ] **UA7** Burn-in watch (ongoing): per-bank daily flow — watch for partial runs, MFA expiry, UI changes, anti-bot signals via the scraper + ingest healthchecks.
+- [ ] **UA8** Per-bank confidence gate before scaling each new login: ship working scrapers, fall back to manual for fragile ones. Applies as each of NAB2/Westpac/ANZ/Bankwest/IBKR is added.
 
-- [ ] **T12** `routines.md` + `HANDOVER.md` v2.4 section + `CHANGELOG.md` + tag `v2.4` + two-tab Firebase smoke — XS
+### Phase 4 — Wrap
 
-**Estimated effort:** ~18–22 hr for the 3-scraper pilot end-to-end; future bank rollouts amortise ~3–5 hr per added login.
+- [x] **T12** `CHANGELOG.md` v2.4 + `HANDOVER.md` v2.4 section + tag `v2.4` — DONE 2026-07-02. Burn-in precondition dropped (see Phase 3). routines.md already carries the live workflow + healthcheck inventory. Two-tab Firebase smoke deferred — the end-to-end ingest (243 real tx surfacing in the app, Brad-confirmed) is the stronger equivalent verification.
+
+**Estimated effort:** ~18–22 hr for the pilot end-to-end; future bank rollouts amortise ~3–5 hr per added login.
 
 ---
 
