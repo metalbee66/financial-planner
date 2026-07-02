@@ -44,7 +44,10 @@ export function loadBankInbox() {
 
 /** Create a hash to identify a unique transaction */
 function txHash(tx) {
-    return `${tx.dateStr}|${tx.amount}|${tx.details}|${tx.account}`;
+    // Normalise details (HSBC uses NBSP separators) so the same transaction
+    // hashes identically whether it came from a CSV upload or the scraped
+    // inbox — otherwise NBSP-vs-space would break dedup / re-apply detection.
+    return `${tx.dateStr}|${tx.amount}|${normalizeDetails(tx.details)}|${tx.account}`;
 }
 
 /**
@@ -168,6 +171,17 @@ function parseHsbcAmount(str) {
 }
 
 /**
+ * Normalise a transaction description for display, search, and matching.
+ * HSBC uses a non-breaking space (U+00A0) as the word separator in its
+ * details (e.g. "TRANSFER TO 005-..."), which renders as an odd
+ * space and breaks plain-space search. Collapse NBSP + any run of whitespace
+ * to single regular spaces and trim.
+ */
+export function normalizeDetails(str) {
+    return String(str == null ? '' : str).replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Parse an HSBC transaction-export CSV. HSBC's format differs from NAB:
  *   - Header: ` Transaction Date,Description,Amount,Balance,` (leading space
  *     on every value; trailing comma → empty 5th column)
@@ -201,7 +215,7 @@ export function parseHsbcCsv(text, accountSlug = 'hsbc-unknown') {
         const amount = parseHsbcAmount(cols[2]);
         if (amount === null) continue;
 
-        const details = cols[1];
+        const details = normalizeDetails(cols[1]);
         const isRefund = amount > 0;
 
         transactions.push({
@@ -385,11 +399,11 @@ export function classifyAutoCategory(tx) {
     const category = (tx.category || '').trim();
     const txType = (tx.txType || '').trim();
 
-    // Note on the separators below: HSBC details arrive with a non-space
-    // separator between words that decodes as U+FFFD (the replacement char) in
-    // the scrape→ingest chain — e.g. "TRANSFER�TO ...", "INTEREST�DEBIT".
-    // So the word-boundary after the keyword is matched with `[^A-Za-z]` (any
-    // non-letter) rather than a literal space, to survive that mangling.
+    // The word-boundary after the leading keyword is matched with `[^A-Za-z]`
+    // (any non-letter), not a literal space. Details are normalised upstream
+    // (normalizeDetails collapses HSBC's NBSP separators to spaces), but the
+    // permissive class keeps this robust if an un-normalised row ever reaches
+    // here, and correctly matches a plain space too.
 
     // Interest first (more specific). Mortgage interest is already absorbed in
     // the mortgage payment, so budgeting it here would double-count.
@@ -678,12 +692,17 @@ export function loadBankInboxIntoReview() {
     // back from Firebase/localStorage as an ISO STRING (JSON has no Date type);
     // rehydrate it to a Date so getWeekIndex/applyToPlanner work like the CSV
     // path (which produces live Date objects).
-    state.importedTransactions = pending.map(tx => ({
-        ...tx,
-        date: tx.date instanceof Date ? tx.date : new Date(tx.date),
-        glLine: '',
-        isDuplicate: false,
-    }));
+    state.importedTransactions = pending.map(tx => {
+        const details = normalizeDetails(tx.details);
+        return {
+            ...tx,
+            details,
+            merchant: normalizeDetails(tx.merchant) || details.substring(0, 30).trim(),
+            date: tx.date instanceof Date ? tx.date : new Date(tx.date),
+            glLine: '',
+            isDuplicate: false,
+        };
+    });
     const allLines = getAllLineNames(state.budgetCY);
     const dupCount = autoSuggest(state.importedTransactions, state.glMappings, allLines, state.storedTransactionHashes);
     renderImportTab(state.importedTransactions, state.budgetCY, dupCount);

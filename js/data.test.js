@@ -17,7 +17,7 @@ import {
     isValidBalanceRecord,
 } from './data.js';
 
-import { parseHsbcCsv, parseAmpCsv, classifyAutoCategory } from './modules/finance/import.js';
+import { parseHsbcCsv, parseAmpCsv, classifyAutoCategory, normalizeDetails } from './modules/finance/import.js';
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -28,6 +28,8 @@ function eq(actual, expected, msg) {
 }
 function truthy(v, msg) { if (!v) throw new Error(msg || 'expected truthy'); }
 function falsy(v, msg) { if (v) throw new Error(msg || 'expected falsy, got ' + JSON.stringify(v)); }
+
+const NBSP = String.fromCharCode(0x00A0); // HSBC's word separator in details
 
 // ── sanitiseBankInbox ──
 
@@ -289,16 +291,17 @@ test('classifyAutoCategory: HSBC "TRANSFER FROM ..." → transfer', () => {
 test('classifyAutoCategory: HSBC "TRANSFER LP ..." → transfer', () => {
     eq(classifyAutoCategory({ details: 'TRANSFER LP SDB60BUBC s1-24 may wk3 NAB account 152607063', category: '', txType: '' }), 'transfer');
 });
-// Real HSBC data uses U+FFFD (replacement char) as the word separator, not a
-// space — "TRANSFER�TO ...". Detection must survive that mangling.
-test('classifyAutoCategory: HSBC "TRANSFER\\uFFFDTO ..." (mangled separator) → transfer', () => {
-    eq(classifyAutoCategory({ details: 'TRANSFER�TO 005-356399-259�transfer�IB0451564', category: '', txType: '' }), 'transfer');
+// Real HSBC data uses a non-breaking space (U+00A0) as the word separator, not
+// a regular space — raw details are "TRANSFER<NBSP>TO ...". Detection must work
+// whether details are still NBSP-separated OR already normalised to spaces.
+test('classifyAutoCategory: HSBC "TRANSFER<NBSP>TO ..." (raw NBSP) → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER' + NBSP + 'TO 005-356399-259' + NBSP + 'transfer', category: '', txType: '' }), 'transfer');
 });
-test('classifyAutoCategory: HSBC "TRANSFER\\uFFFDCranbourne Rent ..." → transfer', () => {
-    eq(classifyAutoCategory({ details: 'TRANSFER�Cranbourne Rent�BRADLEY SMYRK', category: '', txType: '' }), 'transfer');
+test('classifyAutoCategory: HSBC "TRANSFER Cranbourne Rent ..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER' + NBSP + 'Cranbourne Rent' + NBSP + 'BRADLEY SMYRK', category: '', txType: '' }), 'transfer');
 });
-test('classifyAutoCategory: HSBC "TRANSFER\\uFFFDRTP\\uFFFD..." → transfer', () => {
-    eq(classifyAutoCategory({ details: 'TRANSFER�RTP�NOTPROVIDED�NATAAU33XXX', category: '', txType: '' }), 'transfer');
+test('classifyAutoCategory: HSBC "TRANSFER RTP ..." → transfer', () => {
+    eq(classifyAutoCategory({ details: 'TRANSFER RTP NOTPROVIDED NATAAU33XXX', category: '', txType: '' }), 'transfer');
 });
 
 // Transfers — NAB (category is reliable when present)
@@ -310,8 +313,8 @@ test('classifyAutoCategory: NAB category "Internal transfers" → transfer', () 
 test('classifyAutoCategory: HSBC "INTEREST DEBIT ..." (space) → interest', () => {
     eq(classifyAutoCategory({ details: 'INTEREST DEBIT INTEREST ZDD400020 SYSTEM GENERATED', category: '', txType: '' }), 'interest');
 });
-test('classifyAutoCategory: HSBC "INTEREST\\uFFFDDEBIT ..." (mangled separator) → interest', () => {
-    eq(classifyAutoCategory({ details: 'INTEREST�DEBIT INTEREST�ZDD400041�SYSTEM', category: '', txType: '' }), 'interest');
+test('classifyAutoCategory: HSBC "INTEREST<NBSP>DEBIT ..." (raw NBSP) → interest', () => {
+    eq(classifyAutoCategory({ details: 'INTEREST' + NBSP + 'DEBIT INTEREST' + NBSP + 'ZDD400041', category: '', txType: '' }), 'interest');
 });
 test('classifyAutoCategory: NAB txType "INTEREST CHARGED" → interest', () => {
     eq(classifyAutoCategory({ details: 'INTEREST ON CASH ADV(S)', category: 'Loans', txType: 'INTEREST CHARGED' }), 'interest');
@@ -337,6 +340,39 @@ test('classifyAutoCategory: merchant containing "transfer" mid-details → null'
 test('classifyAutoCategory: tolerates missing fields', () => {
     eq(classifyAutoCategory({ details: 'TRANSFER TO 123' }), 'transfer');
     eq(classifyAutoCategory({}), null);
+});
+
+// ── normalizeDetails (HSBC NBSP separator cleanup) ──
+// HSBC details arrive with a non-breaking space (U+00A0) between words. Left
+// raw, it renders oddly, breaks plain-space search, and makes the same tx hash
+// differently across the CSV vs scraped paths. normalizeDetails canonicalises it.
+
+test('normalizeDetails: collapses NBSP to a regular space', () => {
+    const out = normalizeDetails('TRANSFER' + NBSP + 'TO 005-356399');
+    eq(out, 'TRANSFER TO 005-356399');
+    eq(out.charCodeAt(8), 0x20); // regular space, not NBSP
+});
+test('normalizeDetails: collapses runs of mixed whitespace + trims', () => {
+    eq(normalizeDetails('  A' + NBSP + NBSP + ' B\tC  '), 'A B C');
+});
+test('normalizeDetails: null/undefined → empty string', () => {
+    eq(normalizeDetails(null), '');
+    eq(normalizeDetails(undefined), '');
+});
+test('normalizeDetails: leaves already-clean text untouched', () => {
+    eq(normalizeDetails('AMAZON MARKETPLACE AU'), 'AMAZON MARKETPLACE AU');
+});
+
+// parseHsbcCsv must strip NBSP from the details it produces (regression: real
+// HSBC exports use NBSP separators — "TRANSFER<NBSP>TO ...").
+test('parseHsbcCsv normalises NBSP separators in details', () => {
+    const csv = HSBC_HEADER + '\n15 May 2026,TRANSFER' + NBSP + 'TO 005-356399' + NBSP + 'IB0884619,"-100.48"," -1.00"';
+    const rows = parseHsbcCsv(csv);
+    eq(rows.length, 1);
+    eq(rows[0].details, 'TRANSFER TO 005-356399 IB0884619');
+    truthy(rows[0].details.indexOf(NBSP) === -1, 'details should contain no NBSP');
+    // and the normalised details still classify as a transfer
+    eq(classifyAutoCategory(rows[0]), 'transfer');
 });
 
 // ── Runner ──
