@@ -136,6 +136,20 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [x] **UA-NAB.5** DONE 2026-06-30 — read a REAL export. NAB is **10 columns** (`Date,Amount,Account Number,,Type,Details,Balance,Category,Merchant,Processed On`), NOT positional like HSBC/AMP. Fixed `parseTransactionsCsv` with a per-source `CSV_LAYOUTS` map (amount col 1, details col 5, merchant col 8) + updated the workflow Code node; self-check 50/50; both verified against the real CSV.
 - [x] **UA-NAB.6** NAB1 Task Scheduler entry `FamilyPlanner-Nab1ScraperDaily` (Interactive, senseAi-admin, **daily 06:30** — offset from the 06:00 HSBC task; routines.md). The scraper has been running daily — dated CSV folders present through 2026-07-02 (that day's `nab1-cc3696.csv` = 17 KB), which the live ingest picked up. **`fpNabIngest01` deployed to n8n 2026-07-02** (see UA-T7 above). **Remaining NAB loose ends:** (a) NAB2 — empty KeePass entry (UA-NAB.2), no scraper/task yet; (b) tighten `run-nab1.ps1` jitter if the 06:30 slot ever collides with anything.
 
+### AMP scraper walk-through (balance-only; scaffolded 2026-07-02 — Brad to finish on the Geekom)
+
+> `amp.mjs` rewritten to **balance-only** scope (super balance, no transactions —
+> Brad's call 2026-07-02: super rarely has budget-worthy day-to-day transactions).
+> `amp-inspect.mjs` (a11y probe, mirrors `nab-a11y.mjs`), `run-amp.ps1`, and the
+> balance-only `amp-ingest.workflow.json` (8h cadence) are written; the three
+> site-specific selectors (login fields, `DASHBOARD_RE`, balance element) are
+> `TODO(headed)`. Finish steps in `scrapers/README.md` → "Selfwealth + AMP —
+> scaffold status".
+
+- [ ] **UA-AMP.1 — KeePass entry.** ⚠️ **Discrepancy to resolve:** UA2 (line 107) records `Family Planner - AMP` as created 2026-06-05, but as of 2026-07-02 Brad flagged it still **needs creating**. Verify with `keepassxc-cli show … "Family Planner - AMP"` — the title may exist as an empty shell (same as NAB2). Populate UserName + Password in `C:\Vault\familyplanner.kdbx` before the first run.
+- [ ] **UA-AMP.2 — Headed walk-through on the Geekom.** Run `node amp-inspect.mjs`; first run: log in manually + MFA + enroll the trusted device (creates `C:\Vault\fp-state\amp-profile`, MFA-free thereafter). Snapshot the super dashboard, capture: (a) the post-login "top URL" → `DASHBOARD_RE` in `amp.mjs`; (b) the role/name of the balance node → the `.TODO-balance-selector` replacement (prefer an a11y locator). AMP is a modern SPA — expect a possible shadow DOM, hence the a11y probe over CSS.
+- [ ] **UA-AMP.3 — Verify output + wire.** Run `node amp.mjs` headed → confirm one `C:\BankScrapes\amp\<date>\amp-super.balance.json` lands (shape enforced by `lib/balance-writer.js`). Then: Task Scheduler task (`run-amp.ps1`, daily, offset from HSBC 06:00 / NAB1 06:30) and deploy `fpAmpIngest01` per `bank-ingest.BUILD-SHEET.md` (mount + `NODE_FUNCTION_ALLOW_BUILTIN` already in place from UA-T7 — this is import-only). Patch the real `FamilyPlanner-AmpIngestCron` ping URL into the live Heartbeat node only (keep out of git).
+
 ### v2.4 wrap (deferred until pilot complete)
 
 - [x] **2026-06-05** — **Version-control for `scrapers/` RESOLVED: option (a), own private repo `metalbee66/family-planner-scrapers`.** `.gitignore` excludes screenshots/CSVs/node_modules (no bank data or secrets committed). Deploy to the Geekom stays via `scp`. **New manual follow-up:** auto-logon is enabled on the Geekom for senseai-admin (Sysinternals Autologon) — confirm it survives a reboot whenever the box is next bounced (doesn't affect SenseAi services).
