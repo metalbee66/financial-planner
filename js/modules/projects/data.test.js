@@ -367,9 +367,18 @@ test('effectiveProjectStatus returns stored status with empty/missing task list'
     eq(effectiveProjectStatus(p, undefined), 'active');
 });
 
-test('effectiveProjectStatus derives planning when no tasks are done', () => {
+test('effectiveProjectStatus derives planning only when every task is not-started', () => {
     const p = createProject({ name: 'X', status: 'active' });
-    eq(effectiveProjectStatus(p, [statusTask('not-started'), statusTask('in-progress')]), 'planning');
+    eq(effectiveProjectStatus(p, [statusTask('not-started'), statusTask('not-started')]), 'planning');
+});
+
+test('effectiveProjectStatus derives active when work is underway but nothing is done', () => {
+    // A project with in-progress / review / blocked tasks is active even with 0 done —
+    // started work means it is no longer merely being planned.
+    const p = createProject({ name: 'X', status: 'planning' });
+    eq(effectiveProjectStatus(p, [statusTask('not-started'), statusTask('in-progress')]), 'active');
+    eq(effectiveProjectStatus(p, [statusTask('review')]), 'active');
+    eq(effectiveProjectStatus(p, [statusTask('not-started'), statusTask('blocked')]), 'active');
 });
 
 test('effectiveProjectStatus derives active when some tasks are done', () => {

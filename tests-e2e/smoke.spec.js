@@ -3531,6 +3531,39 @@ test.describe('Projects overview — sort persistence, status filter, archive, s
         await expect(page.locator('.projects-toolbar .status-badge')).toHaveText('On hold');
     });
 
+    test('a project with an in-progress task derives Active (not Planning)', async ({ page }) => {
+        // Bug: a project with work underway but nothing done showed as Planning,
+        // because derivation only counted done tasks toward Active.
+        await createProject(page, { name: 'Underway' });
+        await page.locator('#task-add-name').fill('Started task');
+        await page.locator('#task-add-name').press('Enter');
+        // Move the task off not-started so work is underway.
+        await page.locator('.task-row', { hasText: 'Started task' }).locator('.task-row-status').selectOption('in-progress');
+        await expect(page.locator('.projects-toolbar .status-badge')).toHaveText('Active');
+    });
+
+    test('a manual status pick that fights derivation sticks (auto override)', async ({ page }) => {
+        // Bug: selecting a derivable status (e.g. Planning) in the edit form left
+        // override off, so on save the derived value snapped back and the choice
+        // was silently discarded. Selecting any status must now auto-enable override.
+        await createProject(page, { name: 'Forced' });
+        await page.locator('#task-add-name').fill('A task');
+        await page.locator('#task-add-name').press('Enter');
+        await page.locator('.task-row', { hasText: 'A task' }).locator('.task-row-status').selectOption('in-progress');
+        // Derivation now yields Active; user forces it back to Planning.
+        await page.locator('#projects-edit-btn').click();
+        await page.locator('#pf-status').selectOption('planning');
+        await expect(page.locator('#pf-status-override')).toBeChecked();
+        await page.locator('#pf-save').click();
+        await expect(page.locator('.projects-toolbar .status-badge')).toHaveText('Planning');
+        // Survives reload
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await page.locator('.top-nav-btn[data-module="projects"]').click();
+        await page.locator('.project-card', { hasText: 'Forced' }).click();
+        await expect(page.locator('.projects-toolbar .status-badge')).toHaveText('Planning');
+    });
+
     test('overview sort choice persists across reload', async ({ page }) => {
         await createProject(page, { name: 'Sortpref' });
         await backToList(page);

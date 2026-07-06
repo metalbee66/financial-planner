@@ -160,18 +160,24 @@ export function validateProject(p) {
  *
  * Override on → stored `status` wins (including non-derivable `on-hold` /
  * `cancelled`). Override off + no tasks → stored `status`. Otherwise derive
- * from task completion: 0 done → 'planning', all done → 'completed',
- * partial → 'active'. Caller is expected to pass the slice of tasks
- * belonging to this project.
+ * from task progress: every task still not-started → 'planning', all done →
+ * 'completed', any work underway (in-progress / review / blocked / some done)
+ * → 'active'. Caller is expected to pass the slice of tasks belonging to this
+ * project.
  */
 export function effectiveProjectStatus(project, tasks) {
     if (!project) return null;
     if (project.statusOverride) return project.status;
     if (!Array.isArray(tasks) || tasks.length === 0) return project.status;
     let done = 0;
-    for (const t of tasks) if (t && t.status === 'done') done++;
-    if (done === 0) return 'planning';
+    let started = 0; // any task that isn't 'not-started' — work has begun
+    for (const t of tasks) {
+        if (!t) continue;
+        if (t.status === 'done') done++;
+        if (t.status !== 'not-started') started++;
+    }
     if (done === tasks.length) return 'completed';
+    if (started === 0) return 'planning';
     return 'active';
 }
 

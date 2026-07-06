@@ -28,7 +28,6 @@ import {
     deleteProjectFromList,
     findProject,
     effectiveProjectStatus,
-    isNonDerivableStatus,
     shiftProjectDates,
     shiftTaskTreeDates,
     readAssignees,
@@ -1995,11 +1994,15 @@ function renderForm() {
             statusSelect.value = effectiveProjectStatus({ ...draft, statusOverride: false }, projectTasks);
         }
     });
-    // On-hold / cancelled can't be derived from task completion, so picking one
-    // is a no-op unless we also turn on manual override. Auto-enable it so the
-    // chosen status actually sticks instead of snapping back to a derived value.
+    // Picking a status that differs from what derivation would produce is a
+    // no-op unless we also turn on manual override — on save the derived path
+    // would snap it back. Auto-enable override so the chosen status actually
+    // sticks. This covers non-derivable statuses (on-hold / cancelled, which
+    // derivation never yields) and derivable ones the user forces against the
+    // derived value (e.g. forcing Planning on a project with work underway).
     statusSelect.addEventListener('change', () => {
-        if (isNonDerivableStatus(statusSelect.value)) {
+        const derived = effectiveProjectStatus({ ...draft, statusOverride: false }, projectTasks);
+        if (statusSelect.value !== derived) {
             overrideBox.checked = true;
         }
     });
