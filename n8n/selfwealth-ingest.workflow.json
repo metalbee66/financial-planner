@@ -104,7 +104,8 @@
         "typeVersion": 4.4,
         "position": [256, 0],
         "id": "d6666666-0000-4000-8000-000000000006",
-        "name": "Heartbeat"
+        "name": "Heartbeat",
+        "executeOnce": true
       }
     ],
     "connections": {
