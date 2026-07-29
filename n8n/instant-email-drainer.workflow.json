@@ -1,0 +1,324 @@
+[
+  {
+    "id": "9a7n6sQxh4ij0XtF",
+    "name": "Family Planner: Instant email drainer",
+    "active": false,
+    "nodes": [
+      {
+        "parameters": {
+          "url": "https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app/household/family/email_queue.json",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpQueryAuth",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          -432,
+          -32
+        ],
+        "id": "c3cfa964-f4bb-425a-852c-30f04423c3e7",
+        "name": "HTTP Request",
+        "credentials": {
+          "httpQueryAuth": {
+            "id": "9i2uFN81PFlwBaXa",
+            "name": "Family Planner - Firebase RTDB"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "jsCode": "// v2.1.1 fix: emit a {_sentinel:true} item when the queue has nothing to send,\n// so the heartbeat chain never short-circuits on zero items.\nconst data = $input.first().json;\nconst rows = Object.entries(data || {})\n  .filter(([, entry]) => entry && entry.sent !== true && entry.failed !== true)\n  .map(([id, entry]) => ({ json: { ...entry, _sentinel: false, _id: id } }));\nif (rows.length === 0) return [{ json: { _sentinel: true } }];\nreturn rows;\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          -224,
+          -32
+        ],
+        "id": "990d17fb-86a4-45cc-8426-af7df9a88c7d",
+        "name": "Code in JavaScript"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "rows",
+                "leftValue": "={{ $json._sentinel }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "false",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.filter",
+        "typeVersion": 2.2,
+        "position": [
+          -16,
+          -160
+        ],
+        "id": "b1111111-0000-4000-8000-0000000000c1",
+        "name": "Rows only"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "sent",
+                "leftValue": "={{ $json._sentinel }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.filter",
+        "typeVersion": 2.2,
+        "position": [
+          -16,
+          160
+        ],
+        "id": "b2222222-0000-4000-8000-0000000000c2",
+        "name": "Sentinel only"
+      },
+      {
+        "parameters": {
+          "fromEmail": "bradsmyrkai@gmail.com",
+          "toEmail": "={{ $json.to }}",
+          "subject": "={{  $json.subject }} ",
+          "html": "={{  $json.bodyHtml }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.emailSend",
+        "typeVersion": 2.1,
+        "position": [
+          192,
+          -160
+        ],
+        "id": "de92dabc-04f9-4e1d-b141-5335bdbbde72",
+        "name": "Send an Email",
+        "webhookId": "7636c4ef-61b8-4692-be49-50db7b786ecf",
+        "credentials": {
+          "smtp": {
+            "id": "1cvcEssB64OXo7Xb",
+            "name": "Gmail SMTP (bradsmyrkai)"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app/household/family/email_queue/{{ $('Code in JavaScript').item.json._id }}.json",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpQueryAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={ \"sent\": true, \"sentAt\": \"{{ $now.toISO() }}\" }\n",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          416,
+          -160
+        ],
+        "id": "6718494b-c52d-4918-b1b7-f19bb455c18b",
+        "name": "HTTP Request1",
+        "credentials": {
+          "httpQueryAuth": {
+            "id": "9i2uFN81PFlwBaXa",
+            "name": "Family Planner - Firebase RTDB"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "=https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app/household/family/email_queue/{{ $('Code in JavaScript').item.json._id }}.json",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpQueryAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={  \"attempts\": {{ ($('Code in JavaScript').item.json.attempts || 0) + 1 }},\n  \"failed\": {{ (($('Code in JavaScript').item.json.attempts || 0) + 1) >= 3 }}\n}\n",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          416,
+          0
+        ],
+        "id": "d4d13e6c-d672-49f5-82a7-e448ff34ee39",
+        "name": "HTTP Request2",
+        "credentials": {
+          "httpQueryAuth": {
+            "id": "9i2uFN81PFlwBaXa",
+            "name": "Family Planner - Firebase RTDB"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 30
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -640,
+          -32
+        ],
+        "id": "3460b8f6-93bc-47a5-8e68-6c41ed7fe73d",
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "url": "https://hc-ping.com/REPLACE-WITH-InstantDrainerCron-UUID",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          624,
+          -32
+        ],
+        "id": "4ba847cb-100f-4f6a-a02d-d9dbba3f6a57",
+        "name": "Heartbeat",
+        "executeOnce": true
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript": {
+        "main": [
+          [
+            {
+              "node": "Rows only",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Sentinel only",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Rows only": {
+        "main": [
+          [
+            {
+              "node": "Send an Email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send an Email": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "HTTP Request2",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request1": {
+        "main": [
+          [
+            {
+              "node": "Heartbeat",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sentinel only": {
+        "main": [
+          [
+            {
+              "node": "Heartbeat",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate"
+    }
+  }
+]

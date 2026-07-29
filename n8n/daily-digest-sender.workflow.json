@@ -1,0 +1,289 @@
+[
+  {
+    "id": "9Irx9QIVujTgtYVN",
+    "name": "Family Planner: daily digest sender",
+    "active": false,
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "triggerAtHour": 8
+              }
+            ]
+          }
+        },
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -384,
+          -16
+        ],
+        "id": "65ba0367-85c6-4c62-9d1e-aee443566b46",
+        "name": "Schedule Trigger"
+      },
+      {
+        "parameters": {
+          "url": "https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app/household/family/projects/digest_pending.json",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpQueryAuth",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          -176,
+          -16
+        ],
+        "id": "35871ea4-72db-43d5-850b-d53b3bd82fc2",
+        "name": "HTTP Request",
+        "credentials": {
+          "httpQueryAuth": {
+            "id": "9i2uFN81PFlwBaXa",
+            "name": "Family Planner - Firebase RTDB"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "jsCode": "// Mirrors composeDigestSummary + buildDigestEmail from notifications.js.\n// v2.1.2 fix: emit one {_sentinel:true} item on a quiet day so the heartbeat\n// chain never short-circuits on zero items.\nconst NOTIFICATION_KINDS = ['task_assigned', 'comment_added', 'dependency_unblocked', 'task_due_soon', 'task_overdue', 'milestone_completed', 'project_completed'];\nconst DIGEST_KIND_LABELS = {\n  task_assigned:        { one: 'task assigned',       many: 'tasks assigned' },\n  comment_added:        { one: 'new comment',         many: 'new comments' },\n  dependency_unblocked: { one: 'task unblocked',      many: 'tasks unblocked' },\n  task_due_soon:        { one: 'task due soon',       many: 'tasks due soon' },\n  task_overdue:         { one: 'task overdue',        many: 'tasks overdue' },\n  milestone_completed:  { one: 'milestone completed', many: 'milestones completed' },\n  project_completed:    { one: 'project completed',   many: 'projects completed' },\n};\nconst USER_TO_EMAIL = { brad: 'metalbee66@gmail.com', diana: 'dianaleshcheva@gmail.com' };\nconst BASE_URL = 'https://metalbee66.github.io/financial-planner/';\nconst esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\n\nfunction composeDigestSummary(entries) {\n  const counts = new Map();\n  for (const e of entries) {\n    if (!e || !e.kind || !DIGEST_KIND_LABELS[e.kind]) continue;\n    counts.set(e.kind, (counts.get(e.kind) || 0) + 1);\n  }\n  const parts = [];\n  for (const k of NOTIFICATION_KINDS) {\n    const n = counts.get(k);\n    if (!n) continue;\n    const l = DIGEST_KIND_LABELS[k];\n    parts.push(`${n} ${n === 1 ? l.one : l.many}`);\n  }\n  return parts.join(', ');\n}\n\nconst data = $input.first().json || {};\nconst out = [];\nfor (const [user, entries] of Object.entries(data)) {\n  if (!Array.isArray(entries) || entries.length === 0) continue;\n  const to = USER_TO_EMAIL[user];\n  if (!to) continue;\n  const summary = composeDigestSummary(entries);\n  if (!summary) continue;\n  const bullets = entries.map(e => `<li><strong>${esc(e.title || '')}</strong> — ${esc(e.summary || '')}</li>`).join('');\n  const bodyHtml = `<p>${esc(summary)}.</p><ul>${bullets}</ul><p><a href=\"${esc(BASE_URL)}\">Open Family Planner</a></p>`;\n  out.push({ json: { _sentinel: false, _user: user, to, subject: `[Family Planner] Daily digest — ${summary}`, bodyHtml } });\n}\nif (out.length === 0) return [{ json: { _sentinel: true } }];\nreturn out;\n"
+        },
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          32,
+          -16
+        ],
+        "id": "a5064742-7924-44ab-bcf1-e979b0f43df7",
+        "name": "Code in JavaScript"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "rows",
+                "leftValue": "={{ $json._sentinel }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "false",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.filter",
+        "typeVersion": 2.2,
+        "position": [
+          240,
+          -140
+        ],
+        "id": "b1111111-0000-4000-8000-0000000000d1",
+        "name": "Rows only"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "sent",
+                "leftValue": "={{ $json._sentinel }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.filter",
+        "typeVersion": 2.2,
+        "position": [
+          240,
+          120
+        ],
+        "id": "b2222222-0000-4000-8000-0000000000d2",
+        "name": "Sentinel only"
+      },
+      {
+        "parameters": {
+          "fromEmail": "bradsmyrkai@gmail.com",
+          "toEmail": "={{  $json.to }}",
+          "subject": "={{  $json.subject }}",
+          "html": "={{  $json.bodyHtml }}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.emailSend",
+        "typeVersion": 2.1,
+        "position": [
+          448,
+          -140
+        ],
+        "id": "6bd030db-5e44-4d51-b874-3a98a19a72cb",
+        "name": "Send an Email",
+        "webhookId": "ef9e6096-aec6-43d3-b8b6-f1a4de1368bf",
+        "credentials": {
+          "smtp": {
+            "id": "1cvcEssB64OXo7Xb",
+            "name": "Gmail SMTP (bradsmyrkai)"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "https://financial-planner-e85d4-default-rtdb.asia-southeast1.firebasedatabase.app/household/family/projects/digest_pending.json",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpQueryAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={ \"{{ $('Code in JavaScript').item.json._user }}\": null }\n",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          656,
+          -140
+        ],
+        "id": "27600d34-494a-46e0-82ad-f00a7f7a08a0",
+        "name": "HTTP Request1",
+        "credentials": {
+          "httpQueryAuth": {
+            "id": "9i2uFN81PFlwBaXa",
+            "name": "Family Planner - Firebase RTDB"
+          }
+        },
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000
+      },
+      {
+        "parameters": {
+          "url": "https://hc-ping.com/REPLACE-WITH-DailyDigestCron-UUID",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          864,
+          -16
+        ],
+        "id": "905dc4b0-434a-49d1-b1e6-4fefae95d12e",
+        "name": "Heartbeat",
+        "executeOnce": true
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request": {
+        "main": [
+          [
+            {
+              "node": "Code in JavaScript",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Code in JavaScript": {
+        "main": [
+          [
+            {
+              "node": "Rows only",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Sentinel only",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Rows only": {
+        "main": [
+          [
+            {
+              "node": "Send an Email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Send an Email": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request1",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "HTTP Request1": {
+        "main": [
+          [
+            {
+              "node": "Heartbeat",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Sentinel only": {
+        "main": [
+          [
+            {
+              "node": "Heartbeat",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate",
+      "timezone": "Australia/Sydney",
+      "callerPolicy": "workflowsFromSameOwner"
+    }
+  }
+]
