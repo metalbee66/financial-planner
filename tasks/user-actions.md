@@ -146,9 +146,50 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 > `TODO(headed)`. Finish steps in `scrapers/README.md` → "Selfwealth + AMP —
 > scaffold status".
 
-- [ ] **UA-AMP.1 — KeePass entry.** ⚠️ **Discrepancy to resolve:** UA2 (line 107) records `Family Planner - AMP` as created 2026-06-05, but as of 2026-07-02 Brad flagged it still **needs creating**. Verify with `keepassxc-cli show … "Family Planner - AMP"` — the title may exist as an empty shell (same as NAB2). Populate UserName + Password in `C:\Vault\familyplanner.kdbx` before the first run.
-- [ ] **UA-AMP.2 — Headed walk-through on the Geekom.** Run `node amp-inspect.mjs`; first run: log in manually + MFA + enroll the trusted device (creates `C:\Vault\fp-state\amp-profile`, MFA-free thereafter). Snapshot the super dashboard, capture: (a) the post-login "top URL" → `DASHBOARD_RE` in `amp.mjs`; (b) the role/name of the balance node → the `.TODO-balance-selector` replacement (prefer an a11y locator). AMP is a modern SPA — expect a possible shadow DOM, hence the a11y probe over CSS.
-- [ ] **UA-AMP.3 — Verify output + wire.** Run `node amp.mjs` headed → confirm one `C:\BankScrapes\amp\<date>\amp-super.balance.json` lands (shape enforced by `lib/balance-writer.js`). Then: Task Scheduler task (`run-amp.ps1`, daily, offset from HSBC 06:00 / NAB1 06:30) and deploy `fpAmpIngest01` per `bank-ingest.BUILD-SHEET.md` (mount + `NODE_FUNCTION_ALLOW_BUILTIN` already in place from UA-T7 — this is import-only). Patch the real `FamilyPlanner-AmpIngestCron` ping URL into the live Heartbeat node only (keep out of git).
+- [x] **UA-AMP.1 — KeePass entry. DONE 2026-07-28.** Discrepancy resolved: `Family Planner - AMP` in `C:\Vault\familyplanner.kdbx` is **populated** (UserName + Password both set) — verified via `keepassxc-cli show --no-password -k C:\Vault\fp-state\familyplanner.keyx …`. (The vault is key-file-only — unlocks with `--no-password`; that's the unattended-scrape design.)
+- [x] **UA-AMP.2 — Headed walk-through. DONE 2026-07-28** (Claude drove the file prep over SSH; Brad ran the headed browser steps). Captured against the real AMP UI:
+  - **Dashboard URL:** `secure.amp.com.au/myamp/dashboard/#/accounts/overview` → `DASHBOARD_RE = /secure\.amp\.com\.au\/myamp\/dashboard/i`.
+  - **Login page:** full-screen `secure.amp.com.au/public/login`. The form has **no `<label for>`/`aria-label`**, so `getByRole('textbox',{name})` MISSES it. A DOM probe (`amp-login-probe.mjs`) found the real ids: **`#portal-username` / `#portal-password` / `#loginPersonalSubmit`** (the "My AMP Personal" form; a second generic `name="userid"` form is overlaid — must target by id).
+  - **Balance:** the a11y tree reads "Super group balance is $X" but the **visible** DOM splits label from amount, so `getByText(/phrase/)` misses. `readBalance` now polls page text for the first `$[\d,]+\.\d{2}` (= the Super balance, which sits atop the accounts card) — structure-independent.
+  - ⚠️ **AMP does NOT persist a session** (no "remember me"; no device-trust cookie) and its login page has **reCAPTCHA Enterprise** (invisible/passive — real Chrome passes it). So AMP logs in **every run** — unlike HSBC/NAB. This is inherently more fragile; if AMP scraping starts failing, reCAPTCHA scoring is the likely cause. Daily cadence (not 8h) keeps reCAPTCHA exposure low.
+- [x] **UA-AMP.3 — Verify + deploy ingest. DONE 2026-07-28.** `node amp.mjs` ran headed → wrote `C:\BankScrapes\amp\2026-07-28\amp-super.balance.json` (`balance: 183392.38`, valid shape). Container sees it at `/data/bankscrapes/amp/…` (mount + `NODE_FUNCTION_ALLOW_BUILTIN` already in place from UA-T7). Imported `fpAmpIngest01` via `docker cp` + `import:workflow` — with the **real `FamilyPlanner-AmpIngestCron` ping URL** (`config/healthchecks.json` `amp` key, created UA4) substituted into the Heartbeat node at deploy-time in a temp file (kept out of git; BOM-free write — `Set-Content -Encoding utf8` prepends a BOM that breaks n8n's JSON parse, use `[IO.File]::WriteAllText(..., UTF8Encoding($false))`). Activated (`update:workflow --active=true` + `docker restart`). **Brad triggered it via the n8n UI → confirmed the AMP super balance surfaces in Family Planner.** Full pipeline verified end-to-end.
+  - ✅ **AMP scheduling DONE 2026-07-29 — via the orchestrator consolidation below.** `amp.mjs` now runs daily as part of `FamilyPlanner-BankScrapersDaily` (06:00, after HSBC + NAB1). Verified in the burn-in (`balance 183979.7` written). No standalone AMP task was created — see "Scraper orchestrator" below.
+
+### Scraper orchestrator — consolidation DONE 2026-07-29
+
+> The five per-bank `run-<bank>.ps1` wrappers were copy-paste clones, each meant
+> to be its own Task Scheduler entry — but only HSBC + NAB1 were ever actually
+> scheduled (NAB2 + AMP never were). Consolidated into one serial orchestrator so
+> a single task runs every scraper, fixes drift, and finally gets AMP on a schedule.
+
+- [x] **2026-07-29** — Built `scrapers/run-all.ps1`: one Task Scheduler entry
+  (`FamilyPlanner-BankScrapersDaily`, daily 06:00, Interactive/senseAi-admin —
+  same proven shape as the HSBC task) that runs the scrapers **sequentially**
+  (they share one headed desktop, can't parallelise) with **fault isolation** —
+  a scraper crash pings `/fail` and the run continues to the next bank. **One**
+  up-front 0–90 min jitter for the batch (not five stacked). Order:
+  hsbc → nab1 → nab2 → amp, 45 s gap between. The individual `run-<bank>.ps1`
+  wrappers stay on disk for manual one-off debugging (`-NoJitter`).
+  - **Deployed** to `C:\FamilyPlanner\scrapers\run-all.ps1` (byte-exact via base64 —
+    scp mangled a non-ASCII em-dash inside a string literal and broke the parse;
+    keep transferred PS **ASCII-only inside string literals**).
+  - **Old tasks disabled, not deleted** — `FamilyPlanner-HsbcScraperDaily` +
+    `FamilyPlanner-Nab1ScraperDaily` are **Disabled** as a rollback point until the
+    orchestrator has a few clean nightly runs. Delete them once confident.
+  - **Burn-in verified twice** (throwaway no-jitter interactive task, then removed):
+    run 1 proved sequencing + isolation (nab2 crashed on missing creds, amp still
+    succeeded after it); run 2 proved the nab2 skip guard + clean **exit 0**.
+    HSBC 6/6, NAB1 1/1, AMP balance 183979.7 all written.
+- [~] **NAB2 (Diana's NAB login) — pending credentials.** Vault entry
+  `Family Planner - NAB2` has no username/password yet (it's Diana's account,
+  creds not obtained). The orchestrator **skips** any row whose `vaultEntry` has a
+  blank/absent Password — logs "skipped", **no `/fail`, no red healthcheck**, and
+  doesn't taint the exit code. **When Diana's creds are added to the vault, nab2
+  scrapes automatically with no code change.** (Also enrol NAB2's trusted-device
+  profile on first headed run, same as NAB1 — see UA-NAB.3.)
+- [ ] **routines.md** — updated 2026-07-29 to reflect the single task; the two old
+  per-bank tasks marked Disabled. Delete the disabled tasks + this note when the
+  orchestrator is trusted.
 
 ### v2.4 wrap (deferred until pilot complete)
 
