@@ -30,6 +30,9 @@
         "position": [-432, 0],
         "id": "a2222222-0000-4000-8000-000000000002",
         "name": "Get projects",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
         "credentials": {
           "httpQueryAuth": {
             "id": "9i2uFN81PFlwBaXa",
@@ -107,6 +110,9 @@
         "position": [192, -120],
         "id": "a5555555-0000-4000-8000-000000000005",
         "name": "Write email_queue row",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
         "credentials": {
           "httpQueryAuth": {
             "id": "9i2uFN81PFlwBaXa",
@@ -123,7 +129,8 @@
         "typeVersion": 4.4,
         "position": [416, 0],
         "id": "a6666666-0000-4000-8000-000000000006",
-        "name": "Heartbeat"
+        "name": "Heartbeat",
+        "executeOnce": true
       }
     ],
     "connections": {

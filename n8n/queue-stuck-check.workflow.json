@@ -30,6 +30,9 @@
         "position": [-432, 0],
         "id": "b2222222-0000-4000-8000-000000000002",
         "name": "Get email_queue",
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 5000,
         "credentials": {
           "httpQueryAuth": {
             "id": "9i2uFN81PFlwBaXa",
