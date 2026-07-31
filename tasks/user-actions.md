@@ -173,9 +173,12 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
   - **Deployed** to `C:\FamilyPlanner\scrapers\run-all.ps1` (byte-exact via base64 —
     scp mangled a non-ASCII em-dash inside a string literal and broke the parse;
     keep transferred PS **ASCII-only inside string literals**).
-  - **Old tasks disabled, not deleted** — `FamilyPlanner-HsbcScraperDaily` +
-    `FamilyPlanner-Nab1ScraperDaily` are **Disabled** as a rollback point until the
-    orchestrator has a few clean nightly runs. Delete them once confident.
+  - **Old tasks deleted 2026-07-31.** `FamilyPlanner-HsbcScraperDaily` +
+    `FamilyPlanner-Nab1ScraperDaily` were disabled on 2026-07-29, then removed once
+    the orchestrator proved itself on unattended scheduled runs (07-30 + 07-31 both
+    LastResult 0, all live banks wrote fresh data). `FamilyPlanner-BankScrapersDaily`
+    is now the sole bank-scraper task. The `run-<bank>.ps1` wrappers stay on disk for
+    manual debugging.
   - **Burn-in verified twice** (throwaway no-jitter interactive task, then removed):
     run 1 proved sequencing + isolation (nab2 crashed on missing creds, amp still
     succeeded after it); run 2 proved the nab2 skip guard + clean **exit 0**.
@@ -187,9 +190,8 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
   doesn't taint the exit code. **When Diana's creds are added to the vault, nab2
   scrapes automatically with no code change.** (Also enrol NAB2's trusted-device
   profile on first headed run, same as NAB1 — see UA-NAB.3.)
-- [ ] **routines.md** — updated 2026-07-29 to reflect the single task; the two old
-  per-bank tasks marked Disabled. Delete the disabled tasks + this note when the
-  orchestrator is trusted.
+- [x] **routines.md** — updated to reflect the single orchestrator task; the two old
+  per-bank tasks deleted 2026-07-31 after clean unattended runs.
 
 ### v2.4 wrap (deferred until pilot complete)
 
