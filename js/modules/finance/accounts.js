@@ -30,10 +30,24 @@ export const DEFAULT_ACCOUNTS = {
     ],
 };
 
+const OLD_HSBC_IDS = ['hsbc-ppr', 'hsbc-inv'];
+
+// One-time migration: replace the retired hsbc-ppr/hsbc-inv cards in saved data
+// with the 6 new HSBC banking cards. Idempotent. Other cards + sections untouched.
+export function migrateAccounts(data) {
+    if (!data || !Array.isArray(data.banking)) return data;
+    const firstOld = data.banking.findIndex(a => OLD_HSBC_IDS.includes(a.id));
+    if (firstOld === -1) return data;   // already migrated / never had the old ids
+    const newHsbc = DEFAULT_ACCOUNTS.banking.filter(a => a.id.startsWith('hsbc-ppr-') || a.id.startsWith('hsbc-loan-'));
+    const kept = data.banking.filter(a => !OLD_HSBC_IDS.includes(a.id));
+    kept.splice(firstOld, 0, ...newHsbc.map(a => ({ ...a })));
+    return { ...data, banking: kept };
+}
+
 export function loadAccounts() {
     const saved = localStorage.getItem('accounts_data');
     if (saved) {
-        try { return JSON.parse(saved); } catch (e) {}
+        try { return migrateAccounts(JSON.parse(saved)); } catch (e) {}
     }
     return JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
 }

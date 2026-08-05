@@ -3881,4 +3881,29 @@ test.describe('v2.4 bank-api — auto-populated balances', () => {
         const cranbourne = page.locator('.account-card', { hasText: 'HSBC' }).filter({ hasText: 'Cranbourne' });
         await expect(cranbourne.locator('.account-balance-input')).toHaveValue('$504,580.62');
     });
+
+    test('old saved accounts_data migrates to the new HSBC cards on load', async ({ page }) => {
+        // Seed pre-migration saved data (old hsbc-ppr / hsbc-inv two-card layout).
+        await page.evaluate(() => {
+            localStorage.setItem('accounts_data', JSON.stringify({
+                banking: [
+                    { id: 'hsbc-ppr', bank: 'HSBC', name: 'Mortgage PPR (Redraw)', balance: 163000, type: 'offset' },
+                    { id: 'hsbc-inv', bank: 'HSBC', name: 'Mortgages - Investments', balance: 0, type: 'liability' },
+                    { id: 'nab-family', bank: 'NAB', name: 'Family Credit Card', balance: 0, type: 'liability' },
+                ],
+                investments: [{ id: 'sw', bank: 'Selfwealth', name: 'Stock Holdings (AU & US)', desc: '', balance: 0, type: 'asset' }],
+                super: [{ id: 'amp-brad', bank: 'AMP', name: 'Brad Superannuation', desc: '', balance: 0, type: 'asset' }],
+            }));
+        });
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+
+        // New HSBC cards present; old ones gone; untouched cards preserved.
+        await expect(page.locator('.account-card', { hasText: 'PPR (Carrum' })).toBeVisible();
+        await expect(page.locator('.account-card', { hasText: 'Redraw' })).toBeVisible();
+        await expect(page.locator('.account-card').filter({ hasText: 'HSBC' }).filter({ hasText: 'Home Value' })).toBeVisible();
+        await expect(page.locator('.account-card', { hasText: 'Mortgage PPR (Redraw)' })).toHaveCount(0);
+        await expect(page.locator('.account-card', { hasText: 'Family Credit Card' })).toBeVisible();  // preserved
+    });
 });
