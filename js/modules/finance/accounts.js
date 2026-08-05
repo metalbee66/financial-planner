@@ -264,8 +264,8 @@ export function setupAccountsEditing() {
             saveAccounts(state.accountsData);
             renderAccountsTab(state.accountsData);
 
-            // Sync HSBC PPR balance to budget primary account
-            if (state.accountsData[sec][idx].id === 'hsbc-ppr') {
+            // Sync HSBC PPR redraw (available funds) to the budget planner's primary balance.
+            if (state.accountsData[sec][idx].id === 'hsbc-ppr-redraw') {
                 state.budgetCY.primaryAccountBalance = val;
                 saveBudgetCY(state.budgetCY);
             }
