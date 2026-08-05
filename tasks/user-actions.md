@@ -155,6 +155,39 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [x] **UA-AMP.3 — Verify + deploy ingest. DONE 2026-07-28.** `node amp.mjs` ran headed → wrote `C:\BankScrapes\amp\2026-07-28\amp-super.balance.json` (`balance: 183392.38`, valid shape). Container sees it at `/data/bankscrapes/amp/…` (mount + `NODE_FUNCTION_ALLOW_BUILTIN` already in place from UA-T7). Imported `fpAmpIngest01` via `docker cp` + `import:workflow` — with the **real `FamilyPlanner-AmpIngestCron` ping URL** (`config/healthchecks.json` `amp` key, created UA4) substituted into the Heartbeat node at deploy-time in a temp file (kept out of git; BOM-free write — `Set-Content -Encoding utf8` prepends a BOM that breaks n8n's JSON parse, use `[IO.File]::WriteAllText(..., UTF8Encoding($false))`). Activated (`update:workflow --active=true` + `docker restart`). **Brad triggered it via the n8n UI → confirmed the AMP super balance surfaces in Family Planner.** Full pipeline verified end-to-end.
   - ✅ **AMP scheduling DONE 2026-07-29 — via the orchestrator consolidation below.** `amp.mjs` now runs daily as part of `FamilyPlanner-BankScrapersDaily` (06:00, after HSBC + NAB1). Verified in the burn-in (`balance 183979.7` written). No standalone AMP task was created — see "Scraper orchestrator" below.
 
+### Selfwealth scraper walk-through (balance-only) — DONE 2026-08-05
+
+> Last of the authored-but-unbuilt scaffolds. Built from the `TODO(headed)`
+> skeleton via a headed walk-through on the Geekom (auto-login DOM-dump probe
+> `selfwealth-probe.mjs`). v2.4 pilot pipeline now = HSBC + NAB + AMP + Selfwealth.
+
+- [x] **SW.1 — Creds + device trust.** `Family Planner - Selfwealth` vault entry is
+  populated. Login is email+password; **MFA fired only ONCE** (first enrolment) and
+  the device stayed trusted after. BUT the **login session does not persist** — so,
+  like AMP, `login()` runs **every run** with stored creds (no MFA re-trigger). The
+  password re-entry we saw during probing was only because the probe deliberately
+  doesn't type secrets; the real scraper logs in itself.
+- [x] **SW.2 — Selectors captured 2026-08-05.** Login form ids are **unstable React
+  values** (`«r0»-form-item`) → target `input[name=email]` / `input[name=password]`
+  + the `Login` button by role. Dashboard host = `secure.selfwealth.com.au`
+  (login form is on `onboarding.secure.*` — matched separately). A **promo modal**
+  (`button[aria-label=Close]`) covers the dashboard on load and must be dismissed
+  before reading, else the balance read times out.
+- [x] **SW.3 — Scope: Net Portfolio only (1 balance).** Decided **against** the
+  AUS/US split: both market cards render at once (the AUS/US switcher does NOT change
+  the sidebar figures), and the per-card totals carry **no stable label**, so a split
+  read would be positional/fragile. Read the label-anchored **Net Portfolio** total
+  (`div.f-row.net-portfolio`, AUS+US combined AUD) — right granularity for a
+  slow-moving investment account. Verified end-to-end: `balance 101778.14` written
+  with valid shape, and green **inside the orchestrator** burn-in.
+- [x] **SW.4 — Ingest deployed.** `fpSelfwealthIngest01` imported + activated
+  (real `SelfwealthIngestCron` ping URL substituted BOM-free at deploy; kept out of
+  git). n8n executions confirmed **success** (15-min poll reads the mount → PUT to
+  `bank_inbox/balances/selfwealth`). Added `selfwealth.mjs` to the orchestrator
+  (`run-all.ps1`, runs after amp).
+  - ⏳ **App-side confirm owed** — verify the Selfwealth balance surfaces in
+    Family Planner → Import → Bank inbox (same check you did for AMP).
+
 ### Scraper orchestrator — consolidation DONE 2026-07-29
 
 > The five per-bank `run-<bank>.ps1` wrappers were copy-paste clones, each meant
