@@ -46,8 +46,7 @@ export function loadAccounts() {
 // so an unconfirmed slug is surfaced, never silently dropped.
 const SLUG_TO_ACCOUNT_ID = {
     'amp-super': 'amp-brad',            // TODO confirm: pilot AMP account = Brad's super?
-    // 'selfwealth-account-1': 'sw',    // TODO confirm — one 'sw' card today
-    // 'selfwealth-account-2': '???',   // TODO no second Selfwealth card exists yet
+    'selfwealth': 'sw',                 // Selfwealth Net Portfolio → 'Stock Holdings (AU & US)' (confirmed 2026-08-05)
 };
 
 const STALE_MS = 48 * 60 * 60 * 1000;  // auto balance older than 48h → stale warning

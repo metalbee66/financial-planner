@@ -3787,6 +3787,24 @@ test.describe('v2.4 bank-api — auto-populated balances', () => {
         await expect(ampCard.locator('.account-balance-input')).toHaveValue('$85,400.00');
     });
 
+    test('the selfwealth balance maps to the Stock Holdings (AU & US) card', async ({ page }) => {
+        const recentIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();  // 2h ago
+        await seedBalances(page, [
+            { accountSlug: 'selfwealth', balance: 101778.14, asOf: recentIso, institution: 'Selfwealth', category: 'investment' },
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+
+        // selfwealth maps to the 'sw' card (SLUG_TO_ACCOUNT_ID) — the balance fills
+        // that existing card, NOT an unmatched auto-only row.
+        const swCard = page.locator('.account-card', { hasText: 'Stock Holdings (AU & US)' });
+        await expect(swCard.locator('.account-auto-tag')).toBeVisible();
+        await expect(swCard.locator('.account-balance-input')).toHaveValue('$101,778.14');
+        // And it should NOT also appear as an unmatched auto-only row.
+        await expect(page.locator('.account-card-auto', { hasText: 'selfwealth' })).toHaveCount(0);
+    });
+
     test('a stale (>48h) auto balance gets a stale warning', async ({ page }) => {
         const oldIso = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();  // 3d ago
         await seedBalances(page, [
