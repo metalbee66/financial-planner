@@ -8,8 +8,12 @@ import { state } from '../../state.js';
 
 export const DEFAULT_ACCOUNTS = {
     banking: [
-        { id: 'hsbc-ppr', bank: 'HSBC', name: 'Mortgage PPR (Redraw)', desc: 'Primary family account. Available redraw offsets home loan.', balance: 161606.99, type: 'offset' },
-        { id: 'hsbc-inv', bank: 'HSBC', name: 'Mortgages - Investments', desc: '4 mortgage accounts: Cranbourne, Mentone, Cranbourne 2, Stock Assets.', balance: 0, type: 'liability' },
+        { id: 'hsbc-ppr-loan', bank: 'HSBC', name: 'Loan — PPR (Carrum Downs)', desc: 'Primary home loan — outstanding balance.', balance: 0, type: 'liability' },
+        { id: 'hsbc-ppr-redraw', bank: 'HSBC', name: 'Redraw — PPR', desc: 'Available redraw (paid ahead of schedule).', balance: 163000, type: 'asset' },
+        { id: 'hsbc-loan-cranbourne', bank: 'HSBC', name: 'Loan — Cranbourne', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
+        { id: 'hsbc-loan-mentone', bank: 'HSBC', name: 'Loan — Mentone', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
+        { id: 'hsbc-loan-stock-assets', bank: 'HSBC', name: 'Loan — Stock Assets', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
+        { id: 'hsbc-loan-home-value', bank: 'HSBC', name: 'Loan — Home Value', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
         { id: 'nab-family', bank: 'NAB', name: 'Family Credit Card', desc: 'Used to pay most budget items.', balance: 0, type: 'liability' },
         { id: 'nab-business', bank: 'NAB', name: 'Business Credit Card', desc: 'Business expenses only.', balance: 0, type: 'liability' },
         { id: 'anz', bank: 'ANZ', name: 'Rental Income - Cranbourne', desc: 'Tenant pays rent into this account.', balance: 0, type: 'asset' },
@@ -47,6 +51,14 @@ export function loadAccounts() {
 const SLUG_TO_ACCOUNT_ID = {
     'amp-super': 'amp-brad',            // TODO confirm: pilot AMP account = Brad's super?
     'selfwealth': 'sw',                 // Selfwealth Net Portfolio → 'Stock Holdings (AU & US)' (confirmed 2026-08-05)
+    'hsbc-ppr-loan': 'hsbc-ppr-loan',
+    'hsbc-ppr-redraw': 'hsbc-ppr-redraw',
+    'hsbc-loan-cranbourne': 'hsbc-loan-cranbourne',
+    'hsbc-loan-mentone': 'hsbc-loan-mentone',
+    'hsbc-loan-stock-assets': 'hsbc-loan-stock-assets',
+    'hsbc-loan-home-value': 'hsbc-loan-home-value',
+    'nab-family': 'nab-family',
+    'nab-business': 'nab-business',
 };
 
 const STALE_MS = 48 * 60 * 60 * 1000;  // auto balance older than 48h → stale warning

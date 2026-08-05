@@ -3857,4 +3857,28 @@ test.describe('v2.4 bank-api — auto-populated balances', () => {
         await gotoAccounts(page);
         await expect(page.locator('.account-card', { hasText: 'Brad Superannuation' }).locator('.account-balance-input')).toHaveValue('$90,000.00');
     });
+
+    test('HSBC loan balances land on their liability cards as positive owed', async ({ page }) => {
+        const recentIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+        await seedBalances(page, [
+            // scraper writes positive-owed (already negated from the CSV's -318,745)
+            { accountSlug: 'hsbc-ppr-loan', balance: 318745.72, asOf: recentIso, institution: 'HSBC', category: 'banking' },
+            { accountSlug: 'hsbc-loan-cranbourne', balance: 504580.62, asOf: recentIso, institution: 'HSBC', category: 'banking' },
+        ]);
+        await page.reload();
+        await page.waitForSelector('#module-host', { state: 'attached' });
+        await gotoAccounts(page);
+
+        // Match by ASCII substrings that avoid the card name's em-dash (matcher robustness).
+        const pprLoan = page.locator('.account-card', { hasText: 'PPR (Carrum' });
+        await expect(pprLoan.locator('.account-auto-tag')).toBeVisible();
+        await expect(pprLoan.locator('.account-balance-input')).toHaveValue('$318,745.72');
+        // liability > 0 → negative color class
+        await expect(pprLoan.locator('.account-balance-input')).toHaveClass(/negative/);
+
+        // Filter on both 'HSBC' and 'Cranbourne' — the pre-existing ANZ rental
+        // card is also named "...Cranbourne", so 'Cranbourne' alone is ambiguous.
+        const cranbourne = page.locator('.account-card', { hasText: 'HSBC' }).filter({ hasText: 'Cranbourne' });
+        await expect(cranbourne.locator('.account-balance-input')).toHaveValue('$504,580.62');
+    });
 });
