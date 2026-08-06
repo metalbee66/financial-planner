@@ -155,6 +155,31 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [x] **UA-AMP.3 — Verify + deploy ingest. DONE 2026-07-28.** `node amp.mjs` ran headed → wrote `C:\BankScrapes\amp\2026-07-28\amp-super.balance.json` (`balance: 183392.38`, valid shape). Container sees it at `/data/bankscrapes/amp/…` (mount + `NODE_FUNCTION_ALLOW_BUILTIN` already in place from UA-T7). Imported `fpAmpIngest01` via `docker cp` + `import:workflow` — with the **real `FamilyPlanner-AmpIngestCron` ping URL** (`config/healthchecks.json` `amp` key, created UA4) substituted into the Heartbeat node at deploy-time in a temp file (kept out of git; BOM-free write — `Set-Content -Encoding utf8` prepends a BOM that breaks n8n's JSON parse, use `[IO.File]::WriteAllText(..., UTF8Encoding($false))`). Activated (`update:workflow --active=true` + `docker restart`). **Brad triggered it via the n8n UI → confirmed the AMP super balance surfaces in Family Planner.** Full pipeline verified end-to-end.
   - ✅ **AMP scheduling DONE 2026-07-29 — via the orchestrator consolidation below.** `amp.mjs` now runs daily as part of `FamilyPlanner-BankScrapersDaily` (06:00, after HSBC + NAB1). Verified in the burn-in (`balance 183979.7` written). No standalone AMP task was created — see "Scraper orchestrator" below.
 
+### Derived account balances + HSBC card restructure — DONE 2026-08-06 (v2.5)
+
+> Account cards now auto-fill from balances **derived from the last transaction row**
+> of the HSBC/NAB CSVs (data already downloaded — no new scraping for loan/CC figures).
+> HSBC PPR split into separate loan + redraw cards. Built subagent-driven from a spec +
+> plan (`docs/superpowers/specs|plans/2026-08-05-derived-account-balances*`).
+
+- [x] **Derivation** (`scrapers/lib/derive-balance.js` + hsbc.mjs/nab.mjs) — balance from
+  the max-date CSV row (position-independent), `asOf` = the transaction date, liabilities
+  sign-flipped to positive-owed. NAB slug keyed per-`(login, account)`.
+- [x] **HSBC = 6 cards** — Loan PPR (Carrum Downs), Redraw PPR, + 4 investment loans
+  (Cranbourne/Mentone/Stock Assets/Home Value). `everyday` = no card. Old
+  hsbc-ppr/hsbc-inv cards replaced; saved data auto-migrated on load (`migrateAccounts`).
+  Budget-planner `primaryAccountBalance` sync repointed to the redraw card.
+- [x] **Redraw scraped via a11y tree** — HSBC renders balances in a shadow DOM (like NAB);
+  `readRedraw()` reads the "Available balance" via `getByText` (pierces shadow DOM), folded
+  into the existing account loop on the Carrum Downs page. `hsbc-redraw-probe.mjs` = the
+  a11y discovery tool.
+- [x] **Verified end-to-end 2026-08-06** — real run wrote hsbc-ppr-loan=$317,245.72,
+  hsbc-ppr-redraw=$164,746.97, 4 investment loans, nab-family=$1,101.28 (all correct
+  shape/sign). Full e2e 195 passed. Deployed live (scrapers→Geekom byte-exact, app→Pages).
+  - ⏳ **App-side confirm owed** — hard-refresh Accounts → Banking; the HSBC loan + redraw +
+    NAB Family CC cards should fill in as the ingest polls (8h). NAB2 (Diana's Business CC)
+    stays blank until her vault creds land.
+
 ### Selfwealth scraper walk-through (balance-only) — DONE 2026-08-05
 
 > Last of the authored-but-unbuilt scaffolds. Built from the `TODO(headed)`
