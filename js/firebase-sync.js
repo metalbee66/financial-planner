@@ -13,7 +13,7 @@
 
 import { FIREBASE_CONFIG, ALLOWED_EMAILS } from './firebase-config.js';
 import { migrateOutgoing, migrateWeekActuals, DEFAULT_CY, DEFAULT_NY, DEFAULT_BANK_INBOX, sanitiseBankInbox } from './data.js';
-import { DEFAULT_ACCOUNTS } from './modules/finance/accounts.js';
+import { DEFAULT_ACCOUNTS, migrateAccounts } from './modules/finance/accounts.js';
 // v2.0.2: DEFAULT_PM import removed; firebase-sync no longer reads or writes
 // the legacy `pm_dlbooks` key.
 import { DEFAULT_PROJECTS, sanitiseProject, sanitiseTask } from './modules/projects/data.js';
@@ -247,7 +247,7 @@ export function setupRealtimeListeners() {
 
     fbListen('accounts_data', (data) => {
         if (data && data.banking) {
-            state.accountsData = data;
+            state.accountsData = migrateAccounts(data);
             if (renderAccountsTab) renderAccountsTab(state.accountsData);
         }
     });
@@ -333,7 +333,14 @@ export async function initialSync() {
         if (fbWA) state.weekActuals = migrateWeekActuals(fbWA);
 
         const fbAcct = await fbLoad('accounts_data');
-        if (fbAcct && fbAcct.banking) state.accountsData = fbAcct;
+        if (fbAcct && fbAcct.banking) {
+            const migrated = migrateAccounts(fbAcct);
+            state.accountsData = migrated;
+            // migrateAccounts returns the same ref when nothing changed; a new object
+            // when it rewrote old cards. Persist the one-time upgrade back to Firebase
+            // so it's permanent and reaches other devices (idempotent thereafter).
+            if (migrated !== fbAcct) fbSave('accounts_data', migrated);
+        }
 
         const fbGl = await fbLoad('gl_mappings');
         if (fbGl && typeof fbGl === 'object' && !Array.isArray(fbGl)) state.glMappings = fbGl;
