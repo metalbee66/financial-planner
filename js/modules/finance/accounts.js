@@ -9,7 +9,7 @@ import { state } from '../../state.js';
 export const DEFAULT_ACCOUNTS = {
     banking: [
         { id: 'hsbc-ppr-loan', bank: 'HSBC', name: 'Loan — PPR (Carrum Downs)', desc: 'Primary home loan — outstanding balance.', balance: 0, type: 'liability' },
-        { id: 'hsbc-ppr-redraw', bank: 'HSBC', name: 'Redraw — PPR', desc: 'Available redraw (paid ahead of schedule).', balance: 163000, type: 'asset' },
+        { id: 'hsbc-ppr-redraw', bank: 'HSBC', name: 'Redraw — PPR', desc: 'Available redraw (paid ahead of schedule).', balance: 0, type: 'asset' },
         { id: 'hsbc-loan-cranbourne', bank: 'HSBC', name: 'Loan — Cranbourne', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
         { id: 'hsbc-loan-mentone', bank: 'HSBC', name: 'Loan — Mentone', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
         { id: 'hsbc-loan-stock-assets', bank: 'HSBC', name: 'Loan — Stock Assets', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
