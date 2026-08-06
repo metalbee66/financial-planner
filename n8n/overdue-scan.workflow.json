@@ -122,7 +122,7 @@
       },
       {
         "parameters": {
-          "url": "https://hc-ping.com/REPLACE-WITH-OverdueScanCron-UUID",
+          "url": "https://hc-ping.com/REPLACE-WITH-FamilyPlanner-Mail-UUID",
           "options": {}
         },
         "type": "n8n-nodes-base.httpRequest",

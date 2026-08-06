@@ -74,7 +74,7 @@
       },
       {
         "parameters": {
-          "url": "https://hc-ping.com/REPLACE-WITH-QueueStuckCheck-UUID",
+          "url": "https://hc-ping.com/REPLACE-WITH-FamilyPlanner-Mail-UUID",
           "options": {}
         },
         "type": "n8n-nodes-base.httpRequest",
@@ -85,7 +85,7 @@
       },
       {
         "parameters": {
-          "url": "https://hc-ping.com/REPLACE-WITH-QueueStuckCheck-UUID/fail",
+          "url": "https://hc-ping.com/REPLACE-WITH-FamilyPlanner-Mail-UUID/fail",
           "options": {}
         },
         "type": "n8n-nodes-base.httpRequest",

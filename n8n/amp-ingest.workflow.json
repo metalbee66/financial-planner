@@ -100,7 +100,7 @@
       },
       {
         "parameters": {
-          "url": "https://hc-ping.com/REPLACE-WITH-AmpIngestCron-UUID",
+          "url": "https://hc-ping.com/REPLACE-WITH-FamilyPlanner-BalanceIngest-UUID",
           "options": {}
         },
         "type": "n8n-nodes-base.httpRequest",
