@@ -16,8 +16,8 @@ export const DEFAULT_ACCOUNTS = {
         { id: 'hsbc-loan-home-value', bank: 'HSBC', name: 'Loan — Home Value', desc: 'Investment mortgage.', balance: 0, type: 'liability' },
         { id: 'nab-family', bank: 'NAB', name: 'Family Credit Card', desc: 'Used to pay most budget items.', balance: 0, type: 'liability' },
         { id: 'nab-business', bank: 'NAB', name: 'Business Credit Card', desc: 'Business expenses only.', balance: 0, type: 'liability' },
-        { id: 'anz', bank: 'ANZ', name: 'Rental Income - Cranbourne', desc: 'Tenant pays rent into this account.', balance: 0, type: 'asset' },
-        { id: 'westpac', bank: 'Westpac', name: 'Brad Personal / Rental - Mentone', desc: 'Personal account. Tenant pays rent here.', balance: 0, type: 'asset' },
+        { id: 'anz', bank: 'ANZ', name: 'Rental Income - Mentone', desc: 'Mentone tenant pays rent into this account.', balance: 0, type: 'asset' },
+        { id: 'westpac', bank: 'Westpac', name: 'Brad Personal', desc: 'Personal account.', balance: 0, type: 'asset' },
         { id: 'bankwest', bank: 'Bankwest', name: 'Diana Personal', desc: "Diana's personal account.", balance: 0, type: 'asset' },
     ],
     investments: [
@@ -32,16 +32,38 @@ export const DEFAULT_ACCOUNTS = {
 
 const OLD_HSBC_IDS = ['hsbc-ppr', 'hsbc-inv'];
 
-// One-time migration: replace the retired hsbc-ppr/hsbc-inv cards in saved data
-// with the 6 new HSBC banking cards. Idempotent. Other cards + sections untouched.
+// anz/westpac were seeded with Cranbourne/Mentone swapped: ANZ actually receives
+// Mentone rent, and Westpac is Brad's personal account (the Cranbourne tenant pays
+// there but it auto-forwards to HSBC, so it's not a resting rental balance). This
+// relabel only fires on cards STILL holding the exact old wrong strings, so a card
+// the user has since renamed is left untouched. Balances + all other fields kept.
+const ACCOUNT_RELABELS = {
+    anz:     { oldName: 'Rental Income - Cranbourne',       name: 'Rental Income - Mentone', desc: 'Mentone tenant pays rent into this account.' },
+    westpac: { oldName: 'Brad Personal / Rental - Mentone', name: 'Brad Personal',           desc: 'Personal account.' },
+};
+
+// One-time migrations on saved data. Idempotent. Other cards + sections untouched.
+// (1) Replace the retired hsbc-ppr/hsbc-inv cards with the 6 new HSBC banking cards.
+// (2) Correct the swapped anz/westpac labels (see ACCOUNT_RELABELS).
 export function migrateAccounts(data) {
     if (!data || !Array.isArray(data.banking)) return data;
-    const firstOld = data.banking.findIndex(a => OLD_HSBC_IDS.includes(a.id));
-    if (firstOld === -1) return data;   // already migrated / never had the old ids
-    const newHsbc = DEFAULT_ACCOUNTS.banking.filter(a => a.id.startsWith('hsbc-ppr-') || a.id.startsWith('hsbc-loan-'));
-    const kept = data.banking.filter(a => !OLD_HSBC_IDS.includes(a.id));
-    kept.splice(firstOld, 0, ...newHsbc.map(a => ({ ...a })));
-    return { ...data, banking: kept };
+
+    let banking = data.banking;
+
+    const firstOld = banking.findIndex(a => OLD_HSBC_IDS.includes(a.id));
+    if (firstOld !== -1) {
+        const newHsbc = DEFAULT_ACCOUNTS.banking.filter(a => a.id.startsWith('hsbc-ppr-') || a.id.startsWith('hsbc-loan-'));
+        const kept = banking.filter(a => !OLD_HSBC_IDS.includes(a.id));
+        kept.splice(firstOld, 0, ...newHsbc.map(a => ({ ...a })));
+        banking = kept;
+    }
+
+    banking = banking.map(a => {
+        const r = ACCOUNT_RELABELS[a.id];
+        return (r && a.name === r.oldName) ? { ...a, name: r.name, desc: r.desc } : a;
+    });
+
+    return { ...data, banking };
 }
 
 export function loadAccounts() {
