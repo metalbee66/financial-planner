@@ -251,6 +251,27 @@ Manual ops Brad needs to do that aren't code changes. I (Claude) maintained this
 - [x] **routines.md** — updated to reflect the single orchestrator task; the two old
   per-bank tasks deleted 2026-07-31 after clean unattended runs.
 
+### Healthchecks.io consolidation — 13 FP checks → 4 (2026-08-06)
+
+> Brad hit the healthchecks.io **free-tier 20-check cap** (couldn't add the new
+> balance-ingest check). Rationalised: monitor OUTCOMES not per-node. FP folded to
+> 4 shared checks. **Supersedes the per-check entries UA4 + UA-NAB.4 above** (those
+> individual checks were deleted). See `project_healthcheck_consolidation_4checks`
+> memory + routines.md for the full mapping + the Mail-merge tradeoff.
+
+- [x] **Manual (Brad, 2026-08-06):** on healthchecks.io deleted 11 FP checks
+  (`{InstantDrainer,DailyDigest,OverdueScan,QueueStuck,HsbcIngest,NabIngest,AmpIngest,SelfwealthIngest}Cron`
+  + the 5 per-bank scraper checks incl. the dead `Nab2ScraperCron`) and created 4 new:
+  `FamilyPlanner-TxIngest` (8h/2h), `-BalanceIngest` (8h/2h), `-Mail` (1h/1h),
+  `-Scrapers` (1d/3h). Pasted the 4 ping URLs.
+- [x] **Deployed (2026-08-06):** 9 n8n workflows repointed to the 3 shared ingest/mail
+  URLs (imported, reactivated, restarted — all 9 `active`); `run-all.ps1` + config
+  repointed to the aggregate scrapers URL (byte-exact, parses on box). All 4 checks
+  verified receiving pings. Now **13/20** (7 slots free). Commits app `bbe00d5`, scrapers `f65f24a`.
+- [ ] **Confirm green:** the 4 checks should all show green on healthchecks.io after
+  the next scheduled fires (ingests 8h, mail 1h, scrapers tonight's 06:00 batch).
+  Manual box-ping already confirmed each URL is valid + receiving.
+
 ### v2.4 wrap (deferred until pilot complete)
 
 - [x] **2026-06-05** — **Version-control for `scrapers/` RESOLVED: option (a), own private repo `metalbee66/family-planner-scrapers`.** `.gitignore` excludes screenshots/CSVs/node_modules (no bank data or secrets committed). Deploy to the Geekom stays via `scp`. **New manual follow-up:** auto-logon is enabled on the Geekom for senseai-admin (Sysinternals Autologon) — confirm it survives a reboot whenever the box is next bounced (doesn't affect SenseAi services).
