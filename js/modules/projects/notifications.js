@@ -133,6 +133,20 @@ function actorLabel(by) {
 }
 
 /**
+ * Project-level mute. `on-hold` / `cancelled` are the two non-derivable
+ * statuses (see isNonDerivableStatus) — they only ever appear because a user
+ * explicitly set them, so they're a reliable "not being worked on" signal.
+ *
+ * This is a LIVE GATE, deliberately not a rewrite of each task's
+ * `notificationsOff`: putting a project on hold and taking it off again must
+ * not clobber per-task mutes the user set by hand.
+ */
+export function projectNotificationsMuted(project) {
+    if (!project) return false;
+    return project.status === 'on-hold' || project.status === 'cancelled';
+}
+
+/**
  * Map one trigger event + context to a notification for `user`, or null.
  *
  * - event: { kind, by, at, before?, after? }
@@ -147,6 +161,11 @@ function actorLabel(by) {
  */
 export function eventToNotification(event, task, project, user) {
     if (!event || !task || !project || !user) return null;
+    // Per-task mute: `notificationsOff` silences every kind for this task,
+    // bell and email alike. Absent/false means notify as normal, so existing
+    // tasks need no migration.
+    if (task.notificationsOff === true) return null;
+    if (projectNotificationsMuted(project)) return null;
     if (isSelfAction(event, user)) return null;
 
     const participants = Array.isArray(project.participants) ? project.participants : [];
@@ -366,7 +385,7 @@ export function computeTimeBasedTriggers(tasks, todayIso) {
     const out = [];
     for (const t of tasks) {
         if (!t || !t.dueDate || readAssignees(t).length === 0) continue;
-        if (t.status === 'done') continue;
+        if (t.status === 'done' || t.notificationsOff === true) continue;
         const dueMs = Date.parse(t.dueDate);
         if (Number.isNaN(dueMs)) continue;
         if (dueMs < todayMs) {

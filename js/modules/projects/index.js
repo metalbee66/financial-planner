@@ -124,6 +124,7 @@ import {
     getQueueEntriesForAdmin,
     retryQueueEntry,
     clearSentOlderThan,
+    projectNotificationsMuted,
 } from './notifications.js';
 
 const STATUS_LABELS = {
@@ -2392,6 +2393,16 @@ function renderTaskPanel(t) {
                     <span>Mark as milestone</span>
                 </label>
             </div>
+            <div class="form-row">
+                <label class="task-panel-milestone-toggle">
+                    <input type="checkbox" id="tp-notify"${t.notificationsOff ? '' : ' checked'} />
+                    <span aria-hidden="true">🔔</span>
+                    <span>Send notifications for this task</span>
+                </label>
+                ${projectNotificationsMuted(project)
+                    ? `<p class="task-panel-notify-hint">Paused — ${escapeHtml(projectName)} is ${escapeHtml(project.status === 'cancelled' ? 'cancelled' : 'on hold')}. This setting applies again when the project is active.</p>`
+                    : ''}
+            </div>
             <div class="form-error" id="tp-error" role="alert" aria-live="polite"></div>
             <div class="task-panel-deps" id="tp-deps-section">
                 <div class="task-panel-deps-head">
@@ -3018,6 +3029,7 @@ function onTaskPanelSave(orig) {
         dueDate: panel.querySelector('#tp-due').value || null,
         description: panel.querySelector('#tp-desc').value,
         isMilestone: panel.querySelector('#tp-milestone').checked,
+        notificationsOff: !panel.querySelector('#tp-notify').checked,
     };
     const merged = { ...orig, ...patch };
     const err = validateTask(merged);

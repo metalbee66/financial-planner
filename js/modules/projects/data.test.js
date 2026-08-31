@@ -94,6 +94,7 @@ import {
     candidateRecipientsForEvent,
     deriveDependencyUnblockedTriggers,
     computeTimeBasedTriggers,
+    projectNotificationsMuted,
     addNotificationToBucket,
     processTrigger,
     createDefaultPrefs,
@@ -2743,6 +2744,58 @@ test('deriveDependencyUnblockedTriggers ignores transitions that were already do
     // before === 'done' → not a transition into done.
     const evt = { kind: 'status_changed', by: 'metalbee66@gmail.com', at: 'now', before: 'done', after: 'done' };
     eq(deriveDependencyUnblockedTriggers(evt, a, [a, b]).length, 0);
+});
+
+// ── per-task + per-project notification mute ──
+
+test('notificationsOff on a task mutes every notification kind', () => {
+    const p = mkProjectLit();
+    const muted = mkTask({ id: 't1', projectId: 'pid', assignees: ['diana'], notificationsOff: true, isMilestone: true });
+    const kinds = [
+        mkEvent({ kind: 'assignee_changed', after: ['diana'] }),
+        mkEvent({ kind: 'comment_added' }),
+        mkEvent({ kind: 'dependency_unblocked' }),
+        mkEvent({ kind: 'task_due_soon' }),
+        mkEvent({ kind: 'task_overdue' }),
+        mkEvent({ kind: 'status_changed', before: 'in-progress', after: 'done' }),
+    ];
+    for (const ev of kinds) {
+        eq(eventToNotification(ev, muted, p, 'diana'), null);
+    }
+});
+
+test('an unmuted task still notifies (mute default is off)', () => {
+    const p = mkProjectLit();
+    const t = mkTask({ id: 't1', projectId: 'pid', assignees: ['diana'] });
+    truthy(eventToNotification(mkEvent({ kind: 'comment_added' }), t, p, 'diana'), 'unmuted task notifies');
+});
+
+test('computeTimeBasedTriggers skips muted tasks', () => {
+    const today = '2026-05-15';
+    const normal = mkTask({ id: 'a', assignees: ['brad'], dueDate: '2026-05-01' });
+    const muted = mkTask({ id: 'b', assignees: ['brad'], dueDate: '2026-05-01', notificationsOff: true });
+    const out = computeTimeBasedTriggers([normal, muted], today);
+    eq(out.length, 1);
+    eq(out[0].task.id, 'a');
+});
+
+test('projectNotificationsMuted covers on-hold and cancelled only', () => {
+    eq(projectNotificationsMuted(mkProjectLit({ status: 'on-hold' })), true);
+    eq(projectNotificationsMuted(mkProjectLit({ status: 'cancelled' })), true);
+    eq(projectNotificationsMuted(mkProjectLit({ status: 'active' })), false);
+    eq(projectNotificationsMuted(mkProjectLit({ status: 'planning' })), false);
+    eq(projectNotificationsMuted(mkProjectLit({ status: 'completed' })), false);
+    eq(projectNotificationsMuted(null), false);
+});
+
+test('an on-hold project mutes its tasks without touching their own flag', () => {
+    const t = mkTask({ id: 't1', projectId: 'pid', assignees: ['diana'] });
+    const ev = mkEvent({ kind: 'comment_added' });
+    // On hold -> silent, even though the task itself is not muted.
+    eq(eventToNotification(ev, t, mkProjectLit({ status: 'on-hold' }), 'diana'), null);
+    eq(t.notificationsOff, false, 'the live gate must not rewrite the task flag');
+    // Back to active -> notifies again.
+    truthy(eventToNotification(ev, t, mkProjectLit({ status: 'active' }), 'diana'), 'active project notifies again');
 });
 
 // ── computeTimeBasedTriggers ──

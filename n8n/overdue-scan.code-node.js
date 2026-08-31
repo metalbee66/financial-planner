@@ -98,7 +98,7 @@ function shouldAccumulateDigest(prefs, kind) {
  * task. overdue (dueDate < today) wins over due-soon (today ≤ due ≤ today+1).
  * Skips done / unassigned / dateless / unparseable-date tasks.
  */
-function computeTimeBasedTriggers(tasks, todayIso) {
+function computeTimeBasedTriggers(tasks, todayIso, mutedProjects) {
     if (!Array.isArray(tasks) || !todayIso) return [];
     const todayMs = Date.parse(todayIso);
     if (Number.isNaN(todayMs)) return [];
@@ -106,7 +106,10 @@ function computeTimeBasedTriggers(tasks, todayIso) {
     const out = [];
     for (const t of tasks) {
         if (!t || !t.dueDate || readAssignees(t).length === 0) continue;
-        if (t.status === 'done') continue;
+        // Mirror of the client gate: a task muted via `notificationsOff`
+        // produces no triggers at all (no email, no digest).
+        if (t.status === 'done' || t.notificationsOff === true) continue;
+        if (mutedProjects && mutedProjects.has(t.projectId)) continue;
         const dueMs = Date.parse(t.dueDate);
         if (Number.isNaN(dueMs)) continue;
         if (dueMs < todayMs) {
@@ -114,6 +117,20 @@ function computeTimeBasedTriggers(tasks, todayIso) {
         } else if (dueMs <= tomorrowMs) {
             out.push({ kind: 'task_due_soon', task: t });
         }
+    }
+    return out;
+}
+
+/**
+ * Mirror of projectNotificationsMuted: `on-hold` / `cancelled` projects are
+ * silent. Live gate only — task `notificationsOff` flags are left untouched.
+ * Projects live at `blob.items` in the same Firebase blob as the tasks.
+ */
+function mutedProjectIds(blob) {
+    const items = (blob && Array.isArray(blob.items)) ? blob.items : [];
+    const out = new Set();
+    for (const p of items) {
+        if (p && p.id && (p.status === 'on-hold' || p.status === 'cancelled')) out.add(p.id);
     }
     return out;
 }
@@ -190,7 +207,7 @@ function buildDigestEntryForTask(kind, task, seq) {
 function scanBlob(blob, todayIso, baseUrl) {
     const tasks = (blob && Array.isArray(blob.tasks)) ? blob.tasks : [];
     const prefsMap = (blob && blob.prefs && typeof blob.prefs === 'object') ? blob.prefs : {};
-    const triggers = computeTimeBasedTriggers(tasks, todayIso);
+    const triggers = computeTimeBasedTriggers(tasks, todayIso, mutedProjectIds(blob));
 
     const emailRows = [];
     const digestAppends = [];
@@ -329,6 +346,58 @@ function runSelfCheck() {
         };
         const r = scanBlob(blob, TODAY);
         eq(r.stats, { triggers: 1, emails: 0, digests: 0 }, '5: per-kind off mutes overdue');
+    }
+
+    // 5b. task-level notificationsOff → no trigger at all (mute at source,
+    // so unlike the prefs cases above this yields triggers: 0).
+    {
+        const blob = {
+            tasks: [{ id: 't5b', name: 'Z', status: 'not-started', assignees: ['brad'],
+                      dueDate: '2026-06-01', notificationsOff: true }],
+            prefs: {},
+        };
+        const r = scanBlob(blob, TODAY);
+        eq(r.stats, { triggers: 0, emails: 0, digests: 0 }, '5b: task mute suppresses trigger');
+    }
+
+    // 5c. on-hold / cancelled project → its tasks are silent; an active
+    // project in the same blob still notifies.
+    {
+        const blob = {
+            items: [
+                { id: 'ph', name: 'Held', status: 'on-hold' },
+                { id: 'pc', name: 'Cancelled', status: 'cancelled' },
+                { id: 'pa', name: 'Active', status: 'active' },
+            ],
+            tasks: [
+                { id: 'h1', name: 'H', status: 'not-started', assignees: ['brad'], dueDate: '2026-06-01', projectId: 'ph' },
+                { id: 'c1', name: 'C', status: 'not-started', assignees: ['brad'], dueDate: '2026-06-01', projectId: 'pc' },
+                { id: 'a1', name: 'A', status: 'not-started', assignees: ['brad'], dueDate: '2026-06-01', projectId: 'pa' },
+            ],
+            prefs: {},
+        };
+        const r = scanBlob(blob, TODAY);
+        eq(r.stats, { triggers: 1, emails: 1, digests: 0 }, '5c: only the active project notifies');
+        eq(r.emailRows[0].taskId, 'a1', '5c: the surviving trigger is the active-project task');
+    }
+
+    // 5d. Un-holding restores the previous state: the same blob with the
+    // project flipped to active notifies again, and a task the user muted by
+    // hand STAYS muted (the hold is a live gate, not a rewrite).
+    {
+        const mk = (projStatus) => ({
+            items: [{ id: 'p9', name: 'P', status: projStatus }],
+            tasks: [
+                { id: 'k1', name: 'kept', status: 'not-started', assignees: ['brad'], dueDate: '2026-06-01', projectId: 'p9' },
+                { id: 'k2', name: 'user-muted', status: 'not-started', assignees: ['brad'], dueDate: '2026-06-01', projectId: 'p9', notificationsOff: true },
+            ],
+            prefs: {},
+        });
+        const held = scanBlob(mk('on-hold'), TODAY);
+        eq(held.stats, { triggers: 0, emails: 0, digests: 0 }, '5d: on hold → fully silent');
+        const active = scanBlob(mk('active'), TODAY);
+        eq(active.stats, { triggers: 1, emails: 1, digests: 0 }, '5d: un-held → notifies again');
+        eq(active.emailRows[0].taskId, 'k1', '5d: hand-muted task stays muted after un-hold');
     }
 
     // 6. done / unassigned / dateless / due-later → no triggers.

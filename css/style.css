@@ -2807,6 +2807,11 @@ select.editable { width: 100px; cursor: pointer; }
     height: 16px;
     accent-color: var(--accent);
 }
+.task-panel-notify-hint {
+    margin: 6px 0 0 24px;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+}
 .task-panel-assignees-checkboxes {
     display: flex;
     flex-wrap: wrap;
