@@ -17,6 +17,7 @@ import { DEFAULT_ACCOUNTS, migrateAccounts } from './modules/finance/accounts.js
 // v2.0.2: DEFAULT_PM import removed; firebase-sync no longer reads or writes
 // the legacy `pm_dlbooks` key.
 import { DEFAULT_PROJECTS, sanitiseProject, sanitiseTask } from './modules/projects/data.js';
+import { DEFAULT_DETAILS, sanitiseDetails } from './modules/details/data.js';
 import { state } from './state.js';
 
 let firebaseApp = null;
@@ -34,6 +35,7 @@ let renderAccountsTab = null;
 let renderProjectsTab = null;
 let renderEmailQueueAdmin = null;
 let renderBankInbox = null;
+let renderDetailsTab = null;
 
 export function registerRenderHooks(hooks) {
     renderBudgetTab = hooks.renderBudgetTab;
@@ -41,6 +43,7 @@ export function registerRenderHooks(hooks) {
     renderProjectsTab = hooks.renderProjectsTab;
     renderEmailQueueAdmin = hooks.renderEmailQueueAdmin;
     renderBankInbox = hooks.renderBankInbox;
+    renderDetailsTab = hooks.renderDetailsTab;
 }
 
 function isFirebaseConfigured() {
@@ -310,6 +313,14 @@ export function setupRealtimeListeners() {
             if (renderProjectsTab) renderProjectsTab();
         }
     });
+
+    fbListen('details', (data) => {
+        if (data && Array.isArray(data.sections)) {
+            state.detailsData = sanitiseDetails(data);
+            localStorage.setItem('details', JSON.stringify(state.detailsData));
+            if (renderDetailsTab) renderDetailsTab();
+        }
+    });
 }
 
 /** Initial sync: push defaults to Firebase if empty, or load from Firebase */
@@ -383,6 +394,17 @@ export async function initialSync() {
             };
         }
 
+        const fbDetails = await fbLoad('details');
+        if (fbDetails && Array.isArray(fbDetails.sections)) {
+            state.detailsData = sanitiseDetails(fbDetails);
+            localStorage.setItem('details', JSON.stringify(state.detailsData));
+        } else {
+            // Existing household, first boot after the Details module shipped:
+            // seed the defaults so the other device sees the same sections.
+            state.detailsData = sanitiseDetails(null);
+            fbSave('details', state.detailsData);
+        }
+
         console.log('Data loaded from Firebase.');
     } else {
         // Firebase is empty — push defaults
@@ -410,6 +432,9 @@ export async function initialSync() {
         if (!state.bankInbox || typeof state.bankInbox !== 'object') {
             state.bankInbox = JSON.parse(JSON.stringify(DEFAULT_BANK_INBOX));
         }
+        if (!state.detailsData || !Array.isArray(state.detailsData.sections)) {
+            state.detailsData = JSON.parse(JSON.stringify(DEFAULT_DETAILS));
+        }
 
         fbSave('budget_cy26', state.budgetCY);
         fbSave('budget_ny27', state.budgetNY);
@@ -418,6 +443,7 @@ export async function initialSync() {
         fbSave('gl_mappings', state.glMappings || {});
         fbSave('projects', state.projectsData);
         fbSave('bank_inbox', state.bankInbox);
+        fbSave('details', state.detailsData);
         console.log('Default data pushed to Firebase.');
     }
 }

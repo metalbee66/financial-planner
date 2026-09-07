@@ -24,4 +24,6 @@ export const state = {
     bankInbox: { transactions: {}, balances: {} },
     // Projects module (Phase 1+): { items: [...], (later) prefs, notifications, ... }
     projectsData: null,
+    // Details module: { people: [...], sections: [...] } — see modules/details/data.js
+    detailsData: null,
 };

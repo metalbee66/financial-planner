@@ -1,5 +1,15 @@
 # Family Planner — Changelog
 
+## v2.6 — 2026-09-07 — Details module (per-person reference sheet)
+
+New top-level **Details** tab — the third module in the monolith alongside Finance and Projects (`app/js/modules/details/`, registered in `modules.js`). It holds per-person reference info for Brad, Diana, Phoebe and Lorelei as a stack of section cards, each a grid of fields (rows) × people (columns) with free-text cells. Default sections: **Sizing** (Shoe, Tops, Bottoms, Bra), **Health** (Doctor, Blood type, Allergies), **Identity** (D.O.B, Medicare, Passport, Private health).
+
+**Editing.** Cells, field labels and section titles are all inline inputs — blur (or Enter) saves with the usual "Saved" toast. `+ Add field` on each card and `+ Add section` at the bottom append a blank row/card and focus its name input; the ✕ on a row or card deletes after a `confirm()`. Cell/label edits don't re-render (so tabbing between cells keeps focus); only structural changes and remote updates do.
+
+**Storage.** New Firebase key `details` (`{ people, sections }`), mirrored to localStorage, loaded in `shell.js`, synced in `initialSync` + a realtime listener in `firebase-sync.js`. An existing household gets the defaults seeded on first boot after this release. `sanitiseDetails()` rebuilds the `fields`/`values` containers Firebase drops when empty. Note: this key sits at the same trust level as the rest of the household tree (auth-gated RTDB + each browser's localStorage) — Medicare/passport numbers typed here live there at rest.
+
+**Tests.** 16 in-browser unit cases (`details/data.test.js`, wired into `tests.html` → 526 total) + 4 Playwright cases (default render, cell persistence, add section/field round-trip, confirmed deletes). The Phase 0 shell regression now visits all three modules.
+
 ## v2.5 — 2026-08-06 — Auto-derived account balances (HSBC/NAB) + HSBC PPR loan/redraw split
 
 Account cards in Accounts → Banking now **auto-fill their balances** from data the scrapers already download. The HSBC + NAB scrapers export transaction CSVs that carry a running **Balance** column, so the current balance is **derived from the last (max-date) transaction row** — no new scraping needed for the loan/credit-card figures. Each derived balance flows through the existing pipeline (`writeBalance` → n8n ingest → `bank_inbox` → app), landing on its card via `SLUG_TO_ACCOUNT_ID`.

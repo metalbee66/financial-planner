@@ -227,6 +227,10 @@ app/
 │       │   ├── update-businesstransform-20260525.js  v2.0.3: literal patch list + name-based matcher for the 2026-05-25 progress update
 │       │   ├── add-businesstransform-extras-20260525.js  v2.0.5: append-only helper for the three "Recommended additions" from the 2026-05-25 report — Doc Services platform (+7 children incl. blocked Phase 1.5), public-surface security hardening child of Phase 1 Auth, header-nav Phase 2 stub
 │       │   └── data.test.js                        Unit tests for everything above (run via /tests.html, ~372 cases)
+│       ├── details/                                v2.6: per-person reference sheet (Sizing / Health / Identity + user-added sections)
+│       │   ├── index.js                            mount() + renderDetailsTab(): section cards, inline-editable grid, add/delete section + field
+│       │   ├── data.js                             DEFAULT_DETAILS, sanitiseDetails, load/save (`details` key), pure mutators (addSection/addField/setValue…)
+│       │   └── data.test.js                        16 unit cases (run via /tests.html)
 │       └── pm-legacy/
 │           ├── index.js                            Wrapper for pm.js — retired from the module registry in Task 8.2 but kept on disk
 │           └── pm.js                               DLBooks PM source — migrated into projects in Phase 8.1, deleted from Firebase in v2.0.2; loadPM stays imported so the migration runner can source pmData on a fresh device

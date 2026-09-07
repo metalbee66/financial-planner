@@ -3490,9 +3490,9 @@ test.describe('Phase 0 — Module shell regression', () => {
         page.on('pageerror', e => errors.push(e.message));
         page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
-        // Visit each tab. Task 8.2 retired the PM DLBooks (legacy) module
-        // so the nav only renders Finance + Projects now.
-        for (const id of ['finance', 'projects']) {
+        // Visit each tab. Task 8.2 retired the PM DLBooks (legacy) module;
+        // the nav renders Finance + Projects + Details.
+        for (const id of ['finance', 'projects', 'details']) {
             await page.locator(`.top-nav-btn[data-module="${id}"]`).click();
             await expect(page.locator(`#module-${id}`)).toBeVisible();
         }
@@ -3505,6 +3505,97 @@ test.describe('Phase 0 — Module shell regression', () => {
             !/asynchronous response/i.test(e)
         );
         expect(real).toEqual([]);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+test.describe('Details module — per-person reference sheet', () => {
+
+    async function openDetails(page) {
+        await page.locator('.top-nav-btn[data-module="details"]').click();
+        await expect(page.locator('#module-details')).toBeVisible();
+    }
+
+    // `toHaveValues` only applies to <select multiple>; read a set of inputs.
+    async function inputValues(locator) {
+        return locator.evaluateAll(els => els.map(el => el.value));
+    }
+
+    test('default sections render with the four people as columns', async ({ page }) => {
+        await openDetails(page);
+        const sections = page.locator('.details-section');
+        await expect(sections).toHaveCount(3);
+        expect(await inputValues(page.locator('.details-section .details-title'))).toEqual(['Sizing', 'Health', 'Identity']);
+        const sizing = sections.first();
+        await expect(sizing.locator('thead th')).toHaveText(['Field', 'Brad', 'Diana', 'Phoebe', 'Lorelei', '']);
+        expect(await inputValues(sizing.locator('.details-label'))).toEqual(['Shoe', 'Tops', 'Bottoms', 'Bra']);
+        expect(await inputValues(sections.nth(1).locator('.details-label'))).toEqual(['Doctor', 'Blood type', 'Allergies']);
+        expect(await inputValues(sections.nth(2).locator('.details-label'))).toEqual(['D.O.B', 'Medicare', 'Passport', 'Private health']);
+    });
+
+    test('editing a cell persists across reload', async ({ page }) => {
+        await openDetails(page);
+        const cell = page.locator('.details-cell[data-section="sizing"][data-field="shoe"][data-person="phoebe"]');
+        await cell.fill('  3.5 ');
+        await cell.press('Enter');
+        await expect(cell).toHaveValue('3.5');
+        await expect(page.locator('#toast')).toContainText('Saved');
+        // Adjacent cells untouched
+        await expect(page.locator('.details-cell[data-section="sizing"][data-field="shoe"][data-person="brad"]')).toHaveValue('');
+
+        await page.reload();
+        await openDetails(page);
+        await expect(page.locator('.details-cell[data-section="sizing"][data-field="shoe"][data-person="phoebe"]')).toHaveValue('3.5');
+    });
+
+    test('add a section, add a field, enter a value — all survive reload', async ({ page }) => {
+        await openDetails(page);
+        await page.locator('#details-add-section').click();
+        await expect(page.locator('.details-section')).toHaveCount(4);
+        const section = page.locator('.details-section').last();
+        // New section's title input is focused for immediate typing
+        await expect(section.locator('.details-title')).toBeFocused();
+        await section.locator('.details-title').fill('Cars');
+        await section.locator('.details-title').press('Enter');
+        await expect(section.locator('.details-empty')).toBeVisible();
+
+        await section.locator('[data-add-field]').click();
+        await expect(section.locator('.details-label')).toBeFocused();
+        await section.locator('.details-label').fill('Rego');
+        await section.locator('.details-label').press('Enter');
+        await section.locator('.details-cell[data-person="diana"]').fill('ABC123');
+        await section.locator('.details-cell[data-person="diana"]').press('Enter');
+
+        await page.reload();
+        await openDetails(page);
+        const after = page.locator('.details-section').last();
+        await expect(page.locator('.details-section')).toHaveCount(4);
+        await expect(after.locator('.details-title')).toHaveValue('Cars');
+        expect(await inputValues(after.locator('.details-label'))).toEqual(['Rego']);
+        await expect(after.locator('.details-cell[data-person="diana"]')).toHaveValue('ABC123');
+        await expect(after.locator('.details-cell[data-person="brad"]')).toHaveValue('');
+    });
+
+    test('deleting a field and a section asks for confirmation, then persists', async ({ page }) => {
+        await openDetails(page);
+        // Decline first: nothing changes
+        page.once('dialog', d => d.dismiss());
+        await page.locator('[data-del-section="health"]').click();
+        await expect(page.locator('.details-section')).toHaveCount(3);
+
+        page.once('dialog', d => d.accept());
+        await page.locator('[data-del-field="bra"]').click();
+        expect(await inputValues(page.locator('.details-section[data-section="sizing"] .details-label'))).toEqual(['Shoe', 'Tops', 'Bottoms']);
+
+        page.once('dialog', d => d.accept());
+        await page.locator('[data-del-section="health"]').click();
+        await expect(page.locator('.details-section')).toHaveCount(2);
+        await expect(page.locator('.details-section[data-section="health"]')).toHaveCount(0);
+
+        await page.reload();
+        await openDetails(page);
+        await expect(page.locator('.details-section')).toHaveCount(2);
+        expect(await inputValues(page.locator('.details-section[data-section="sizing"] .details-label'))).toEqual(['Shoe', 'Tops', 'Bottoms']);
     });
 });
 

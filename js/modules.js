@@ -7,6 +7,7 @@
 
 import { mount as mountFinance } from './modules/finance/index.js';
 import { mount as mountProjects } from './modules/projects/index.js';
+import { mount as mountDetails } from './modules/details/index.js';
 
 // Task 8.2: the PM DLBooks (legacy) module is retired now that Task 8.1's
 // one-shot migration has copied its data into the Projects module. The
@@ -29,5 +30,12 @@ export const MODULES = [
         mount: mountProjects,
         // Single root key holds `{ items: [...] }`; Phase 6 adds `prefs` and `notifications` siblings.
         dataKeys: ['projects'],
+    },
+    {
+        id: 'details',
+        label: 'Details',
+        mount: mountDetails,
+        // Single root key holds `{ people: [...], sections: [...] }`.
+        dataKeys: ['details'],
     },
 ];

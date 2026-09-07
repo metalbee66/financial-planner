@@ -38,11 +38,13 @@ import { renderProjectsTab, renderEmailQueueAdmin, mountBell } from './modules/p
 import { migratePMDLBooksToProjects } from './modules/projects/migrate-pm.js';
 import { applyBusinessTransformUpdate20260525 } from './modules/projects/update-businesstransform-20260525.js';
 import { applyBusinessTransformExtras20260525 } from './modules/projects/add-businesstransform-extras-20260525.js';
+import { loadDetails } from './modules/details/data.js';
+import { renderDetailsTab } from './modules/details/index.js';
 
 // Wire render hooks so firebase-sync's realtime listeners can re-render
 // when the other user changes data. Registered at module-load time;
 // cheap and idempotent.
-registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderProjectsTab, renderEmailQueueAdmin, renderBankInbox: renderBankInboxCard });
+registerRenderHooks({ renderBudgetTab, renderAccountsTab, renderProjectsTab, renderEmailQueueAdmin, renderBankInbox: renderBankInboxCard, renderDetailsTab });
 
 document.addEventListener('DOMContentLoaded', async () => {
     // Load from localStorage first (instant render before Firebase resolves)
@@ -55,6 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     state.storedTransactionHashes = loadStoredHashes();
     state.bankInbox = loadBankInbox();
     state.projectsData = loadProjects();
+    state.detailsData = loadDetails();
 
     const fbReady = await initFirebase();
 
