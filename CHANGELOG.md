@@ -8,7 +8,9 @@ New top-level **Details** tab — the third module in the monolith alongside Fin
 
 **Storage.** New Firebase key `details` (`{ people, sections }`), mirrored to localStorage, loaded in `shell.js`, synced in `initialSync` + a realtime listener in `firebase-sync.js`. An existing household gets the defaults seeded on first boot after this release. `sanitiseDetails()` rebuilds the `fields`/`values` containers Firebase drops when empty. Note: this key sits at the same trust level as the rest of the household tree (auth-gated RTDB + each browser's localStorage) — Medicare/passport numbers typed here live there at rest.
 
-**Tests.** 16 in-browser unit cases (`details/data.test.js`, wired into `tests.html` → 526 total) + 4 Playwright cases (default render, cell persistence, add section/field round-trip, confirmed deletes). The Phase 0 shell regression now visits all three modules.
+**Tests.** 18 in-browser unit cases (`details/data.test.js`, wired into `tests.html`) + 5 Playwright cases (default render, seed-order migration, cell persistence, add section/field round-trip, confirmed deletes). The Phase 0 shell regression now visits all three modules.
+
+**v2.6.1 (same day).** Section order flipped to **Identity → Health → Sizing**. A household already seeded with the original sizing-first order is reordered on load by `sanitiseDetails` (only when the sections are exactly that three-item sequence, so a user-arranged list is left alone).
 
 ## v2.5 — 2026-08-06 — Auto-derived account balances (HSBC/NAB) + HSBC PPR loan/redraw split
 

@@ -28,12 +28,12 @@ export const DEFAULT_DETAILS = {
     ],
     sections: [
         {
-            id: 'sizing', title: 'Sizing',
+            id: 'identity', title: 'Identity',
             fields: [
-                { id: 'shoe', label: 'Shoe' },
-                { id: 'tops', label: 'Tops' },
-                { id: 'bottoms', label: 'Bottoms' },
-                { id: 'bra', label: 'Bra' },
+                { id: 'dob', label: 'D.O.B' },
+                { id: 'medicare', label: 'Medicare' },
+                { id: 'passport', label: 'Passport' },
+                { id: 'private-health', label: 'Private health' },
             ],
             values: {},
         },
@@ -47,17 +47,28 @@ export const DEFAULT_DETAILS = {
             values: {},
         },
         {
-            id: 'identity', title: 'Identity',
+            id: 'sizing', title: 'Sizing',
             fields: [
-                { id: 'dob', label: 'D.O.B' },
-                { id: 'medicare', label: 'Medicare' },
-                { id: 'passport', label: 'Passport' },
-                { id: 'private-health', label: 'Private health' },
+                { id: 'shoe', label: 'Shoe' },
+                { id: 'tops', label: 'Tops' },
+                { id: 'bottoms', label: 'Bottoms' },
+                { id: 'bra', label: 'Bra' },
             ],
             values: {},
         },
     ],
 };
+
+// The first release seeded sections as sizing → health → identity. A household
+// still holding exactly that order gets flipped to the current default order.
+// Idempotent: once reordered (or once the user adds/removes a section) the
+// signature no longer matches and nothing happens.
+const LEGACY_SECTION_ORDER = ['sizing', 'health', 'identity'];
+function migrateSectionOrder(sections) {
+    const ids = sections.map(s => s.id);
+    if (ids.length !== 3 || ids.some((id, i) => id !== LEGACY_SECTION_ORDER[i])) return sections;
+    return DEFAULT_DETAILS.sections.map(d => sections.find(s => s.id === d.id));
+}
 
 function newId(prefix) {
     return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -103,7 +114,7 @@ export function sanitiseDetails(raw) {
         // No people means nothing renders — treat as an empty/unknown tree.
         return JSON.parse(JSON.stringify(DEFAULT_DETAILS));
     }
-    return { people, sections };
+    return { people, sections: migrateSectionOrder(sections) };
 }
 
 export function loadDetails() {

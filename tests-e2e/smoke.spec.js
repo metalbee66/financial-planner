@@ -3525,12 +3525,31 @@ test.describe('Details module — per-person reference sheet', () => {
         await openDetails(page);
         const sections = page.locator('.details-section');
         await expect(sections).toHaveCount(3);
-        expect(await inputValues(page.locator('.details-section .details-title'))).toEqual(['Sizing', 'Health', 'Identity']);
-        const sizing = sections.first();
-        await expect(sizing.locator('thead th')).toHaveText(['Field', 'Brad', 'Diana', 'Phoebe', 'Lorelei', '']);
-        expect(await inputValues(sizing.locator('.details-label'))).toEqual(['Shoe', 'Tops', 'Bottoms', 'Bra']);
+        expect(await inputValues(page.locator('.details-section .details-title'))).toEqual(['Identity', 'Health', 'Sizing']);
+        const identity = sections.first();
+        await expect(identity.locator('thead th')).toHaveText(['Field', 'Brad', 'Diana', 'Phoebe', 'Lorelei', '']);
+        expect(await inputValues(identity.locator('.details-label'))).toEqual(['D.O.B', 'Medicare', 'Passport', 'Private health']);
         expect(await inputValues(sections.nth(1).locator('.details-label'))).toEqual(['Doctor', 'Blood type', 'Allergies']);
-        expect(await inputValues(sections.nth(2).locator('.details-label'))).toEqual(['D.O.B', 'Medicare', 'Passport', 'Private health']);
+        expect(await inputValues(sections.nth(2).locator('.details-label'))).toEqual(['Shoe', 'Tops', 'Bottoms', 'Bra']);
+    });
+
+    test('a household seeded with the v2.6.0 order is reordered to Identity / Health / Sizing on load', async ({ page }) => {
+        await page.evaluate(() => {
+            // The first-release seed order, with a value in it. (Nothing is
+            // written to localStorage until the first edit, so build it here.)
+            localStorage.setItem('details', JSON.stringify({
+                people: [{ id: 'brad', name: 'Brad' }, { id: 'diana', name: 'Diana' }, { id: 'phoebe', name: 'Phoebe' }, { id: 'lorelei', name: 'Lorelei' }],
+                sections: [
+                    { id: 'sizing', title: 'Sizing', fields: [{ id: 'shoe', label: 'Shoe' }], values: { shoe: { brad: '10' } } },
+                    { id: 'health', title: 'Health', fields: [{ id: 'doctor', label: 'Doctor' }] },
+                    { id: 'identity', title: 'Identity', fields: [{ id: 'dob', label: 'D.O.B' }] },
+                ],
+            }));
+        });
+        await page.reload();
+        await openDetails(page);
+        expect(await inputValues(page.locator('.details-section .details-title'))).toEqual(['Identity', 'Health', 'Sizing']);
+        await expect(page.locator('.details-cell[data-section="sizing"][data-field="shoe"][data-person="brad"]')).toHaveValue('10');
     });
 
     test('editing a cell persists across reload', async ({ page }) => {

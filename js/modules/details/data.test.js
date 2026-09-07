@@ -31,11 +31,35 @@ test('default has the four people in order', () => {
     eq(DEFAULT_DETAILS.people.map(p => p.name), ['Brad', 'Diana', 'Phoebe', 'Lorelei']);
 });
 
-test('default has Sizing / Health / Identity sections with the requested fields', () => {
-    eq(DEFAULT_DETAILS.sections.map(s => s.title), ['Sizing', 'Health', 'Identity']);
-    eq(DEFAULT_DETAILS.sections[0].fields.map(f => f.label), ['Shoe', 'Tops', 'Bottoms', 'Bra']);
+test('default has Identity / Health / Sizing sections (in that order) with the requested fields', () => {
+    eq(DEFAULT_DETAILS.sections.map(s => s.title), ['Identity', 'Health', 'Sizing']);
+    eq(DEFAULT_DETAILS.sections[0].fields.map(f => f.label), ['D.O.B', 'Medicare', 'Passport', 'Private health']);
     eq(DEFAULT_DETAILS.sections[1].fields.map(f => f.label), ['Doctor', 'Blood type', 'Allergies']);
-    eq(DEFAULT_DETAILS.sections[2].fields.map(f => f.label), ['D.O.B', 'Medicare', 'Passport', 'Private health']);
+    eq(DEFAULT_DETAILS.sections[2].fields.map(f => f.label), ['Shoe', 'Tops', 'Bottoms', 'Bra']);
+});
+
+test('sanitiseDetails flips the v2.6.0 seed order (sizing, health, identity) to the current default order, keeping values', () => {
+    const legacy = {
+        people: [{ id: 'brad', name: 'Brad' }],
+        sections: [
+            { id: 'sizing', title: 'Sizing', fields: [{ id: 'shoe', label: 'Shoe' }], values: { shoe: { brad: '10' } } },
+            { id: 'health', title: 'Health', fields: [{ id: 'doctor', label: 'Doctor' }] },
+            { id: 'identity', title: 'Identity', fields: [{ id: 'dob', label: 'D.O.B' }] },
+        ],
+    };
+    const out = sanitiseDetails(legacy);
+    eq(out.sections.map(s => s.id), ['identity', 'health', 'sizing']);
+    eq(out.sections[2].values, { shoe: { brad: '10' } });
+});
+
+test('sanitiseDetails leaves any other section order alone (user-arranged or extra sections)', () => {
+    const people = [{ id: 'brad', name: 'Brad' }];
+    const extra = { people, sections: [
+        { id: 'sizing', title: 'Sizing' }, { id: 'health', title: 'Health' }, { id: 'identity', title: 'Identity' }, { id: 's_x', title: 'Cars' },
+    ] };
+    eq(sanitiseDetails(extra).sections.map(s => s.id), ['sizing', 'health', 'identity', 's_x']);
+    const fewer = { people, sections: [{ id: 'sizing', title: 'Sizing' }, { id: 'health', title: 'Health' }] };
+    eq(sanitiseDetails(fewer).sections.map(s => s.id), ['sizing', 'health']);
 });
 
 test('default ids are unique across sections and within each section', () => {
@@ -120,7 +144,7 @@ test('addSection appends an empty section with a unique id and returns it', () =
 test('removeSection deletes by id; unknown id is a no-op returning false', () => {
     const d = fresh();
     truthy(removeSection(d, 'health'));
-    eq(d.sections.map(s => s.id), ['sizing', 'identity']);
+    eq(d.sections.map(s => s.id), ['identity', 'sizing']);
     falsy(removeSection(d, 'nope'));
     eq(d.sections.length, 2);
 });
