@@ -39,7 +39,7 @@ function buildProject() {
         startDate: null,
         endDate: null,
         participants: ['brad', 'diana'],
-        description: 'Take portal.dlbooks.com.au from built-but-event-driven to live across the existing clientbase. Order is deliberate: close the build gaps the announcement promises, fix the empty-portal problem for existing clients, get support ready, pilot on 3-5 friendly clients, then stage the rest. The announcement draft lives at docs/templates/client-portal-announcement.md and must not send until Phase 3 is done.',
+        description: 'Take portal.dlbooks.com.au from built-but-event-driven to live across the existing clientbase. Order is deliberate: harden against a third Safe Browsing flag, close the build gaps the announcement promises, fix the empty-portal problem for existing clients, get support ready, pilot on 3-5 friendly clients, then stage the rest. The real blocker is Phase 2 — publishing is event-driven, so an existing client signs in to a near-empty portal and granting access emails them nothing. The announcement draft lives at docs/templates/client-portal-announcement.md and must not send until Phase 3 is done.',
         createdAt: at,
         updatedAt: at,
         archivedAt: null,
@@ -93,26 +93,23 @@ export function seedPortalLaunchProject() {
         return phase;
     }
 
-    // ── Phase 0 — External blocker ────────────────────────────────────────
+    // ── Phase 0 — Safe Browsing: cleared, now stop it recurring ───────────
     addPhase(
-        'Phase 0 — Clear the Safe Browsing flag (HARD BLOCKER)',
-        'dlbooks.com.au was domain-flagged by Google Safe Browsing as social engineering (false positive, noted 2026-09-07). Clients hit a red interstitial before they reach the login page. Nothing else in this project can ship past this, and the turnaround is not in our control — start it first.',
+        'Phase 0 — Safe Browsing hardening (flag CLEARED)',
+        'dlbooks.com.au was domain-flagged by Google Safe Browsing as social engineering. Brad\'s Search Console appeal succeeded in the week of 2026-09-08, so the blocker is gone. But this was the SECOND flag cleared the same way (the first was July, cleared 07-30) — twice is a pattern. A public login form on the domain is the likely trigger and it is not going away, so the remaining work is preventing a third flag landing mid-launch.',
         [
             {
-                name: 'Confirm whether the flag is still active',
-                description: 'Last written evidence is 2026-09-07. Check the current state before assuming either way — it may already be cleared.',
+                name: 'Add legitimacy cues to the portal sign-in page',
+                description: 'Left as "optional hardening" after the July flag, and the domain was flagged again. Put the firm name, ABN, phone number and a link to the main site on the sign-in page. A bare login form on a small domain is exactly the shape Safe Browsing heuristics penalise — and the cues help real clients trust the page too.',
                 priority: 'high',
             },
             {
-                name: 'Submit the Search Console review request',
-                description: 'Google Search Console → Security issues → request review. Turnaround is theirs, not ours, which is why this task sits at the front of the project.',
-                priority: 'high',
+                name: 'Re-check the flag before each launch batch',
+                description: 'It is a browser-side interstitial, so an HTTP 200 proves nothing. Open the portal in a browser with no history on the domain — ideally a phone on mobile data, which is how a client will first meet it. Cheap to check, and a flag discovered by a client mid-onboarding is expensive.',
             },
             {
-                name: 'Verify the portal login page loads clean in a fresh browser',
-                description: 'Test in a browser with no history on the domain — ideally on a phone on mobile data, which is how a client will first open it. Verification gate: if this shows an interstitial, the pilot does not start.',
-                priority: 'high',
-                milestone: true,
+                name: 'Know the recovery path if it flags a third time',
+                description: 'Search Console → dlbooks.com.au property → Security issues → note sample URLs → Request Review. Cleared in roughly a week both times. Worth having written down so it does not need rediscovering under pressure.',
             },
         ]
     );
