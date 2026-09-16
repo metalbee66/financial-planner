@@ -3089,7 +3089,7 @@ test.describe('Admin — Project seeds queue (manual pull)', () => {
         const brauer = page.locator('.seed-row[data-seed-id="subpoena-brauer"]');
         await expect(brauer.locator('.admin-status-pill')).toHaveText('Pending');
         await expect(brauer.locator('.seed-run-btn')).toBeVisible();
-        await expect(page.locator('#seed-run-all-btn')).toContainText('Run 2 pending');
+        await expect(page.locator('#seed-run-all-btn')).toContainText('Run 3 pending');
     });
 
     test('Run now applies a pending seed live (no reload) and flips it to Applied', async ({ page }) => {
@@ -3115,6 +3115,7 @@ test.describe('Admin — Project seeds queue (manual pull)', () => {
                 pm_dlbooks_migrated_to_projects: true,
                 business_transform_seeded: true,
                 subpoena_brauer_seeded: true,
+                portal_launch_seeded: true,
             }));
         });
         await page.reload();

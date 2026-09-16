@@ -137,6 +137,7 @@ import {
     smartSortTasks,
 } from './local-ai.js';
 import { migratePMDLBooksToProjects } from './migrate-pm.js';
+import { seedPortalLaunchProject } from './seed-portal-launch.js';
 import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './seed-businesstransform.js';
 import {
     applyBusinessTransformUpdate20260525,
@@ -4185,6 +4186,36 @@ test('PROJECT_SEEDS entries are well-formed and their flags exist in DEFAULT_PRO
         truthy(typeof s.run === 'function', `seed ${s.id} has run()`);
         truthy(s.flag in DEFAULT_PROJECTS, `flag ${s.flag} is declared in DEFAULT_PROJECTS`);
     }
+});
+
+test('seedPortalLaunchProject returns one project with six phases and nested children', () => {
+    const { projects, tasks } = seedPortalLaunchProject();
+    eq(projects.length, 1, 'exactly one project');
+    const project = projects[0];
+    truthy(project.id, 'project has an id');
+    eq(project.status, 'active', 'project is active');
+
+    // Every task belongs to the project.
+    for (const t of tasks) eq(t.projectId, project.id, `task ${t.name} is on the project`);
+
+    // Phase 0 (Safe Browsing blocker) through Phase 5 (staged launch).
+    const phases = tasks.filter((t) => t.parentTaskId === null);
+    eq(phases.length, 6, 'six top-level phases');
+
+    // Every non-phase task hangs off a real phase.
+    const phaseIds = new Set(phases.map((p) => p.id));
+    const children = tasks.filter((t) => t.parentTaskId !== null);
+    truthy(children.length > 0, 'phases have children');
+    for (const c of children) {
+        truthy(phaseIds.has(c.parentTaskId), `child "${c.name}" hangs off a phase`);
+    }
+
+    // Milestones mark the verification gates.
+    truthy(tasks.some((t) => t.isMilestone), 'at least one milestone');
+
+    // Ids are unique — a collision would silently merge two tasks in the UI.
+    const ids = new Set(tasks.map((t) => t.id));
+    eq(ids.size, tasks.length, 'all task ids are unique');
 });
 
 // ── bulk date shift ──

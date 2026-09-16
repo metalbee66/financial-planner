@@ -17,6 +17,7 @@
 
 import { seedBusinessTransformProjects, BUSINESS_TRANSFORM_SEED } from './seed-businesstransform.js';
 import { seedSubpoenaBrauerProject } from './seed-subpoena-brauer.js';
+import { seedPortalLaunchProject } from './seed-portal-launch.js';
 
 export const PROJECT_SEEDS = [
     {
@@ -32,6 +33,13 @@ export const PROJECT_SEEDS = [
         label: 'Subpoena — Barry Brauer',
         description: 'Court proceedings legal matter (hearing 1 Jul 2026)',
         run: () => seedSubpoenaBrauerProject(),
+    },
+    {
+        id: 'portal-launch',
+        flag: 'portal_launch_seeded',
+        label: 'Client portal — live, pilot and launch',
+        description: 'Five-phase portal go-live: build gaps, empty-portal fix, readiness, pilot, staged launch',
+        run: () => seedPortalLaunchProject(),
     },
 ];
 

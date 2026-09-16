@@ -46,6 +46,10 @@ export const DEFAULT_PROJECTS = {
     // Subpoena Brauer seed — set true after seeding the court proceedings
     // project (hearing 1 July 2026). Legal matter tracker: phases 1–6.
     subpoena_brauer_seeded: false,
+    // Client-portal launch seed — set true after seeding the five-phase
+    // portal go-live project (build gaps → empty-portal fix → readiness →
+    // pilot → staged launch).
+    portal_launch_seeded: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
