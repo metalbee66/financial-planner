@@ -48,8 +48,13 @@ export const DEFAULT_PROJECTS = {
     subpoena_brauer_seeded: false,
     // Client-portal launch seed — set true after seeding the five-phase
     // portal go-live project (build gaps → empty-portal fix → readiness →
-    // pilot → staged launch).
+    // pilot → staged launch). Superseded by the v2 flag below; kept declared
+    // so data that already applied it stays settled.
     portal_launch_seeded: false,
+    // Client-portal launch, v2 — the same project with the task language
+    // rewritten as plain statements. A new flag so it seeds fresh for anyone
+    // who already applied v1 and deleted the project.
+    portal_launch_v2_seeded: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);

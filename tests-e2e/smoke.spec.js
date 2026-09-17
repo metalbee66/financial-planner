@@ -3115,7 +3115,7 @@ test.describe('Admin — Project seeds queue (manual pull)', () => {
                 pm_dlbooks_migrated_to_projects: true,
                 business_transform_seeded: true,
                 subpoena_brauer_seeded: true,
-                portal_launch_seeded: true,
+                portal_launch_v2_seeded: true,
             }));
         });
         await page.reload();
