@@ -2,12 +2,12 @@
  * One-shot seed for the SenseAi client-portal launch to the existing
  * clientbase (portal.dlbooks.com.au).
  *
- * Nine phases: domain hardening → invoicing → reporting → business
- * solutions → live-tab close-out → backfill for existing clients →
- * practice readiness → pilot → staged launch.
+ * Ten phases: domain hardening → invoicing → reporting → marketing
+ * surfaces → live-tab close-out → Business Solutions scoping → backfill
+ * for existing clients → practice readiness → pilot → staged launch.
  *
  * Pure function — accepts no input, returns `{ projects, tasks }`.
- * Idempotency is the runner's responsibility (flag: `portal_launch_v2_seeded`).
+ * Idempotency is the runner's responsibility (flag: `portal_launch_v3_seeded`).
  */
 
 function nowIso() { return new Date().toISOString(); }
@@ -114,19 +114,14 @@ export function seedPortalLaunchProject() {
         'DL Books fee invoicing does not exist yet: no CRM invoice model, no portal_invoices migration, no publisher. The warehouse invoices table is the client\'s own Xero AR/AP and is not this.',
         [
             {
-                name: 'Decide how DL Books raises fee invoices',
-                description: 'Xero-native from our own org (not yet connected) or a CRM-side invoice model. Sets everything below.',
+                name: 'Decide where fee invoices are raised and which system owns the number',
+                description: 'Raise them in the DL BOOKKEEPING Xero org (connected, tenant d6b68ad8, CRM client #14) and pull them back for the portal, or raise them in SenseAi and push to Xero. Decides who owns the invoice number, who chases payment, and where the client\'s payment status is read from.',
                 priority: 'high',
                 milestone: true,
             },
             {
-                name: 'Connect the DL Books Xero org',
-                description: 'Reporting decision D9, still open. Needed if invoicing is Xero-native.',
-                priority: 'high',
-            },
-            {
                 name: 'Build the invoice data model',
-                description: 'Invoice and line tables, numbering, status, links to quotes, service tiers and time entries. Write last_invoice_date on crm_clients.',
+                description: 'Invoice and line tables (or a mirror of the Xero invoice, per the decision above), numbering, status, links to quotes, service tiers and time entries. Write last_invoice_date on crm_clients — nothing writes it today.',
                 priority: 'high',
             },
             {
@@ -185,26 +180,35 @@ export function seedPortalLaunchProject() {
 
     // ── Phase 1c ──────────────────────────────────────────────────────
     addPhase(
-        'Phase 1c — Build the Business Solutions tab',
-        'Client access to the bespoke solutions built for them. No spec, data model or publisher exists yet.',
+        'Phase 1c — Make the portal a marketing channel',
+        'Home and Business Solutions are marketing surfaces aimed at a captive audience, so content reaches clients without emailing them. Business Solutions stays visible while empty — a standing reminder that we offer more than bookkeeping — and turns operational as clients take up offers.',
         [
             {
-                name: 'Write down what a bespoke solution is as a deliverable',
-                description: 'What the client gets access to, per client. Drives the data model.',
+                name: 'Write the Business Solutions tab copy',
+                description: 'What we can build for a client and how they start a conversation. Written to read well empty, since that is its normal state for now.',
                 priority: 'high',
-                milestone: true,
+                assignees: ['brad', 'diana'],
             },
             {
-                name: 'Build the data model for per-client solutions',
-                priority: 'high',
-            },
-            {
-                name: 'Publish solutions to the portal and build the tab',
-                description: 'Migration, publisher in portal/publish.py, RLS policy, SPA tab replacing the placeholder card.',
+                name: 'Replace the Business Solutions placeholder',
+                description: 'The nav button, #tab-solutions section and TABS entry already exist. Swap the .coming-wrap block for real markup and drop the "Coming soon" badge. It should look deliberate while empty, not unfinished.',
                 priority: 'high',
             },
             {
-                name: 'Load the existing bespoke solutions per client',
+                name: 'Write the Home tab content',
+                description: 'The landing surface after onboarding finishes. The #home-content div already exists as the declared marketing slot and renders whenever the checklist is clear — it just has no content behind it.',
+                priority: 'high',
+                assignees: ['brad', 'diana'],
+            },
+            {
+                name: 'Decide how marketing content gets updated',
+                description: 'Who changes the copy, how often, and whether it is per-client or the same for everyone.',
+                assignees: ['brad', 'diana'],
+            },
+            {
+                name: 'Add a "drop us a note" button to Business Solutions',
+                description: 'Along the lines of "tell us what you need to make your business better". The collector is nearly free — the onboarding checklist\'s "I need help" branch already does free-text to a CRM note + task with an idempotency stamp. The cost is the client write path: a migration carrying the permissive policy, its restrictive no-staff-write twin, column grants, a state pin and a length cap.',
+                priority: 'high',
             },
         ]
     );
@@ -225,6 +229,59 @@ export function seedPortalLaunchProject() {
             {
                 name: 'Update the stale deferral docs',
                 description: 'DEFERRAL_FLOW_SPEC and tasks/todo.md still say "awaiting rollout". It is live — deferral 296 round-tripped to a real client.',
+            },
+        ]
+    );
+
+    // ── Phase 1e ──────────────────────────────────────────────────────
+    addPhase(
+        'Phase 1e — Scope what Business Solutions delivers',
+        'Business Solutions is broader than Document Services. Docservices is one delivery mechanism that can sit behind an offering, not the definition of the offering. Its preview contract is tabular (columns, groups, rows), so it fits timesheet-shaped work and little else. Scoping only — build follows the first real solution.',
+        [
+            {
+                name: 'List the kinds of solution we expect to offer',
+                description: 'Advisory, dashboards, training, one-off builds, recurring deliverables, software access — whatever is actually on the table. Until this exists, any data model is a guess.',
+                priority: 'high',
+                milestone: true,
+                assignees: ['brad', 'diana'],
+            },
+            {
+                name: 'Work out what those kinds have in common',
+                description: 'The shared shape across them is what the tab renders and what the data model holds. If they have little in common, the tab is a directory pointing at per-solution surfaces rather than one renderer.',
+                priority: 'high',
+            },
+            {
+                name: 'Decide which delivery mechanisms sit behind an offering',
+                description: 'Docservices for anything tabular and cyclical, a document or report drop, a link out to something hosted elsewhere, or purely a conversation we have offline. One offering may use more than one.',
+                priority: 'high',
+            },
+            {
+                name: 'Decide how the tab stays generic as offerings are added',
+                description: 'Portal tabs are hard-coded in three places (nav button, section, TABS array) with eager loading, so a sub-surface per offering costs another table, loader and detail view. One table with a content column and a renderer dispatching on a kind field avoids that.',
+                priority: 'high',
+            },
+            {
+                name: 'Decide how a client takes up an offer',
+                description: 'Whether a call-to-action creates the delivery record directly, or raises a CRM task so we scope and price it first. Likely differs per kind of solution.',
+                priority: 'high',
+            },
+            {
+                name: 'Decide where docservices fits and what it needs to change',
+                description: 'docservices_catalog and docservices_subscriptions are already the firm-facing definition and per-client uptake for cyclical deliverables. If Business Solutions covers more than that, either docservices generalises or it stays one mechanism among several.',
+            },
+            {
+                name: 'Decide how the portal login replaces the owner magic link',
+                description: 'Docservices reaches clients by signed magic-link token with a shared synthetic user, because owner_user_id is NOT NULL — the handover flags this breaks past one magic-link owner. It is also dual-surfaced today: the same cycle renders at the magic-link page and the portal Timesheets tab. Worth settling regardless of the Business Solutions shape.',
+                priority: 'high',
+            },
+            {
+                name: 'Decide whether offerings and uptake need an admin UI',
+                description: 'Docservices catalog and subscription creation are DB-seed only today — create_subscription() is exposed on no route. Whatever the model ends up being, adding an offering should not be a manual prod script run.',
+            },
+            {
+                name: 'Write the Business Solutions spec',
+                description: 'What the offering is, what the tab renders, which mechanisms deliver it, and how a client takes one up.',
+                milestone: true,
             },
         ]
     );

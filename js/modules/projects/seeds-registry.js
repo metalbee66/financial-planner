@@ -35,10 +35,10 @@ export const PROJECT_SEEDS = [
         run: () => seedSubpoenaBrauerProject(),
     },
     {
-        id: 'portal-launch-v2',
-        flag: 'portal_launch_v2_seeded',
+        id: 'portal-launch-v3',
+        flag: 'portal_launch_v3_seeded',
         label: 'Client portal — live, pilot and launch',
-        description: 'Portal go-live: domain hardening, unbuilt tabs, backfill, readiness, pilot, staged launch',
+        description: 'Portal go-live: invoicing, reporting, marketing surfaces, backfill, readiness, pilot, staged launch',
         run: () => seedPortalLaunchProject(),
     },
 ];

@@ -4188,7 +4188,7 @@ test('PROJECT_SEEDS entries are well-formed and their flags exist in DEFAULT_PRO
     }
 });
 
-test('seedPortalLaunchProject returns one project with nine phases and nested children', () => {
+test('seedPortalLaunchProject returns one project with ten phases and nested children', () => {
     const { projects, tasks } = seedPortalLaunchProject();
     eq(projects.length, 1, 'exactly one project');
     const project = projects[0];
@@ -4199,9 +4199,9 @@ test('seedPortalLaunchProject returns one project with nine phases and nested ch
     for (const t of tasks) eq(t.projectId, project.id, `task ${t.name} is on the project`);
 
     // Phase 0 (domain hardening) through Phase 5 (staged launch), with the
-    // four build phases 1 / 1b / 1c / 1d counted separately.
+    // five build phases 1 / 1b / 1c / 1d / 1e counted separately.
     const phases = tasks.filter((t) => t.parentTaskId === null);
-    eq(phases.length, 9, 'nine top-level phases');
+    eq(phases.length, 10, 'ten top-level phases');
 
     // Every non-phase task hangs off a real phase.
     const phaseIds = new Set(phases.map((p) => p.id));

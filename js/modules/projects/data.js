@@ -55,6 +55,10 @@ export const DEFAULT_PROJECTS = {
     // rewritten as plain statements. A new flag so it seeds fresh for anyone
     // who already applied v1 and deleted the project.
     portal_launch_v2_seeded: false,
+    // Client-portal launch, v3 — approved 2026-09-18. Nothing cut: invoicing,
+    // reporting refinement and the marketing surfaces are all build phases,
+    // plus a scoping phase for what Business Solutions delivers.
+    portal_launch_v3_seeded: false,
 };
 
 const STATUS_SET = new Set(PROJECT_STATUSES);
